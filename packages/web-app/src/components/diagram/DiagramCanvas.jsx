@@ -12,7 +12,6 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import EntityNode from "./EntityNode";
-import SubjectAreaGroup from "./SubjectAreaGroup";
 import AnnotationNode from "./AnnotationNode";
 import SchemaOverviewNode from "./SchemaOverviewNode";
 import DiagramToolbar from "./DiagramToolbar";
@@ -26,7 +25,7 @@ import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
-const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, annotation: AnnotationNode, schemaOverview: SchemaOverviewNode };
+const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, schemaOverview: SchemaOverviewNode };
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;
@@ -313,9 +312,7 @@ function FlowCanvas() {
         ? visualNodes.map((n) => ({ ...n, data: { ...n.data, compactMode: true } }))
         : visualNodes;
 
-      // Merge group nodes (subject area backgrounds) before entity nodes
-      const groupNodes = layoutResult.groupNodes || [];
-      setRfNodes([...groupNodes, ...finalNodes]);
+      setRfNodes(finalNodes);
       setRfEdges(visualEdges);
       setLayoutDone(true);
     };

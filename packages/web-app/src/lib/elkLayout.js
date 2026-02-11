@@ -51,18 +51,6 @@ export async function layoutWithElk(nodes, edges, options = {}) {
   const nodeSpacing = Math.round(80 * spacingMultiplier);
   const layerSpacing = Math.round(120 * spacingMultiplier);
 
-  // Group nodes by subject_area
-  const subjectAreas = new Map();
-  if (groupBySubjectArea) {
-    for (const node of nodes) {
-      const sa = node.data?.subject_area || "";
-      if (sa) {
-        if (!subjectAreas.has(sa)) subjectAreas.set(sa, []);
-        subjectAreas.get(sa).push(node.id);
-      }
-    }
-  }
-
   const isLargeGraph = nodes.length > LARGE_GRAPH_THRESHOLD;
   const defaultWidth = isLargeGraph ? 160 : 300;
   const defaultHeight = isLargeGraph ? 60 : 200;
@@ -79,44 +67,8 @@ export async function layoutWithElk(nodes, edges, options = {}) {
     targets: [edge.target],
   }));
 
-  // Build ELK graph with compound nodes for subject areas
-  let children;
-  const nodeToGroup = new Map();
-  if (subjectAreas.size > 1) {
-    const groupChildren = [];
-    const ungrouped = [];
-    const grouped = new Set();
-
-    let saIdx = 0;
-    for (const [sa, nodeIds] of subjectAreas) {
-      const groupId = `__group_${sa}`;
-      const groupElkNodes = elkNodes.filter((n) => nodeIds.includes(n.id));
-      for (const nid of nodeIds) {
-        nodeToGroup.set(nid, groupId);
-        grouped.add(nid);
-      }
-      groupChildren.push({
-        id: groupId,
-        layoutOptions: {
-          "elk.algorithm": "layered",
-          "elk.direction": direction,
-          "elk.spacing.nodeNode": String(nodeSpacing),
-          "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
-          "elk.padding": "[top=40,left=30,bottom=30,right=30]",
-        },
-        children: groupElkNodes,
-      });
-      saIdx++;
-    }
-
-    for (const n of elkNodes) {
-      if (!grouped.has(n.id)) ungrouped.push(n);
-    }
-
-    children = [...groupChildren, ...ungrouped];
-  } else {
-    children = elkNodes;
-  }
+  // Flat layout — no compound grouping (schema identity shown via entity accent colors)
+  const children = elkNodes;
 
   const baseOptions = isLargeGraph
     ? { ...FORCE_LAYOUT_OPTIONS, "elk.spacing.nodeNode": String(nodeSpacing) }
@@ -129,13 +81,7 @@ export async function layoutWithElk(nodes, edges, options = {}) {
 
   const graph = {
     id: "root",
-    layoutOptions: {
-      ...baseOptions,
-      ...(subjectAreas.size > 1 && !isLargeGraph ? {
-        "elk.hierarchyHandling": "INCLUDE_CHILDREN",
-        "elk.spacing.componentComponent": String(Math.round(100 * spacingMultiplier)),
-      } : {}),
-    },
+    layoutOptions: baseOptions,
     children,
     edges: elkEdges,
   };
@@ -144,49 +90,19 @@ export async function layoutWithElk(nodes, edges, options = {}) {
     const result = await elk.layout(graph);
 
     const positionMap = new Map();
-    const groupNodes = [];
-    let saIdx = 0;
-
-    const processChildren = (children, offsetX = 0, offsetY = 0) => {
-      for (const child of children || []) {
-        if (child.id.startsWith("__group_")) {
-          const sa = child.id.replace("__group_", "");
-          const color = getSubjectAreaColor(saIdx);
-          groupNodes.push({
-            id: child.id,
-            type: "group",
-            position: { x: (child.x || 0) + offsetX, y: (child.y || 0) + offsetY },
-            style: {
-              width: child.width || 400,
-              height: child.height || 300,
-              backgroundColor: color.bg,
-              border: `2px dashed ${color.border}`,
-              borderRadius: 16,
-              zIndex: -1,
-            },
-            data: { label: sa, color },
-          });
-          processChildren(child.children, (child.x || 0) + offsetX, (child.y || 0) + offsetY);
-          saIdx++;
-        } else {
-          positionMap.set(child.id, { x: (child.x || 0) + offsetX, y: (child.y || 0) + offsetY });
-        }
-      }
-    };
-
-    processChildren(result.children);
+    for (const child of result.children || []) {
+      positionMap.set(child.id, { x: child.x || 0, y: child.y || 0 });
+    }
 
     const layoutedNodes = nodes.map((node) => {
       const pos = positionMap.get(node.id);
       return {
         ...node,
         position: pos || node.position,
-        parentId: nodeToGroup.get(node.id) || undefined,
-        extent: nodeToGroup.get(node.id) ? "parent" : undefined,
       };
     });
 
-    return { nodes: layoutedNodes, edges, groupNodes };
+    return { nodes: layoutedNodes, edges, groupNodes: [] };
   } catch (err) {
     console.warn("[elk] Layout failed, falling back to grid:", err);
     return fallbackGridLayout(nodes, edges, density);

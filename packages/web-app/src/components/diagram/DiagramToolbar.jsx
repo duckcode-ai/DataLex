@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import { SCHEMA_COLORS } from "../../lib/schemaColors";
 
 const CARDINALITY_LEGEND = [
   { key: "one_to_one", label: "1:1", color: "#16a34a" },
@@ -95,6 +96,7 @@ export default function DiagramToolbar() {
 
   const { diagramFullscreen, toggleDiagramFullscreen } = useUiStore();
   const [showLegend, setShowLegend] = useState(false);
+  const [showSchemaLegend, setShowSchemaLegend] = useState(false);
 
   const tagOptions = getTagOptions();
   const entityNames = getEntityNames();
@@ -246,10 +248,10 @@ export default function DiagramToolbar() {
         <ToolbarButton active={vizSettings.dimUnrelated} onClick={() => updateVizSetting("dimUnrelated", !vizSettings.dimUnrelated)} title="Dim unrelated">
           {vizSettings.dimUnrelated ? <EyeOff size={10} /> : <Eye size={10} />}
         </ToolbarButton>
-        <ToolbarButton active={vizSettings.groupBySubjectArea} onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)} title="Group by area">
+        <ToolbarButton active={showSchemaLegend} onClick={() => setShowSchemaLegend(!showSchemaLegend)} title="Schema color legend">
           <Boxes size={10} />
         </ToolbarButton>
-        <ToolbarButton active={showLegend} onClick={() => setShowLegend(!showLegend)} title="Legend">
+        <ToolbarButton active={showLegend} onClick={() => setShowLegend(!showLegend)} title="Relationship legend">
           <ArrowRightLeft size={10} />
         </ToolbarButton>
 
@@ -299,7 +301,42 @@ export default function DiagramToolbar() {
         </button>
       </div>
 
-      {/* Legend dropdown */}
+      {/* Schema color legend */}
+      {showSchemaLegend && schemaOptions.length > 0 && (
+        <div className="absolute top-full left-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[180px] max-w-[260px]">
+          <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2">
+            Schema / Domain Colors
+          </div>
+          <div className="space-y-1.5">
+            {schemaOptions.map((s, i) => {
+              const sc = SCHEMA_COLORS[i % SCHEMA_COLORS.length];
+              return (
+                <button
+                  key={s.name}
+                  onClick={() => { setActiveSchemaFilter(s.name === activeSchemaFilter ? null : s.name); }}
+                  className={`flex items-center gap-2 w-full rounded-md px-1.5 py-1 transition-colors ${
+                    activeSchemaFilter === s.name ? "bg-slate-100" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <div className="w-3 h-3 rounded-sm shrink-0" style={{ backgroundColor: sc.hex }} />
+                  <span className="text-[11px] font-medium text-slate-700 truncate flex-1 text-left">{s.name}</span>
+                  <span className="text-[10px] text-slate-400 tabular-nums shrink-0">{s.entityCount}</span>
+                </button>
+              );
+            })}
+          </div>
+          {activeSchemaFilter && (
+            <button
+              onClick={() => setActiveSchemaFilter(null)}
+              className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-blue-600 hover:text-blue-700 font-medium w-full text-left"
+            >
+              Show all schemas
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Relationship legend dropdown */}
       {showLegend && (
         <div className="absolute top-full right-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[180px]">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2">
