@@ -524,6 +524,80 @@ app.post("/api/connectors/pull", express.json(), async (req, res) => {
   }
 });
 
+// Pull multiple schemas — one model file per schema
+app.post("/api/connectors/pull-multi", express.json(), async (req, res) => {
+  try {
+    const { connector, schemas: schemaList, ...params } = req.body;
+    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+    if (!schemaList || !Array.isArray(schemaList) || schemaList.length === 0) {
+      return res.status(400).json({ error: "Missing schemas array" });
+    }
+
+    const results = [];
+    const errors = [];
+
+    for (const schemaEntry of schemaList) {
+      const schemaName = typeof schemaEntry === "string" ? schemaEntry : schemaEntry.name;
+      const tablesToPull = typeof schemaEntry === "object" ? schemaEntry.tables : null;
+
+      try {
+        const schemaParams = { ...params, db_schema: schemaName };
+        if (connector === "bigquery") schemaParams.dataset = schemaName;
+
+        const args = [join(REPO_ROOT, "dm"), "pull", connector, ...buildConnArgs(schemaParams)];
+        args.push("--model-name", schemaName);
+
+        if (tablesToPull && Array.isArray(tablesToPull) && tablesToPull.length > 0) {
+          args.push("--tables", ...tablesToPull);
+        }
+
+        const output = execFileSync("python3", args, { encoding: "utf-8", timeout: 120000 });
+
+        const yamlStart = output.indexOf("model:");
+        const yamlText = yamlStart >= 0 ? output.substring(yamlStart) : output;
+        let model;
+        try { model = yaml.load(yamlText); } catch (_) { model = null; }
+
+        const entities = model?.entities || [];
+        const relationships = model?.relationships || [];
+        const indexes = model?.indexes || [];
+        const fieldCount = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
+
+        results.push({
+          schema: schemaName,
+          success: true,
+          entityCount: entities.length,
+          fieldCount,
+          relationshipCount: relationships.length,
+          indexCount: indexes.length,
+          yaml: yamlText,
+        });
+      } catch (pullErr) {
+        const stderr = pullErr.stderr || pullErr.message;
+        errors.push({ schema: schemaName, error: stderr });
+        results.push({ schema: schemaName, success: false, error: stderr });
+      }
+    }
+
+    const totalEntities = results.filter(r => r.success).reduce((s, r) => s + r.entityCount, 0);
+    const totalFields = results.filter(r => r.success).reduce((s, r) => s + r.fieldCount, 0);
+    const totalRels = results.filter(r => r.success).reduce((s, r) => s + r.relationshipCount, 0);
+
+    res.json({
+      success: errors.length === 0,
+      schemasProcessed: results.length,
+      schemasFailed: errors.length,
+      totalEntities,
+      totalFields,
+      totalRelationships: totalRels,
+      results,
+      errors,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
   console.log(`[datalex] Repo root: ${REPO_ROOT}`);

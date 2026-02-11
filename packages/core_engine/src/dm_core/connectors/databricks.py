@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Dict, List, Tuple
 
-from dm_core.connectors.base import BaseConnector, ConnectorConfig, ConnectorResult
+from dm_core.connectors.base import BaseConnector, ConnectorConfig, ConnectorResult, infer_primary_keys, infer_relationships
 
 
 _SPARK_TYPE_MAP = {
@@ -228,7 +228,24 @@ class DatabricksConnector(BaseConnector):
         except Exception as e:
             warnings.append(f"Could not fetch constraints: {e}")
 
-        model["entities"] = list(table_entities.values())
+        entities_list = list(table_entities.values())
+
+        # --- Inference: fill in PKs and FKs when constraints are missing ---
+        has_any_pk = any(
+            f.get("primary_key") for ent in entities_list for f in ent.get("fields", [])
+        )
+        if not has_any_pk:
+            entities_list, pk_msgs = infer_primary_keys(entities_list)
+            warnings.extend(pk_msgs)
+
+        if not relationships:
+            inferred_rels, fk_msgs = infer_relationships(entities_list, relationships)
+            relationships.extend(inferred_rels)
+            warnings.extend(fk_msgs)
+            if inferred_rels:
+                warnings.insert(0, f"No FK constraints found — inferred {len(inferred_rels)} relationships from column naming patterns.")
+
+        model["entities"] = entities_list
         model["relationships"] = relationships
 
         cur.close()

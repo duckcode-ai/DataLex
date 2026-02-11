@@ -120,6 +120,31 @@ export default function EntityNode({ data }) {
     return set;
   }, [entityIndexes]);
 
+  // Compact dot mode for large models
+  if (data.compactMode) {
+    const relCount = data.relationshipCount || 0;
+    return (
+      <div className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden`}>
+        <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
+        <div className={`bg-gradient-to-r ${colors.bg} px-2.5 py-1.5`}>
+          <h3 className="text-[11px] font-semibold text-text-primary truncate">{data.name}</h3>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className={`px-1 py-0 rounded text-[8px] font-bold uppercase ${colors.badge}`}>
+              {entityType.replace("_", " ")}
+            </span>
+            <span className="text-[9px] text-slate-400">{fields.length}f</span>
+            {relCount > 0 && (
+              <span className="flex items-center gap-0.5 text-[9px] text-slate-400">
+                <ArrowRightLeft size={7} />{relCount}
+              </span>
+            )}
+          </div>
+        </div>
+        <Handle type="source" position={Position.Right} className="!bg-blue-500 !border-white !w-2 !h-2" />
+      </div>
+    );
+  }
+
   let visibleFields = fields;
   let hiddenCount = 0;
   if (collapsed) {

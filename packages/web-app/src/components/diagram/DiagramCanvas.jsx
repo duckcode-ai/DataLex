@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Background,
   Controls,
@@ -14,6 +14,7 @@ import "@xyflow/react/dist/style.css";
 import EntityNode from "./EntityNode";
 import SubjectAreaGroup from "./SubjectAreaGroup";
 import AnnotationNode from "./AnnotationNode";
+import SchemaOverviewNode from "./SchemaOverviewNode";
 import DiagramToolbar from "./DiagramToolbar";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -22,7 +23,10 @@ import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
 import { runModelChecks } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
 
-const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, annotation: AnnotationNode };
+const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, annotation: AnnotationNode, schemaOverview: SchemaOverviewNode };
+
+const LARGE_MODEL_THRESHOLD = 100;
+const COMPACT_MODE_THRESHOLD = 200;
 
 // Build adjacency map from edges (undirected)
 function adjacencyFromEdges(edges) {
@@ -165,6 +169,25 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
   return { nodes: styledNodes, edges: styledEdges };
 }
 
+// Build schema overview nodes from the store's schema options
+function buildSchemaOverviewNodes(schemaOptions, onDrillIn) {
+  const cols = Math.max(1, Math.ceil(Math.sqrt(schemaOptions.length)));
+  return schemaOptions.map((s, i) => ({
+    id: `__schema_${s.name}`,
+    type: "schemaOverview",
+    position: { x: 60 + (i % cols) * 280, y: 60 + Math.floor(i / cols) * 200 },
+    data: {
+      schemaName: s.name,
+      entityCount: s.entityCount,
+      tableCount: s.tableCount,
+      viewCount: s.viewCount,
+      relCount: s.relCount,
+      colorIndex: i,
+      onDrillIn,
+    },
+  }));
+}
+
 function FlowCanvas() {
   const rf = useReactFlow();
   const {
@@ -176,15 +199,51 @@ function FlowCanvas() {
     selectEntity,
     clearSelection,
     viewMode,
+    setViewMode,
     visibleLimit,
+    setVisibleLimit,
     lineageDepth,
+    activeSchemaFilter,
+    setActiveSchemaFilter,
+    setLargeModelBanner,
+    centerEntityId,
+    setCenterEntityId,
+    getSchemaOptions,
+    setVizSettings,
+    _lastAutoTuneCount,
   } = useDiagramStore();
 
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState([]);
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState([]);
   const [layoutDone, setLayoutDone] = useState(false);
+  const autoTuneRef = useRef(0);
 
-  // Pipeline: filter → lineage → limit → layout → visual effects
+  // Auto-tune: apply smart defaults when a large model is first loaded
+  useEffect(() => {
+    const total = storeNodes.length;
+    if (total > LARGE_MODEL_THRESHOLD && autoTuneRef.current !== total) {
+      autoTuneRef.current = total;
+      const showCount = Math.min(50, total);
+      setVisibleLimit(showCount);
+      setVizSettings({
+        fieldView: "keys",
+        layoutDensity: "compact",
+        showEdgeLabels: false,
+      });
+      setLargeModelBanner({ total, showing: showCount });
+    } else if (total <= LARGE_MODEL_THRESHOLD && autoTuneRef.current !== total) {
+      autoTuneRef.current = total;
+      setLargeModelBanner(null);
+    }
+  }, [storeNodes.length, setVisibleLimit, setVizSettings, setLargeModelBanner]);
+
+  // Schema overview drill-in handler
+  const handleSchemaOverviewDrillIn = useCallback((schemaName) => {
+    setActiveSchemaFilter(schemaName);
+    setViewMode("all");
+  }, [setActiveSchemaFilter, setViewMode]);
+
+  // Pipeline: filter → schema filter → lineage → limit → layout → compact → visual effects
   useEffect(() => {
     if (storeNodes.length === 0) {
       setRfNodes([]);
@@ -192,8 +251,28 @@ function FlowCanvas() {
       return;
     }
 
+    // Schema overview mode: show schema summary cards instead of entities
+    if (viewMode === "overview") {
+      const schemaOptions = getSchemaOptions();
+      const overviewNodes = buildSchemaOverviewNodes(schemaOptions, handleSchemaOverviewDrillIn);
+      setRfNodes(overviewNodes);
+      setRfEdges([]);
+      setLayoutDone(true);
+      return;
+    }
+
     // Step 1: type/tag filters
     let { nodes: filtered, edges: filteredEdges } = applyFilters(storeNodes, storeEdges, vizSettings);
+
+    // Step 1b: schema/subject_area filter
+    if (activeSchemaFilter) {
+      filtered = filtered.filter((n) => {
+        const sa = n.data?.subject_area || n.data?.schema || "(default)";
+        return sa === activeSchemaFilter;
+      });
+      const ids = new Set(filtered.map((n) => n.id));
+      filteredEdges = filteredEdges.filter((e) => ids.has(e.source) && ids.has(e.target));
+    }
 
     // Step 2: lineage mode
     if (viewMode === "lineage" && selectedEntityId) {
@@ -214,6 +293,9 @@ function FlowCanvas() {
         layoutResult = fallbackGridLayout(filtered, filteredEdges, vizSettings.layoutDensity);
       }
 
+      // Inject compact mode for large visible sets
+      const useCompact = layoutResult.nodes.length > COMPACT_MODE_THRESHOLD;
+
       // Step 4: visual effects
       const { nodes: visualNodes, edges: visualEdges } = applyVisualEffects(
         layoutResult.nodes,
@@ -223,15 +305,20 @@ function FlowCanvas() {
         entitySearch
       );
 
+      // Apply compact mode flag
+      const finalNodes = useCompact
+        ? visualNodes.map((n) => ({ ...n, data: { ...n.data, compactMode: true } }))
+        : visualNodes;
+
       // Merge group nodes (subject area backgrounds) before entity nodes
       const groupNodes = layoutResult.groupNodes || [];
-      setRfNodes([...groupNodes, ...visualNodes]);
+      setRfNodes([...groupNodes, ...finalNodes]);
       setRfEdges(visualEdges);
       setLayoutDone(true);
     };
 
     doLayout();
-  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, lineageDepth, setRfNodes, setRfEdges]);
+  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, lineageDepth, activeSchemaFilter, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
 
   // Fit view after layout
   useEffect(() => {
@@ -243,7 +330,22 @@ function FlowCanvas() {
     }
   }, [layoutDone, rfNodes.length, rf]);
 
+  // Center on entity when requested from entity list panel
+  useEffect(() => {
+    if (centerEntityId && rfNodes.length > 0) {
+      const targetNode = rfNodes.find((n) => n.id === centerEntityId);
+      if (targetNode) {
+        requestAnimationFrame(() => {
+          rf.fitView({ nodes: [{ id: centerEntityId }], padding: 0.5, duration: 500 });
+        });
+      }
+      setCenterEntityId(null);
+    }
+  }, [centerEntityId, rfNodes, rf, setCenterEntityId]);
+
   const onNodeClick = useCallback((_event, node) => {
+    // Schema overview nodes handle their own click
+    if (node.type === "schemaOverview") return;
     selectEntity(node.id);
   }, [selectEntity]);
 
@@ -285,6 +387,7 @@ function FlowCanvas() {
       onNodeClick={onNodeClick}
       onPaneClick={onPaneClick}
       fitView
+      onlyRenderVisibleElements={rfNodes.length > 100}
       proOptions={{ hideAttribution: true }}
       minZoom={0.05}
       maxZoom={3}
@@ -307,7 +410,7 @@ function FlowCanvas() {
 }
 
 export default function DiagramCanvas() {
-  const { setGraph } = useDiagramStore();
+  const { setGraph, largeModelBanner, setLargeModelBanner, setVisibleLimit, setViewMode } = useDiagramStore();
   const { activeFileContent } = useWorkspaceStore();
   const { diagramFullscreen, setDiagramFullscreen } = useUiStore();
 
@@ -362,6 +465,36 @@ export default function DiagramCanvas() {
   return (
     <div className={containerClass}>
       <DiagramToolbar />
+
+      {/* Large model info banner */}
+      {largeModelBanner && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-50 border-b border-amber-200 text-[11px] text-amber-800">
+          <span className="font-semibold">Large model ({largeModelBanner.total} entities)</span>
+          <span className="text-amber-600">— Showing top {largeModelBanner.showing} by connectivity. Use search, filters, or Overview to explore.</span>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <button
+              onClick={() => { setVisibleLimit(0); setLargeModelBanner(null); }}
+              className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-100 hover:bg-amber-200 text-amber-700 transition-colors"
+            >
+              Show All
+            </button>
+            <button
+              onClick={() => setViewMode("overview")}
+              className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-100 hover:bg-blue-200 text-blue-700 transition-colors"
+            >
+              Overview
+            </button>
+            <button
+              onClick={() => setLargeModelBanner(null)}
+              className="p-0.5 rounded hover:bg-amber-200 text-amber-500 transition-colors"
+              title="Dismiss"
+            >
+              ×
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 min-h-0">
         <ReactFlowProvider>
           <FlowCanvas />

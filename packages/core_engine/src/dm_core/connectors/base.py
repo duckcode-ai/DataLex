@@ -90,6 +90,211 @@ def _default_model(model_name: str, domain: str, owners: List[str]) -> Dict[str,
     }
 
 
+# ---------------------------------------------------------------------------
+# Relationship & PK inference for databases without constraints
+# ---------------------------------------------------------------------------
+
+# Common PK column patterns (case-insensitive)
+_PK_PATTERNS = [
+    re.compile(r"^id$", re.IGNORECASE),
+    re.compile(r"^pk$", re.IGNORECASE),
+    re.compile(r"^(.+)_id$", re.IGNORECASE),  # only if matches table name
+    re.compile(r"^(.+)_pk$", re.IGNORECASE),
+]
+
+# Common FK column patterns: <table>_id, <table>_fk, <table>Id, fk_<table>
+_FK_PATTERNS = [
+    re.compile(r"^(.+)_id$", re.IGNORECASE),
+    re.compile(r"^(.+)_fk$", re.IGNORECASE),
+    re.compile(r"^fk_(.+)$", re.IGNORECASE),
+    re.compile(r"^(.+)Id$"),  # camelCase: orderId, userId
+]
+
+
+def _normalize(name: str) -> str:
+    """Normalize a name for fuzzy matching: lowercase, strip underscores/hyphens."""
+    return re.sub(r"[_\-\s]+", "", name).lower()
+
+
+def _plurals(name: str) -> List[str]:
+    """Return plausible singular/plural variants of a normalized name."""
+    variants = []
+    if name.endswith("ies"):
+        variants.append(name[:-3] + "y")       # "categories" → "category"
+    if name.endswith("ses") or name.endswith("xes") or name.endswith("zes"):
+        variants.append(name[:-2])              # "addresses" → "address"
+    if name.endswith("s") and not name.endswith("ss"):
+        variants.append(name[:-1])              # "orders" → "order"
+    if not name.endswith("s"):
+        variants.append(name + "s")             # "order" → "orders"
+    if name.endswith("y") and not name.endswith("ey"):
+        variants.append(name[:-1] + "ies")      # "category" → "categories"
+    return variants
+
+
+def _build_entity_lookup(entities: List[Dict[str, Any]]) -> Dict[str, str]:
+    """Build a lookup from normalized table/entity name → actual entity name.
+
+    Includes both the entity name and singular/plural variants for flexible matching.
+    """
+    lookup: Dict[str, str] = {}
+    for entity in entities:
+        ename = entity["name"]
+        norm = _normalize(ename)
+        lookup[norm] = ename
+        for variant in _plurals(norm):
+            if variant not in lookup:
+                lookup[variant] = ename
+    return lookup
+
+
+def infer_primary_keys(entities: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Infer primary keys for entities that have no PK defined.
+
+    Heuristics (in priority order):
+    1. Column named exactly 'id'
+    2. Column named '<table_name>_id' (e.g., order_id in orders table)
+    3. Column named '<table_name>_pk'
+    4. First column if it ends with '_id' or '_pk'
+
+    Returns (modified entities, list of inference messages).
+    """
+    messages: List[str] = []
+
+    for entity in entities:
+        fields = entity.get("fields", [])
+        # Skip if any field already has primary_key
+        if any(f.get("primary_key") for f in fields):
+            continue
+        if not fields:
+            continue
+
+        ename_norm = _normalize(entity["name"])
+        inferred_pk = None
+
+        # Priority 1: column named 'id'
+        for f in fields:
+            if f["name"].lower() == "id":
+                inferred_pk = f
+                break
+
+        # Priority 2: column named '<entity>_id' or '<entity>_pk'
+        if not inferred_pk:
+            for f in fields:
+                fname = f["name"].lower()
+                if fname == f"{ename_norm}_id" or fname == f"{ename_norm}_pk":
+                    inferred_pk = f
+                    break
+
+        # Priority 3: first column ending in _id or _pk
+        if not inferred_pk:
+            for f in fields:
+                fname = f["name"].lower()
+                if fname.endswith("_id") or fname.endswith("_pk"):
+                    inferred_pk = f
+                    break
+
+        if inferred_pk:
+            inferred_pk["primary_key"] = True
+            inferred_pk["nullable"] = False
+            messages.append(f"Inferred PK: {entity['name']}.{inferred_pk['name']}")
+
+    return entities, messages
+
+
+def infer_relationships(
+    entities: List[Dict[str, Any]],
+    existing_relationships: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """Infer foreign key relationships from column naming conventions.
+
+    Detects patterns like:
+    - user_id in orders table → Orders.user_id references Users.id
+    - customer_fk in invoices → Invoices.customer_fk references Customers.id
+    - fk_product in line_items → LineItems.fk_product references Products.id
+
+    Only creates relationships to entities that actually exist in the model.
+    Skips columns that are already marked as primary_key.
+
+    Returns (list of inferred relationships, list of inference messages).
+    """
+    existing = existing_relationships or []
+    existing_pairs = set()
+    for rel in existing:
+        existing_pairs.add((rel.get("from", ""), rel.get("to", "")))
+
+    entity_lookup = _build_entity_lookup(entities)
+
+    # Build a map of entity_name → its PK field name
+    pk_map: Dict[str, str] = {}
+    for entity in entities:
+        for f in entity.get("fields", []):
+            if f.get("primary_key"):
+                pk_map[entity["name"]] = f["name"]
+                break
+        # Default to 'id' if no PK found
+        if entity["name"] not in pk_map:
+            pk_map[entity["name"]] = "id"
+
+    inferred: List[Dict[str, Any]] = []
+    messages: List[str] = []
+
+    for entity in entities:
+        entity_name = entity["name"]
+        for f in entity.get("fields", []):
+            # Skip fields already marked as PK
+            if f.get("primary_key"):
+                continue
+            # Skip fields already marked as FK
+            if f.get("foreign_key"):
+                continue
+
+            fname = f["name"]
+            ref_table_norm = None
+
+            # Try each FK pattern
+            for pattern in _FK_PATTERNS:
+                m = pattern.match(fname)
+                if m:
+                    ref_table_norm = _normalize(m.group(1))
+                    break
+
+            if not ref_table_norm:
+                continue
+
+            # Don't self-reference via the entity's own name_id pattern
+            if ref_table_norm == _normalize(entity_name):
+                continue
+
+            # Look up the referenced entity
+            ref_entity = entity_lookup.get(ref_table_norm)
+            if not ref_entity:
+                continue
+
+            # Build the relationship
+            ref_pk = pk_map.get(ref_entity, "id")
+            from_key = f"{ref_entity}.{ref_pk}"
+            to_key = f"{entity_name}.{fname}"
+
+            # Skip if this relationship already exists
+            if (from_key, to_key) in existing_pairs:
+                continue
+
+            f["foreign_key"] = True
+            rel_name = f"{_normalize(ref_entity)}_{_normalize(entity_name)}_{fname}_inferred"
+            inferred.append({
+                "name": rel_name,
+                "from": from_key,
+                "to": to_key,
+                "cardinality": "one_to_many",
+                "inferred": True,
+            })
+            existing_pairs.add((from_key, to_key))
+            messages.append(f"Inferred FK: {entity_name}.{fname} → {ref_entity}.{ref_pk}")
+
+    return inferred, messages
+
+
 class BaseConnector(ABC):
     """Abstract base class for all database connectors."""
 

@@ -102,6 +102,14 @@ DataLex is a YAML-first data modeling platform (Schema v2) with three runtime su
 - **Global search**: Bottom panel tab searching across entities, fields, tags, descriptions, and glossary terms. Category filter pills with counts. Click-to-navigate selects entity in diagram.
 - **Diagram annotations**: Draggable sticky-note nodes with 5 color variants. Inline text editing, delete on hover. Added via toolbar "Note" button.
 - **Keyboard shortcuts**: `⌘+S` save, `⌘+K` global search, `⌘+\` toggle sidebar, `⌘+J` toggle bottom panel, `⌘+D` toggle dark mode, `?` shortcuts panel. Full shortcuts reference modal with grouped categories.
+- **Large model scaling (1000+ tables)**:
+  - **Virtual rendering**: `onlyRenderVisibleElements` on React Flow — only DOM-renders nodes in viewport.
+  - **Force layout**: Auto-switches ELK from `layered` to `force` algorithm for >200 nodes (O(n log n) vs O(n²)).
+  - **Auto-tune**: Models with >100 entities auto-set to top-50 visible, keys-only fields, compact density, no edge labels.
+  - **Compact dot mode**: >200 visible nodes render as 140px mini-cards (name + type badge + field/rel counts only).
+  - **Schema overview mode**: New "Overview" view shows schemas/subject_areas as clickable summary cards with entity counts. Click to drill into a schema.
+  - **Entity list panel**: Sidebar panel with searchable, sortable entity list. Click to select + center in diagram. Filter by schema, sort by name/fields/relationships.
+  - **Large model banner**: Dismissible info bar with "Show All" and "Overview" quick actions.
 
 ### 2.10 Policy Engine & Governance Maturity Plane
 - **Policy schema v2** (`schemas/policy.schema.json`): 10 policy types (4 original + 6 new), `pack.extends` for inheritance.

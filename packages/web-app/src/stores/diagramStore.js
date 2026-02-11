@@ -15,9 +15,13 @@ const useDiagramStore = create((set, get) => ({
   entitySearch: "",
 
   // Exploration mode
-  viewMode: "all", // "all" | "lineage"
+  viewMode: "all", // "all" | "lineage" | "overview"
   visibleLimit: 0, // 0 = show all, >0 = limit visible entities
   lineageDepth: 1, // how many hops from selected entity in lineage mode
+  activeSchemaFilter: null, // filter to a specific schema/subject_area
+  largeModelBanner: null, // { total, showing } or null
+  centerEntityId: null, // entity to center on in diagram
+  _lastAutoTuneCount: 0, // track last auto-tune to avoid re-applying
 
   // Layout & viz settings
   vizSettings: {
@@ -63,6 +67,9 @@ const useDiagramStore = create((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setVisibleLimit: (limit) => set({ visibleLimit: limit }),
   setLineageDepth: (depth) => set({ lineageDepth: depth }),
+  setActiveSchemaFilter: (schema) => set({ activeSchemaFilter: schema }),
+  setLargeModelBanner: (banner) => set({ largeModelBanner: banner }),
+  setCenterEntityId: (id) => set({ centerEntityId: id }),
 
   updateVizSetting: (key, value) => {
     set((s) => ({
@@ -90,6 +97,31 @@ const useDiagramStore = create((set, get) => ({
   getEntityNames: () => {
     const { model } = get();
     return (model?.entities || []).map((e) => e.name).sort();
+  },
+
+  // Get unique schema/subject_area options with counts
+  getSchemaOptions: () => {
+    const { model, edges } = get();
+    const entities = model?.entities || [];
+    const schemaMap = new Map();
+    for (const entity of entities) {
+      const key = entity.subject_area || entity.schema || "(default)";
+      if (!schemaMap.has(key)) schemaMap.set(key, { name: key, entityCount: 0, tableCount: 0, viewCount: 0, relCount: 0 });
+      const s = schemaMap.get(key);
+      s.entityCount++;
+      if ((entity.type || "table") === "view") s.viewCount++;
+      else s.tableCount++;
+    }
+    // Count relationships per schema
+    const entityToSchema = new Map();
+    for (const entity of entities) {
+      entityToSchema.set(entity.name, entity.subject_area || entity.schema || "(default)");
+    }
+    for (const edge of (edges || [])) {
+      const srcSchema = entityToSchema.get(edge.source);
+      if (srcSchema && schemaMap.has(srcSchema)) schemaMap.get(srcSchema).relCount++;
+    }
+    return Array.from(schemaMap.values()).sort((a, b) => b.entityCount - a.entityCount);
   },
 }));
 

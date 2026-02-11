@@ -93,18 +93,20 @@ export default function ConnectorsPanel() {
   // Step 1: connection test
   const [connected, setConnected] = useState(false);
 
-  // Step 2: schemas
+  // Step 2: schemas (multi-select)
   const [schemas, setSchemas] = useState([]);
-  const [selectedSchema, setSelectedSchema] = useState(null);
+  const [selectedSchemas, setSelectedSchemas] = useState(new Set());
 
-  // Step 3: tables
-  const [tables, setTables] = useState([]);
-  const [selectedTables, setSelectedTables] = useState(new Set());
+  // Step 3: tables (per-schema preview before pull)
+  const [previewSchema, setPreviewSchema] = useState(null);
+  const [previewTables, setPreviewTables] = useState([]);
+  const [schemaTableSelections, setSchemaTableSelections] = useState({});
 
   // Step 4: pull result
   const [pullResult, setPullResult] = useState(null);
+  const [pullProgress, setPullProgress] = useState(null);
 
-  const { loadImportedYaml } = useWorkspaceStore();
+  const { loadImportedYaml, loadMultipleImportedYaml } = useWorkspaceStore();
   const { addToast, setBottomPanelTab } = useUiStore();
 
   // Fetch connector list
@@ -124,10 +126,12 @@ export default function ConnectorsPanel() {
     setStep(0);
     setConnected(false);
     setSchemas([]);
-    setSelectedSchema(null);
-    setTables([]);
-    setSelectedTables(new Set());
+    setSelectedSchemas(new Set());
+    setPreviewSchema(null);
+    setPreviewTables([]);
+    setSchemaTableSelections({});
     setPullResult(null);
+    setPullProgress(null);
     setError(null);
   };
 
@@ -172,9 +176,8 @@ export default function ConnectorsPanel() {
     try {
       const data = await apiPost("/api/connectors/schemas", { connector: selectedConnector, ...formValues });
       setSchemas(data);
-      if (data.length === 1) {
-        setSelectedSchema(data[0].name);
-      }
+      // Auto-select all schemas by default
+      setSelectedSchemas(new Set(data.map((s) => s.name)));
     } catch (err) {
       setError(err.message);
       setSchemas([]);
@@ -183,28 +186,9 @@ export default function ConnectorsPanel() {
     }
   };
 
-  // Step 3: Fetch tables for selected schema
-  const fetchTables = async (schemaName) => {
-    setLoading(true);
-    setError(null);
-    setSelectedSchema(schemaName);
-    try {
-      const params = { connector: selectedConnector, ...formValues, db_schema: schemaName };
-      if (selectedConnector === "bigquery") params.dataset = schemaName;
-      const data = await apiPost("/api/connectors/tables", params);
-      setTables(data);
-      setSelectedTables(new Set(data.map((t) => t.name)));
-      setStep(2);
-    } catch (err) {
-      setError(err.message);
-      setTables([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleTable = (name) => {
-    setSelectedTables((prev) => {
+  // Schema multi-select helpers
+  const toggleSchema = (name) => {
+    setSelectedSchemas((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -212,40 +196,125 @@ export default function ConnectorsPanel() {
     });
   };
 
-  const toggleAllTables = () => {
-    if (selectedTables.size === tables.length) setSelectedTables(new Set());
-    else setSelectedTables(new Set(tables.map((t) => t.name)));
+  const toggleAllSchemas = () => {
+    if (selectedSchemas.size === schemas.length) setSelectedSchemas(new Set());
+    else setSelectedSchemas(new Set(schemas.map((s) => s.name)));
   };
 
-  // Step 4: Pull
+  // Step 3: Preview tables for a specific schema (optional drill-in)
+  const fetchTablesPreview = async (schemaName) => {
+    setLoading(true);
+    setError(null);
+    setPreviewSchema(schemaName);
+    try {
+      const params = { connector: selectedConnector, ...formValues, db_schema: schemaName };
+      if (selectedConnector === "bigquery") params.dataset = schemaName;
+      const data = await apiPost("/api/connectors/tables", params);
+      setPreviewTables(data);
+      // Initialize table selection for this schema (all selected by default)
+      setSchemaTableSelections((prev) => ({
+        ...prev,
+        [schemaName]: prev[schemaName] || new Set(data.map((t) => t.name)),
+      }));
+    } catch (err) {
+      setError(err.message);
+      setPreviewTables([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const togglePreviewTable = (name) => {
+    if (!previewSchema) return;
+    setSchemaTableSelections((prev) => {
+      const current = new Set(prev[previewSchema] || []);
+      if (current.has(name)) current.delete(name);
+      else current.add(name);
+      return { ...prev, [previewSchema]: current };
+    });
+  };
+
+  const toggleAllPreviewTables = () => {
+    if (!previewSchema) return;
+    const current = schemaTableSelections[previewSchema] || new Set();
+    if (current.size === previewTables.length) {
+      setSchemaTableSelections((prev) => ({ ...prev, [previewSchema]: new Set() }));
+    } else {
+      setSchemaTableSelections((prev) => ({ ...prev, [previewSchema]: new Set(previewTables.map((t) => t.name)) }));
+    }
+  };
+
+  // Step 4: Pull — multi-schema mode
   const handlePull = async () => {
+    const schemasToProcess = [...selectedSchemas];
+    if (schemasToProcess.length === 0) return;
+
     setLoading(true);
     setError(null);
     setPullResult(null);
+    setPullProgress({ current: 0, total: schemasToProcess.length, currentSchema: schemasToProcess[0] });
+
     try {
-      const params = {
-        connector: selectedConnector,
-        ...formValues,
-        db_schema: selectedSchema,
-        model_name: formValues.model_name || selectedSchema || "imported_model",
-        tables: [...selectedTables].join(","),
-      };
-      if (selectedConnector === "bigquery") params.dataset = selectedSchema;
-      const data = await apiPost("/api/connectors/pull", params);
-      if (data.success) {
-        setPullResult(data);
-        setStep(3);
-        if (data.yaml) {
-          loadImportedYaml(params.model_name, data.yaml);
-          addToast?.({ message: `Pulled ${data.entityCount || 0} tables from ${CONNECTOR_META[selectedConnector]?.name} / ${selectedSchema}`, type: "success" });
+      if (schemasToProcess.length === 1) {
+        // Single schema — use original endpoint for backward compat
+        const schemaName = schemasToProcess[0];
+        const tableSet = schemaTableSelections[schemaName];
+        const params = {
+          connector: selectedConnector,
+          ...formValues,
+          db_schema: schemaName,
+          model_name: schemaName,
+          tables: tableSet ? [...tableSet].join(",") : "",
+        };
+        if (selectedConnector === "bigquery") params.dataset = schemaName;
+        const data = await apiPost("/api/connectors/pull", params);
+        if (data.success && data.yaml) {
+          loadImportedYaml(schemaName, data.yaml);
+          setPullResult({
+            schemasProcessed: 1,
+            schemasFailed: 0,
+            totalEntities: data.entityCount || 0,
+            totalFields: data.fieldCount || 0,
+            totalRelationships: data.relationshipCount || 0,
+            results: [{ schema: schemaName, success: true, ...data }],
+            errors: [],
+          });
+          addToast?.({ message: `Pulled ${data.entityCount || 0} tables from ${CONNECTOR_META[selectedConnector]?.name} / ${schemaName}`, type: "success" });
+        } else {
+          setError(data.error || "Pull failed");
         }
       } else {
-        setError(data.error || "Pull failed");
+        // Multi-schema — use pull-multi endpoint
+        const schemaEntries = schemasToProcess.map((name) => {
+          const tableSet = schemaTableSelections[name];
+          return tableSet && tableSet.size > 0 ? { name, tables: [...tableSet] } : name;
+        });
+        const data = await apiPost("/api/connectors/pull-multi", {
+          connector: selectedConnector,
+          ...formValues,
+          schemas: schemaEntries,
+        });
+
+        // Load each successful schema as a separate model file
+        const files = (data.results || []).filter((r) => r.success && r.yaml).map((r) => ({
+          name: r.schema,
+          yaml: r.yaml,
+        }));
+        if (files.length > 0) {
+          loadMultipleImportedYaml(files);
+          addToast?.({ message: `Pulled ${files.length} schemas (${data.totalEntities} tables) as separate model files`, type: "success" });
+        }
+        setPullResult(data);
+        if (data.errors?.length > 0 && files.length === 0) {
+          setError(`All ${data.errors.length} schema pulls failed`);
+        }
       }
+      setStep(3);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+      setPullProgress(null);
     }
   };
 
@@ -254,45 +323,41 @@ export default function ConnectorsPanel() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-border-primary bg-bg-secondary/50 shrink-0">
-        <Database size={12} className="text-accent-blue" />
-        <span className="text-xs font-semibold text-text-primary">Database Connectors</span>
-        {selectedConnector && meta && (
-          <span className={`text-[10px] font-semibold ${meta.color}`}>{meta.name}</span>
-        )}
-        {/* Step indicator */}
-        {selectedConnector && (
-          <div className="flex items-center gap-0.5 ml-auto mr-1">
+      {/* Step indicator bar */}
+      {selectedConnector && meta && (
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border-primary bg-bg-secondary/30 shrink-0">
+          <span className={`text-[11px] font-semibold ${meta.color}`}>{meta.name}</span>
+          <div className="flex items-center gap-0.5 ml-2">
             {STEPS.map((s, i) => {
               const StepIcon = s.icon;
               const isActive = i === step;
               const isDone = i < step;
               return (
                 <div key={s.id} className="flex items-center gap-0.5">
-                  {i > 0 && <div className={`w-3 h-px ${isDone ? "bg-green-400" : "bg-border-primary"}`} />}
+                  {i > 0 && <div className={`w-4 h-px ${isDone ? "bg-green-400" : "bg-border-primary"}`} />}
                   <div
-                    className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-medium ${
+                    className={`flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium ${
                       isActive ? `${meta.bg} ${meta.color} ${meta.border} border` :
                       isDone ? "bg-green-50 text-green-600 border border-green-200" :
                       "text-text-muted"
                     }`}
                   >
-                    {isDone ? <Check size={8} /> : <StepIcon size={8} />}
+                    {isDone ? <Check size={9} /> : <StepIcon size={9} />}
                     {s.label}
                   </div>
                 </div>
               );
             })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-4">
         {/* Connector selector */}
         <div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-1.5">Select Database</div>
-          <div className="grid grid-cols-5 gap-1.5">
+          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2">Select Database</div>
+          <div className="grid grid-cols-5 gap-2">
             {Object.entries(CONNECTOR_META).map(([type, cm]) => {
               const isSelected = selectedConnector === type;
               const connInfo = connectors?.find((c) => c.type === type);
@@ -357,20 +422,23 @@ export default function ConnectorsPanel() {
           </div>
         )}
 
-        {/* Step 1: Schema browser */}
+        {/* Step 1: Schema browser — multi-select */}
         {selectedConnector && step === 1 && (
           <div className={`rounded-lg border ${meta.border} ${meta.bg} p-3 space-y-2`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
                 <Layers size={12} />
-                Select Schema
-                <span className="text-[10px] font-normal text-text-muted">({schemas.length} found)</span>
+                Select Schemas
+                <span className="text-[10px] font-normal text-text-muted">
+                  ({selectedSchemas.size}/{schemas.length} selected — each becomes a separate model file)
+                </span>
               </div>
               <button onClick={() => { setStep(0); setConnected(false); }}
                 className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary">
                 <ChevronLeft size={10} /> Back
               </button>
             </div>
+
             {loading ? (
               <div className="flex items-center justify-center py-4">
                 <Loader2 size={16} className="animate-spin text-text-muted" />
@@ -379,60 +447,92 @@ export default function ConnectorsPanel() {
             ) : schemas.length === 0 ? (
               <div className="text-[11px] text-text-muted text-center py-3">No schemas found.</div>
             ) : (
-              <div className="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto">
-                {schemas.map((s) => (
-                  <button key={s.name} onClick={() => fetchTables(s.name)}
-                    className={`flex items-center justify-between px-2.5 py-2 rounded-md border text-left transition-colors text-[11px] ${
-                      selectedSchema === s.name
-                        ? `${meta.border} ${meta.bg} ${meta.color} font-semibold`
-                        : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
-                    }`}>
-                    <div className="flex items-center gap-1.5">
-                      <Layers size={11} className="shrink-0" />
-                      <span className="truncate">{s.name}</span>
-                    </div>
-                    <span className="text-[9px] text-text-muted shrink-0 ml-1">{s.table_count} tbl</span>
+              <>
+                {/* Select all / none */}
+                <div className="flex items-center gap-2 pb-1 border-b border-border-primary/50">
+                  <button onClick={toggleAllSchemas}
+                    className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary">
+                    {selectedSchemas.size === schemas.length ? <CheckSquare size={11} /> : <Square size={11} />}
+                    {selectedSchemas.size === schemas.length ? "Deselect all" : "Select all"}
                   </button>
-                ))}
-              </div>
+                  <span className="text-[9px] text-text-muted ml-auto">
+                    {schemas.reduce((s, sc) => s + (sc.table_count || 0), 0)} total tables across {schemas.length} schemas
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto">
+                  {schemas.map((s) => {
+                    const checked = selectedSchemas.has(s.name);
+                    return (
+                      <div key={s.name} className="flex items-center gap-1">
+                        <button onClick={() => toggleSchema(s.name)}
+                          className={`flex items-center gap-2 flex-1 px-2.5 py-2 rounded-md border text-left transition-colors text-[11px] ${
+                            checked
+                              ? `${meta.border} bg-white/80 ${meta.color} font-semibold`
+                              : "border-border-primary bg-bg-primary text-text-secondary opacity-60 hover:opacity-80"
+                          }`}>
+                          {checked ? <CheckSquare size={11} className={meta.color} /> : <Square size={11} className="text-text-muted" />}
+                          <Layers size={10} className="shrink-0" />
+                          <span className="truncate flex-1">{s.name}</span>
+                          <span className="text-[9px] text-text-muted shrink-0">{s.table_count} tbl</span>
+                        </button>
+                        {checked && (
+                          <button onClick={() => { fetchTablesPreview(s.name); setStep(2); }}
+                            title="Preview & filter tables"
+                            className="p-1.5 rounded border border-border-primary bg-bg-primary text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors">
+                            <Eye size={10} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pull button */}
+                <div className="flex items-center gap-2 pt-1">
+                  <button onClick={handlePull} disabled={loading || selectedSchemas.size === 0}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}>
+                    {loading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
+                    Pull {selectedSchemas.size} Schema{selectedSchemas.size !== 1 ? "s" : ""} as Separate Models
+                    <ChevronRight size={11} />
+                  </button>
+                  <span className="text-[9px] text-text-muted">
+                    Creates {selectedSchemas.size} .model.yaml file{selectedSchemas.size !== 1 ? "s" : ""}
+                  </span>
+                </div>
+              </>
             )}
           </div>
         )}
 
-        {/* Step 2: Table browser with checkboxes */}
-        {selectedConnector && step === 2 && (
+        {/* Step 2: Table preview for a specific schema */}
+        {selectedConnector && step === 2 && previewSchema && (
           <div className={`rounded-lg border ${meta.border} ${meta.bg} p-3 space-y-2`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
                 <Table2 size={12} />
-                {selectedSchema}
+                {previewSchema}
                 <span className="text-[10px] font-normal text-text-muted">
-                  ({selectedTables.size}/{tables.length} selected)
+                  ({(schemaTableSelections[previewSchema] || new Set()).size}/{previewTables.length} tables selected)
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <button onClick={() => setStep(1)}
-                  className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary">
-                  <ChevronLeft size={10} /> Schemas
-                </button>
-              </div>
+              <button onClick={() => { setStep(1); setPreviewSchema(null); }}
+                className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary">
+                <ChevronLeft size={10} /> Back to Schemas
+              </button>
+            </div>
+
+            <div className="text-[10px] text-text-muted bg-white/50 rounded px-2 py-1 border border-border-primary/30">
+              Filter tables for <strong>{previewSchema}</strong>. Uncheck tables you don't want to import. This schema will become <strong>{previewSchema}.model.yaml</strong>.
             </div>
 
             {/* Select all / none */}
             <div className="flex items-center gap-2 pb-1 border-b border-border-primary/50">
-              <button onClick={toggleAllTables}
+              <button onClick={toggleAllPreviewTables}
                 className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary">
-                {selectedTables.size === tables.length ? <CheckSquare size={11} /> : <Square size={11} />}
-                {selectedTables.size === tables.length ? "Deselect all" : "Select all"}
+                {(schemaTableSelections[previewSchema] || new Set()).size === previewTables.length ? <CheckSquare size={11} /> : <Square size={11} />}
+                {(schemaTableSelections[previewSchema] || new Set()).size === previewTables.length ? "Deselect all" : "Select all"}
               </button>
-              <div className="ml-auto">
-                <label className="text-[10px] text-text-muted font-medium mr-1">Model name:</label>
-                <input type="text" value={formValues.model_name || ""}
-                  onChange={(e) => setFormValues((p) => ({ ...p, model_name: e.target.value }))}
-                  placeholder={selectedSchema || "imported_model"}
-                  className="px-2 py-0.5 text-[10px] rounded border border-border-primary bg-bg-primary text-text-primary w-36 focus:outline-none focus:border-accent-blue"
-                />
-              </div>
             </div>
 
             {loading ? (
@@ -442,10 +542,10 @@ export default function ConnectorsPanel() {
               </div>
             ) : (
               <div className="max-h-44 overflow-y-auto space-y-0.5">
-                {tables.map((t) => {
-                  const checked = selectedTables.has(t.name);
+                {previewTables.map((t) => {
+                  const checked = (schemaTableSelections[previewSchema] || new Set()).has(t.name);
                   return (
-                    <button key={t.name} onClick={() => toggleTable(t.name)}
+                    <button key={t.name} onClick={() => togglePreviewTable(t.name)}
                       className={`flex items-center gap-2 w-full px-2 py-1 rounded text-[11px] text-left transition-colors ${
                         checked ? "bg-white/60" : "opacity-50 hover:opacity-80"
                       }`}>
@@ -463,62 +563,87 @@ export default function ConnectorsPanel() {
               </div>
             )}
 
-            {/* Pull button */}
             <div className="flex items-center gap-2 pt-1">
-              <button onClick={handlePull} disabled={loading || selectedTables.size === 0}
-                className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}>
-                {loading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
-                Pull {selectedTables.size} Table{selectedTables.size !== 1 ? "s" : ""} into Model
-                <ChevronRight size={11} />
+              <button onClick={() => { setStep(1); setPreviewSchema(null); }}
+                className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors`}>
+                <Check size={11} /> Done — Back to Schemas
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 3: Pull result */}
+        {/* Step 3: Pull result — per-schema breakdown */}
         {selectedConnector && step === 3 && pullResult && (
           <div className="rounded-lg border border-green-200 bg-green-50 p-3 space-y-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700">
               <CheckCircle2 size={12} />
-              Schema Pulled Successfully
+              {pullResult.schemasProcessed === 1 ? "Schema Pulled Successfully" : `${pullResult.schemasProcessed} Schemas Pulled as Separate Model Files`}
+              {pullResult.schemasFailed > 0 && (
+                <span className="text-[10px] font-normal text-amber-600">({pullResult.schemasFailed} failed)</span>
+              )}
             </div>
+
+            {/* Totals */}
             <div className="text-[11px] text-green-800 grid grid-cols-4 gap-2">
               <div className="text-center p-2 bg-white rounded border border-green-200">
-                <div className="text-lg font-bold">{pullResult.entityCount || 0}</div>
+                <div className="text-lg font-bold">{pullResult.schemasProcessed || 0}</div>
+                <div className="text-[9px] text-green-600">Model Files</div>
+              </div>
+              <div className="text-center p-2 bg-white rounded border border-green-200">
+                <div className="text-lg font-bold">{pullResult.totalEntities || 0}</div>
                 <div className="text-[9px] text-green-600">Tables</div>
               </div>
               <div className="text-center p-2 bg-white rounded border border-green-200">
-                <div className="text-lg font-bold">{pullResult.fieldCount || 0}</div>
+                <div className="text-lg font-bold">{pullResult.totalFields || 0}</div>
                 <div className="text-[9px] text-green-600">Columns</div>
               </div>
               <div className="text-center p-2 bg-white rounded border border-green-200">
-                <div className="text-lg font-bold">{pullResult.relationshipCount || 0}</div>
+                <div className="text-lg font-bold">{pullResult.totalRelationships || 0}</div>
                 <div className="text-[9px] text-green-600">Relationships</div>
               </div>
-              <div className="text-center p-2 bg-white rounded border border-green-200">
-                <div className="text-lg font-bold">{pullResult.indexCount || 0}</div>
-                <div className="text-[9px] text-green-600">Indexes</div>
-              </div>
             </div>
+
+            {/* Per-schema breakdown */}
+            {pullResult.results && pullResult.results.length > 1 && (
+              <div className="space-y-1">
+                <div className="text-[10px] text-green-700 font-semibold uppercase tracking-wider">Per-Schema Files</div>
+                <div className="max-h-32 overflow-y-auto space-y-0.5">
+                  {pullResult.results.map((r) => (
+                    <div key={r.schema} className={`flex items-center gap-2 px-2 py-1 rounded text-[11px] ${r.success ? "bg-white/60" : "bg-red-50"}`}>
+                      {r.success ? <CheckCircle2 size={10} className="text-green-500 shrink-0" /> : <AlertCircle size={10} className="text-red-500 shrink-0" />}
+                      <span className="font-semibold truncate flex-1">{r.schema}.model.yaml</span>
+                      {r.success ? (
+                        <>
+                          <span className="text-[9px] text-text-muted">{r.entityCount} tbl</span>
+                          <span className="text-[9px] text-text-muted">{r.fieldCount} col</span>
+                          <span className="text-[9px] text-text-muted">{r.relationshipCount} rel</span>
+                        </>
+                      ) : (
+                        <span className="text-[9px] text-red-500 truncate">{r.error}</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 pt-1">
               <button onClick={() => setBottomPanelTab("properties")}
                 className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-semibold rounded-md text-white bg-green-500 hover:bg-green-600 transition-colors">
                 <CheckCircle2 size={11} /> View Model
               </button>
-              <button onClick={() => { setStep(2); setPullResult(null); }}
-                className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium rounded-md border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover transition-colors">
-                <ChevronLeft size={11} /> Back to Tables
-              </button>
               <button onClick={() => { resetWizard(); }}
                 className="flex items-center gap-1 px-3 py-1.5 text-[11px] font-medium rounded-md border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover transition-colors">
-                <RefreshCw size={11} /> Pull Another Schema
+                <RefreshCw size={11} /> Pull Another Database
               </button>
             </div>
-            {pullResult.yaml && (
+
+            {/* YAML preview for single-schema pulls */}
+            {pullResult.results?.length === 1 && pullResult.results[0]?.yaml && (
               <details className="mt-1">
                 <summary className="text-[10px] text-green-600 cursor-pointer hover:underline">View generated YAML</summary>
                 <pre className="mt-1 p-2 bg-white rounded border border-green-200 text-[10px] font-mono text-text-primary overflow-x-auto max-h-48 overflow-y-auto">
-                  {pullResult.yaml}
+                  {pullResult.results[0].yaml}
                 </pre>
               </details>
             )}
@@ -545,6 +670,7 @@ export default function ConnectorsPanel() {
             </p>
           </div>
         )}
+        </div>{/* end max-w-3xl */}
       </div>
     </div>
   );

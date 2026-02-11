@@ -79,6 +79,7 @@ export default function DiagramToolbar() {
     clearSelection,
     getTagOptions,
     getEntityNames,
+    getSchemaOptions,
     nodes,
     viewMode,
     setViewMode,
@@ -87,6 +88,9 @@ export default function DiagramToolbar() {
     lineageDepth,
     setLineageDepth,
     selectedEntityId,
+    activeSchemaFilter,
+    setActiveSchemaFilter,
+    largeModelBanner,
   } = useDiagramStore();
 
   const { diagramFullscreen, toggleDiagramFullscreen } = useUiStore();
@@ -94,6 +98,7 @@ export default function DiagramToolbar() {
 
   const tagOptions = getTagOptions();
   const entityNames = getEntityNames();
+  const schemaOptions = getSchemaOptions();
   const totalEntities = entityNames.length;
 
   const handleFocusSearch = () => {
@@ -148,8 +153,16 @@ export default function DiagramToolbar() {
 
         <ToolbarDivider />
 
-        {/* View Mode: All vs Lineage */}
+        {/* View Mode: Overview / All / Lineage */}
         <ToolbarSection>
+          <ToolbarButton
+            active={viewMode === "overview"}
+            onClick={() => { setViewMode("overview"); setActiveSchemaFilter(null); }}
+            title="Schema overview — see schemas as cards"
+          >
+            <LayoutGrid size={12} />
+            Overview
+          </ToolbarButton>
           <ToolbarButton
             active={viewMode === "all"}
             onClick={() => setViewMode("all")}
@@ -171,6 +184,29 @@ export default function DiagramToolbar() {
             <GitBranch size={12} />
             Lineage
           </ToolbarButton>
+          {activeSchemaFilter && (
+            <button
+              onClick={() => setActiveSchemaFilter(null)}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+              title="Clear schema filter"
+            >
+              <X size={10} />
+              {activeSchemaFilter}
+            </button>
+          )}
+          {schemaOptions.length > 1 && viewMode !== "overview" && (
+            <select
+              value={activeSchemaFilter || ""}
+              onChange={(e) => setActiveSchemaFilter(e.target.value || null)}
+              className="bg-white border border-slate-200 rounded-md px-1.5 py-1 text-[11px] text-slate-600 outline-none hover:border-slate-300 cursor-pointer max-w-[120px]"
+              title="Filter by schema"
+            >
+              <option value="">All Schemas</option>
+              {schemaOptions.map((s) => (
+                <option key={s.name} value={s.name}>{s.name} ({s.entityCount})</option>
+              ))}
+            </select>
+          )}
         </ToolbarSection>
 
         <ToolbarDivider />

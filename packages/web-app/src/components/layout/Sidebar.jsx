@@ -18,17 +18,26 @@ import {
   FileCode2,
   AlertCircle,
   CheckCircle2,
+  List,
+  Search,
+  Plug,
+  BookOpen,
+  Compass,
+  Import,
+  Boxes,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
+import EntityListPanel from "../panels/EntityListPanel";
 
-const NAV_ITEMS = [
-  { id: "modeling", label: "Modeling", icon: LayoutDashboard },
-  { id: "validation", label: "Validation", icon: ShieldCheck },
-  { id: "diff", label: "Diff & Gate", icon: GitCompare },
-  { id: "impact", label: "Impact", icon: Network },
-  { id: "model-graph", label: "Model Graph", icon: Network },
+const ACTIVITIES = [
+  { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
+  { id: "connect",  label: "Connect",  icon: Plug,            group: "top" },
+  { id: "validate", label: "Validate", icon: ShieldCheck,     group: "top" },
+  { id: "explore",  label: "Explore",  icon: Compass,         group: "top" },
+  { id: "search",   label: "Search",   icon: Search,          group: "top" },
+  { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
 ];
 
 function ProjectSection() {
@@ -172,27 +181,31 @@ function FileSection() {
   );
 }
 
-function NavSection() {
-  const { activeView, setActiveView } = useUiStore();
+// ── Explore side panel: quick links to tools ──
+function ExploreSection() {
+  const { setBottomPanelTab } = useUiStore();
+  const items = [
+    { id: "impact",      label: "Impact Analysis",  icon: Network,    tab: "impact" },
+    { id: "diff",        label: "Diff & Gate",      icon: GitCompare, tab: "diff" },
+    { id: "model-graph", label: "Model Graph",      icon: Boxes,      tab: "model-graph" },
+    { id: "dictionary",  label: "Data Dictionary",  icon: BookOpen,   tab: "dictionary" },
+    { id: "import",      label: "Import Schema",    icon: Import,     tab: "import" },
+    { id: "history",     label: "History",           icon: FileText,   tab: "history" },
+  ];
 
   return (
     <div className="px-2 py-1">
-      <div className="px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
-        <LayoutDashboard size={12} />
-        Views
+      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+        Tools & Views
       </div>
-      <div className="ml-1 space-y-0.5">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+      <div className="space-y-0.5">
+        {items.map(({ id, label, icon: Icon, tab }) => (
           <button
             key={id}
-            onClick={() => setActiveView(id)}
-            className={`flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs transition-colors ${
-              activeView === id
-                ? "bg-bg-active text-text-accent"
-                : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-            }`}
+            onClick={() => setBottomPanelTab(tab)}
+            className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
           >
-            <Icon size={14} />
+            <Icon size={13} />
             {label}
           </button>
         ))}
@@ -201,76 +214,227 @@ function NavSection() {
   );
 }
 
+// ── Entity list in side panel ──
+function EntitySection() {
+  const { model } = useDiagramStore();
+  const entities = model?.entities || [];
+  const [expanded, setExpanded] = useState(true);
+
+  return (
+    <div className="px-2 py-1">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1.5 w-full px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
+      >
+        {expanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+        Entities
+        <span className="ml-auto text-[9px] font-normal">{entities.length}</span>
+      </button>
+      {expanded && (
+        <div className="min-h-[100px] max-h-[300px]">
+          <EntityListPanel />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Validate side panel ──
+function ValidateSection() {
+  const { setBottomPanelTab } = useUiStore();
+  const { model } = useDiagramStore();
+  const entityCount = model?.entities?.length || 0;
+  const relCount = model?.relationships?.length || 0;
+
+  return (
+    <div className="px-2 py-1 space-y-3">
+      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+        Model Quality
+      </div>
+      <div className="grid grid-cols-2 gap-2 px-1">
+        <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+          <div className="text-lg font-bold text-text-primary">{entityCount}</div>
+          <div className="text-[9px] text-text-muted">Entities</div>
+        </div>
+        <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+          <div className="text-lg font-bold text-text-primary">{relCount}</div>
+          <div className="text-[9px] text-text-muted">Relationships</div>
+        </div>
+      </div>
+      <div className="space-y-0.5">
+        <button onClick={() => setBottomPanelTab("validation")}
+          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
+          <ShieldCheck size={13} /> Run Validation
+        </button>
+        <button onClick={() => setBottomPanelTab("diff")}
+          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors">
+          <GitCompare size={13} /> Diff & Gate
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Search side panel ──
+function SearchSection() {
+  const { setBottomPanelTab } = useUiStore();
+
+  return (
+    <div className="px-2 py-1 space-y-2">
+      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+        Search
+      </div>
+      <button onClick={() => setBottomPanelTab("search")}
+        className="flex items-center gap-2 w-full px-2 py-2 rounded-md text-xs text-text-muted border border-border-primary bg-bg-primary hover:border-accent-blue transition-colors">
+        <Search size={12} />
+        <span>Search models, entities...</span>
+        <kbd className="ml-auto text-[9px] px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary font-mono">⌘K</kbd>
+      </button>
+    </div>
+  );
+}
+
+// ── Activity Bar (thin icon rail on the far left) ──
+function ActivityBar({ activeActivity, onSelect }) {
+  const topItems = ACTIVITIES.filter((a) => a.group === "top");
+  const bottomItems = ACTIVITIES.filter((a) => a.group === "bottom");
+
+  return (
+    <div className="w-12 min-w-[48px] bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 shrink-0">
+      {/* Logo */}
+      <div className="w-8 h-8 rounded-lg bg-accent-blue flex items-center justify-center mb-3 shrink-0">
+        <Database size={16} className="text-white" />
+      </div>
+
+      {/* Top activities */}
+      <div className="flex flex-col items-center gap-0.5 flex-1">
+        {topItems.map(({ id, label, icon: Icon }) => {
+          const isActive = activeActivity === id;
+          return (
+            <button
+              key={id}
+              onClick={() => onSelect(id)}
+              title={label}
+              className={`relative w-10 h-10 flex flex-col items-center justify-center rounded-lg transition-all ${
+                isActive
+                  ? "bg-bg-active text-accent-blue"
+                  : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
+              }`}
+            >
+              {isActive && (
+                <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
+              )}
+              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
+              <span className="text-[8px] mt-0.5 font-medium leading-none">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Bottom activities */}
+      <div className="flex flex-col items-center gap-0.5 shrink-0">
+        {bottomItems.map(({ id, label, icon: Icon }) => {
+          const isActive = activeActivity === id;
+          return (
+            <button
+              key={id}
+              onClick={() => onSelect(id)}
+              title={label}
+              className={`relative w-10 h-10 flex flex-col items-center justify-center rounded-lg transition-all ${
+                isActive
+                  ? "bg-bg-active text-accent-blue"
+                  : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
+              }`}
+            >
+              <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
+              <span className="text-[8px] mt-0.5 font-medium leading-none">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Side Panel (contextual content based on active activity) ──
+function SidePanel({ activity }) {
+  const panelTitle = ACTIVITIES.find((a) => a.id === activity)?.label || "Panel";
+  const { setSidePanelOpen } = useUiStore();
+
+  return (
+    <div className="w-[240px] min-w-[240px] bg-bg-secondary border-r border-border-primary flex flex-col overflow-hidden">
+      {/* Panel header */}
+      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-primary shrink-0">
+        <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">{panelTitle}</span>
+        <button
+          onClick={() => setSidePanelOpen(false)}
+          className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+          title="Close panel"
+        >
+          <PanelLeftClose size={14} />
+        </button>
+      </div>
+
+      {/* Panel content */}
+      <div className="flex-1 overflow-y-auto py-1 space-y-1">
+        {activity === "model" && (
+          <>
+            <ProjectSection />
+            <div className="mx-3 border-t border-border-primary" />
+            <FileSection />
+            <div className="mx-3 border-t border-border-primary" />
+            <EntitySection />
+          </>
+        )}
+        {activity === "connect" && (
+          <div className="px-3 py-2">
+            <p className="text-[10px] text-text-muted leading-relaxed">
+              Use the connector wizard in the main area to connect to databases and pull schemas as separate model files.
+            </p>
+          </div>
+        )}
+        {activity === "validate" && <ValidateSection />}
+        {activity === "explore" && <ExploreSection />}
+        {activity === "search" && <SearchSection />}
+        {activity === "settings" && (
+          <div className="px-3 py-2 space-y-2">
+            <p className="text-[10px] text-text-muted">Application settings</p>
+            <button
+              onClick={() => useUiStore.getState().toggleTheme()}
+              className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+            >
+              <Settings size={13} /> Toggle Theme
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Main Sidebar export: Activity Bar + Side Panel ──
 export default function Sidebar() {
-  const { sidebarOpen, toggleSidebar } = useUiStore();
+  const { activeActivity, setActiveActivity, sidePanelOpen, setSidePanelOpen } = useUiStore();
   const { loadProjects } = useWorkspaceStore();
 
   useEffect(() => {
     loadProjects();
   }, [loadProjects]);
 
-  if (!sidebarOpen) {
-    return (
-      <div className="w-10 bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 gap-2">
-        <button
-          onClick={toggleSidebar}
-          className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-          title="Open sidebar"
-        >
-          <PanelLeftOpen size={16} />
-        </button>
-        {NAV_ITEMS.map(({ id, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => { useUiStore.getState().setActiveView(id); }}
-            className="p-1.5 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-            title={id}
-          >
-            <Icon size={16} />
-          </button>
-        ))}
-      </div>
-    );
-  }
+  const handleActivitySelect = (id) => {
+    if (activeActivity === id) {
+      // Toggle side panel if clicking the same activity
+      setSidePanelOpen(!sidePanelOpen);
+    } else {
+      setActiveActivity(id);
+      setSidePanelOpen(true);
+    }
+  };
 
   return (
-    <div className="w-[260px] min-w-[260px] bg-bg-secondary border-r border-border-primary flex flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-3 py-3 border-b border-border-primary">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-accent-blue flex items-center justify-center">
-            <Database size={14} className="text-white" />
-          </div>
-          <span className="text-sm font-semibold text-text-primary">DataLex</span>
-        </div>
-        <button
-          onClick={toggleSidebar}
-          className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-          title="Collapse sidebar"
-        >
-          <PanelLeftClose size={16} />
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto py-1 space-y-1">
-        <ProjectSection />
-        <div className="mx-3 border-t border-border-primary" />
-        <FileSection />
-        <div className="mx-3 border-t border-border-primary" />
-        <NavSection />
-      </div>
-
-      {/* Footer */}
-      <div className="border-t border-border-primary px-3 py-2">
-        <button
-          onClick={() => useUiStore.getState().openModal("settings")}
-          className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors"
-        >
-          <Settings size={13} />
-          Settings
-        </button>
-      </div>
+    <div className="flex h-full">
+      <ActivityBar activeActivity={activeActivity} onSelect={handleActivitySelect} />
+      {sidePanelOpen && <SidePanel activity={activeActivity} />}
     </div>
   );
 }

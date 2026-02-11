@@ -1,33 +1,43 @@
 import { create } from "zustand";
 
-const useUiStore = create((set) => ({
-  // Sidebar
-  sidebarOpen: true,
-  sidebarWidth: 260,
+const useUiStore = create((set, get) => ({
+  // ── Activity bar (left icon rail) ──
+  // Primary activity determines what shows in the side panel AND the main content area
+  activeActivity: "model", // "model" | "connect" | "validate" | "explore" | "search" | "settings"
 
-  // Theme
-  theme: localStorage.getItem("dm_theme") || "light", // "light" | "dark"
+  // ── Side panel ──
+  sidePanelOpen: true,
+  sidePanelWidth: 260,
 
-  // Active view
-  activeView: "modeling", // modeling | validation | diff | impact
+  // ── Legacy aliases (keep for backward compat during migration) ──
+  get sidebarOpen() { return get().sidePanelOpen; },
+  get activeView() { return get().activeActivity; },
 
-  // Bottom panel
+  // ── Theme ──
+  theme: localStorage.getItem("dm_theme") || "light",
+
+  // ── Bottom panel (slimmed: only contextual panels) ──
   bottomPanelOpen: true,
-  bottomPanelTab: "properties", // properties | validation | diff | impact | history
+  bottomPanelTab: "properties", // "properties" | "validation" | "history"
 
-  // Right panel (entity properties)
+  // ── Right panel (entity properties) ──
   rightPanelOpen: false,
 
-  // Diagram fullscreen
+  // ── Diagram fullscreen ──
   diagramFullscreen: false,
 
-  // Modals
-  activeModal: null, // "addProject" | "newFile" | "settings" | null
+  // ── Command palette ──
+  commandPaletteOpen: false,
 
-  // Notifications
+  // ── Modals ──
+  activeModal: null,
+
+  // ── Notifications ──
   toasts: [],
 
-  // --- Actions ---
+  // ── Actions ──
+  setActiveActivity: (activity) => set({ activeActivity: activity }),
+
   toggleTheme: () => set((s) => {
     const next = s.theme === "light" ? "dark" : "light";
     localStorage.setItem("dm_theme", next);
@@ -35,10 +45,12 @@ const useUiStore = create((set) => ({
     return { theme: next };
   }),
 
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-  setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  toggleSidebar: () => set((s) => ({ sidePanelOpen: !s.sidePanelOpen })),
+  setSidebarOpen: (open) => set({ sidePanelOpen: open }),
+  setSidePanelOpen: (open) => set({ sidePanelOpen: open }),
 
-  setActiveView: (view) => set({ activeView: view }),
+  // Legacy alias
+  setActiveView: (view) => set({ activeActivity: view }),
 
   toggleBottomPanel: () => set((s) => ({ bottomPanelOpen: !s.bottomPanelOpen })),
   setBottomPanelTab: (tab) => set({ bottomPanelTab: tab, bottomPanelOpen: true }),
@@ -47,6 +59,9 @@ const useUiStore = create((set) => ({
   toggleDiagramFullscreen: () => set((s) => ({ diagramFullscreen: !s.diagramFullscreen })),
   setDiagramFullscreen: (open) => set({ diagramFullscreen: open }),
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+
+  toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
+  setCommandPaletteOpen: (open) => set({ commandPaletteOpen: open }),
 
   openModal: (modal) => set({ activeModal: modal }),
   closeModal: () => set({ activeModal: null }),

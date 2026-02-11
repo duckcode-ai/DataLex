@@ -13,6 +13,16 @@ const LAYOUT_OPTIONS = {
   "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
 };
 
+const FORCE_LAYOUT_OPTIONS = {
+  "elk.algorithm": "force",
+  "elk.force.temperature": "0.001",
+  "elk.force.iterations": "300",
+  "elk.spacing.nodeNode": "60",
+  "elk.padding": "[top=50,left=50,bottom=50,right=50]",
+};
+
+const LARGE_GRAPH_THRESHOLD = 200;
+
 const SUBJECT_AREA_COLORS = [
   { bg: "rgba(59,130,246,0.06)", border: "rgba(59,130,246,0.25)", text: "#2563eb" },
   { bg: "rgba(16,185,129,0.06)", border: "rgba(16,185,129,0.25)", text: "#059669" },
@@ -53,10 +63,14 @@ export async function layoutWithElk(nodes, edges, options = {}) {
     }
   }
 
+  const isLargeGraph = nodes.length > LARGE_GRAPH_THRESHOLD;
+  const defaultWidth = isLargeGraph ? 160 : 300;
+  const defaultHeight = isLargeGraph ? 60 : 200;
+
   const elkNodes = nodes.map((node) => ({
     id: node.id,
-    width: node.measured?.width || 300,
-    height: node.measured?.height || 200,
+    width: node.measured?.width || defaultWidth,
+    height: node.measured?.height || defaultHeight,
   }));
 
   const elkEdges = edges.map((edge) => ({
@@ -104,14 +118,20 @@ export async function layoutWithElk(nodes, edges, options = {}) {
     children = elkNodes;
   }
 
+  const baseOptions = isLargeGraph
+    ? { ...FORCE_LAYOUT_OPTIONS, "elk.spacing.nodeNode": String(nodeSpacing) }
+    : {
+        ...LAYOUT_OPTIONS,
+        "elk.direction": direction,
+        "elk.spacing.nodeNode": String(nodeSpacing),
+        "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
+      };
+
   const graph = {
     id: "root",
     layoutOptions: {
-      ...LAYOUT_OPTIONS,
-      "elk.direction": direction,
-      "elk.spacing.nodeNode": String(nodeSpacing),
-      "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
-      ...(subjectAreas.size > 1 ? {
+      ...baseOptions,
+      ...(subjectAreas.size > 1 && !isLargeGraph ? {
         "elk.hierarchyHandling": "INCLUDE_CHILDREN",
         "elk.spacing.componentComponent": String(Math.round(100 * spacingMultiplier)),
       } : {}),

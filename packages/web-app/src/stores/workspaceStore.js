@@ -107,6 +107,41 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
+  loadMultipleImportedYaml: (files) => {
+    if (!files || files.length === 0) return;
+    const docs = files.map((f, i) => ({
+      id: `imported-${Date.now()}-${i}`,
+      name: f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`,
+      content: f.yaml,
+    }));
+    const { offlineMode, localDocuments, openTabs } = get();
+    const existingIds = new Set(docs.map((d) => d.name));
+    const filteredTabs = openTabs.filter((t) => !existingIds.has(t.name));
+    const newTabs = [...filteredTabs, ...docs];
+    const activeDoc = docs[0];
+    if (offlineMode) {
+      const existingDocs = localDocuments.filter((d) => !existingIds.has(d.name));
+      const updated = [...existingDocs, ...docs];
+      set({
+        localDocuments: updated,
+        activeFile: activeDoc,
+        activeFileContent: activeDoc.content,
+        originalContent: activeDoc.content,
+        isDirty: false,
+        openTabs: newTabs,
+      });
+      localStorage.setItem("dm_offline_docs", JSON.stringify(updated));
+    } else {
+      set({
+        activeFile: activeDoc,
+        activeFileContent: activeDoc.content,
+        originalContent: activeDoc.content,
+        isDirty: false,
+        openTabs: newTabs,
+      });
+    }
+  },
+
   saveOfflineDocs: () => {
     const { localDocuments } = get();
     localStorage.setItem("dm_offline_docs", JSON.stringify(localDocuments));

@@ -35,6 +35,8 @@ import {
   AlertCircle,
   Search,
   Database,
+  BookOpen,
+  Import,
 } from "lucide-react";
 
 const BOTTOM_TABS = [
@@ -43,9 +45,8 @@ const BOTTOM_TABS = [
   { id: "diff", label: "Diff & Gate", icon: GitCompare },
   { id: "impact", label: "Impact", icon: Network },
   { id: "model-graph", label: "Model Graph", icon: Network },
-  { id: "dictionary", label: "Dictionary", icon: Columns3 },
-  { id: "import", label: "Import", icon: Plus },
-  { id: "connectors", label: "Connectors", icon: Database },
+  { id: "dictionary", label: "Dictionary", icon: BookOpen },
+  { id: "import", label: "Import", icon: Import },
   { id: "search", label: "Search", icon: Search },
   { id: "history", label: "History", icon: Clock },
 ];
@@ -187,8 +188,6 @@ function BottomPanelContent({ tab }) {
       return <DictionaryPanel />;
     case "import":
       return <ImportPanel />;
-    case "connectors":
-      return <ConnectorsPanel />;
     case "search":
       return <GlobalSearchPanel />;
     case "history":
@@ -225,8 +224,89 @@ function ToastContainer() {
   );
 }
 
+// ── Primary content area for "connect" activity ──
+function ConnectView() {
+  return (
+    <div className="h-full flex flex-col bg-bg-surface">
+      <div className="flex items-center px-4 py-2.5 border-b border-border-primary bg-bg-secondary/50 shrink-0">
+        <Database size={14} className="text-accent-blue mr-2" />
+        <span className="text-xs font-semibold text-text-primary">Database Connectors</span>
+        <span className="text-[10px] text-text-muted ml-2">Connect to databases and pull schemas as separate model files</span>
+      </div>
+      <div className="flex-1 overflow-hidden">
+        <ConnectorsPanel />
+      </div>
+    </div>
+  );
+}
+
+// ── Primary content area for "model" activity (editor + diagram) ──
+function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel }) {
+  return (
+    <Allotment vertical>
+      {/* Top: Editor + Diagram split */}
+      <Allotment.Pane>
+        <Allotment>
+          {/* YAML Editor */}
+          <Allotment.Pane minSize={250} preferredSize={500}>
+            <div className="h-full flex flex-col bg-bg-surface">
+              <div className="flex items-center px-3 py-1 border-b border-border-primary bg-bg-secondary/50">
+                <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">YAML Editor</span>
+              </div>
+              <YamlEditor />
+            </div>
+          </Allotment.Pane>
+
+          {/* Diagram */}
+          <Allotment.Pane minSize={300}>
+            <div className="h-full bg-bg-surface">
+              <DiagramCanvas />
+            </div>
+          </Allotment.Pane>
+        </Allotment>
+      </Allotment.Pane>
+
+      {/* Bottom panel */}
+      {bottomPanelOpen && (
+        <Allotment.Pane minSize={120} preferredSize={260} maxSize={500}>
+          <div className="h-full flex flex-col bg-bg-surface border-t border-border-primary">
+            {/* Bottom panel tabs */}
+            <div className="flex items-center border-b border-border-primary bg-bg-secondary/30 shrink-0 overflow-x-auto">
+              {BOTTOM_TABS.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => setBottomPanelTab(id)}
+                  className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${
+                    bottomPanelTab === id
+                      ? "border-accent-blue text-text-accent"
+                      : "border-transparent text-text-muted hover:text-text-secondary hover:bg-bg-hover"
+                  }`}
+                >
+                  <Icon size={11} />
+                  {label}
+                </button>
+              ))}
+              <button
+                onClick={toggleBottomPanel}
+                className="ml-auto mr-2 p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors shrink-0"
+                title="Close panel (⌘J)"
+              >
+                <X size={12} />
+              </button>
+            </div>
+            {/* Panel content */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <BottomPanelContent tab={bottomPanelTab} />
+            </div>
+          </div>
+        </Allotment.Pane>
+      )}
+    </Allotment>
+  );
+}
+
 export default function App() {
-  const { activeModal, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel } = useUiStore();
+  const { activeModal, activeActivity, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel } = useUiStore();
   const { error, clearError } = useWorkspaceStore();
   const { selectedEntityId } = useDiagramStore();
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -274,6 +354,16 @@ export default function App() {
         useUiStore.getState().toggleTheme();
         return;
       }
+      // ⌘+1..5 — Switch activities
+      if (meta && e.key >= "1" && e.key <= "5") {
+        e.preventDefault();
+        const activities = ["model", "connect", "validate", "explore", "search"];
+        const idx = parseInt(e.key) - 1;
+        if (idx < activities.length) {
+          useUiStore.getState().setActiveActivity(activities[idx]);
+        }
+        return;
+      }
       // ? — Show shortcuts (only when not in input)
       if (!isInput && e.key === "?") {
         setShowShortcuts((v) => !v);
@@ -304,10 +394,14 @@ export default function App() {
     }
   }, [error, clearError]);
 
+  // Determine which primary view to show
+  const showModelView = activeActivity === "model" || activeActivity === "validate" || activeActivity === "explore" || activeActivity === "search" || activeActivity === "settings";
+  const showConnectView = activeActivity === "connect";
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <div className="flex flex-1 min-h-0">
-        {/* Sidebar */}
+        {/* Sidebar: Activity Bar + Side Panel */}
         <Sidebar />
 
         {/* Main content */}
@@ -315,67 +409,17 @@ export default function App() {
           {/* Top bar with tabs */}
           <TopBar />
 
-          {/* Main workspace area */}
+          {/* Primary view area */}
           <div className="flex-1 min-h-0">
-            <Allotment vertical>
-              {/* Top: Editor + Diagram split */}
-              <Allotment.Pane>
-                <Allotment>
-                  {/* YAML Editor */}
-                  <Allotment.Pane minSize={250} preferredSize={500}>
-                    <div className="h-full flex flex-col bg-bg-surface">
-                      <div className="flex items-center px-3 py-1 border-b border-border-primary bg-bg-secondary/50">
-                        <span className="text-[10px] text-text-muted uppercase tracking-wider font-semibold">YAML Editor</span>
-                      </div>
-                      <YamlEditor />
-                    </div>
-                  </Allotment.Pane>
-
-                  {/* Diagram */}
-                  <Allotment.Pane minSize={300}>
-                    <div className="h-full bg-bg-surface">
-                      <DiagramCanvas />
-                    </div>
-                  </Allotment.Pane>
-                </Allotment>
-              </Allotment.Pane>
-
-              {/* Bottom panel */}
-              {bottomPanelOpen && (
-                <Allotment.Pane minSize={120} preferredSize={260} maxSize={500}>
-                  <div className="h-full flex flex-col bg-bg-surface border-t border-border-primary">
-                    {/* Bottom panel tabs */}
-                    <div className="flex items-center border-b border-border-primary bg-bg-secondary/30 shrink-0">
-                      {BOTTOM_TABS.map(({ id, label, icon: Icon }) => (
-                        <button
-                          key={id}
-                          onClick={() => setBottomPanelTab(id)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium border-b-2 transition-colors ${
-                            bottomPanelTab === id
-                              ? "border-accent-blue text-text-accent"
-                              : "border-transparent text-text-muted hover:text-text-secondary hover:bg-bg-hover"
-                          }`}
-                        >
-                          <Icon size={12} />
-                          {label}
-                        </button>
-                      ))}
-                      <button
-                        onClick={toggleBottomPanel}
-                        className="ml-auto mr-2 p-1 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-                        title="Close panel"
-                      >
-                        <X size={12} />
-                      </button>
-                    </div>
-                    {/* Panel content */}
-                    <div className="flex-1 min-h-0 overflow-hidden">
-                      <BottomPanelContent tab={bottomPanelTab} />
-                    </div>
-                  </div>
-                </Allotment.Pane>
-              )}
-            </Allotment>
+            {showConnectView && <ConnectView />}
+            {showModelView && (
+              <ModelView
+                bottomPanelOpen={bottomPanelOpen}
+                bottomPanelTab={bottomPanelTab}
+                setBottomPanelTab={setBottomPanelTab}
+                toggleBottomPanel={toggleBottomPanel}
+              />
+            )}
           </div>
 
           {/* Status bar */}
