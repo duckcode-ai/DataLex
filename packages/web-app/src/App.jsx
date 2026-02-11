@@ -46,7 +46,6 @@ const BOTTOM_TABS = [
   { id: "impact", label: "Impact", icon: Network },
   { id: "model-graph", label: "Model Graph", icon: Network },
   { id: "dictionary", label: "Dictionary", icon: BookOpen },
-  { id: "search", label: "Search", icon: Search },
   { id: "history", label: "History", icon: Clock },
 ];
 
@@ -185,8 +184,6 @@ function BottomPanelContent({ tab }) {
       return <ModelGraphPanel />;
     case "dictionary":
       return <DictionaryPanel />;
-    case "search":
-      return <GlobalSearchPanel />;
     case "history":
       return <HistoryPanel />;
     default:
@@ -243,6 +240,17 @@ function ImportView() {
     <div className="h-full flex flex-col bg-bg-surface">
       <div className="flex-1 overflow-hidden">
         <ImportPanel />
+      </div>
+    </div>
+  );
+}
+
+// ── Primary content area for "search" activity ──
+function SearchView() {
+  return (
+    <div className="h-full flex flex-col bg-bg-surface">
+      <div className="flex-1 overflow-hidden">
+        <GlobalSearchPanel />
       </div>
     </div>
   );
@@ -341,7 +349,7 @@ export default function App() {
       // ⌘+K — Global search
       if (meta && e.key === "k") {
         e.preventDefault();
-        setBottomPanelTab("search");
+        useUiStore.getState().setActiveActivity("search");
         return;
       }
       // ⌘+\ — Toggle sidebar
@@ -403,9 +411,10 @@ export default function App() {
   }, [error, clearError]);
 
   // Determine which primary view to show
-  const showModelView = activeActivity === "model" || activeActivity === "explore" || activeActivity === "search" || activeActivity === "settings";
+  const showModelView = activeActivity === "model" || activeActivity === "explore" || activeActivity === "settings";
   const showConnectView = activeActivity === "connect";
   const showImportView = activeActivity === "import";
+  const showSearchView = activeActivity === "search";
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
@@ -422,6 +431,7 @@ export default function App() {
           <div className="flex-1 min-h-0">
             {showConnectView && <ConnectView />}
             {showImportView && <ImportView />}
+            {showSearchView && <SearchView />}
             {showModelView && (
               <ModelView
                 bottomPanelOpen={bottomPanelOpen}

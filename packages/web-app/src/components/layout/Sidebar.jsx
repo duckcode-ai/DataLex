@@ -267,19 +267,19 @@ function EntitySection() {
 
 // ── Search side panel ──
 function SearchSection() {
-  const { setBottomPanelTab } = useUiStore();
-
   return (
     <div className="px-2 py-1 space-y-2">
       <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
         Search
       </div>
-      <button onClick={() => setBottomPanelTab("search")}
-        className="flex items-center gap-2 w-full px-2 py-2 rounded-md text-xs text-text-muted border border-border-primary bg-bg-primary hover:border-accent-blue transition-colors">
-        <Search size={12} />
-        <span>Search models, entities...</span>
-        <kbd className="ml-auto text-[9px] px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary font-mono">⌘K</kbd>
-      </button>
+      <div className="px-1">
+        <p className="text-[10px] text-text-muted leading-relaxed">
+          Use the search panel to find entities, fields, tags, descriptions, and glossary terms across your model.
+        </p>
+        <p className="text-[10px] text-text-muted leading-relaxed mt-1">
+          Shortcut: <kbd className="text-[9px] px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary font-mono">⌘K</kbd>
+        </p>
+      </div>
     </div>
   );
 }
