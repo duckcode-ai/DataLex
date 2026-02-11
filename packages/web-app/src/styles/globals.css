@@ -77,21 +77,39 @@
   }
 }
 
+/* Dark theme overrides */
+[data-theme="dark"] {
+  --color-bg-primary: #0f172a;
+  --color-bg-secondary: #1e293b;
+  --color-bg-tertiary: #334155;
+  --color-bg-surface: #1e293b;
+  --color-bg-hover: #334155;
+  --color-bg-active: #1e3a5f;
+  --color-bg-card: #1e293b;
+  --color-border-primary: #334155;
+  --color-border-secondary: #475569;
+  --color-border-accent: #3b82f6;
+  --color-text-primary: #f1f5f9;
+  --color-text-secondary: #cbd5e1;
+  --color-text-muted: #64748b;
+  --color-text-accent: #60a5fa;
+}
+
 /* CodeMirror light theme overrides */
 .cm-editor {
   height: 100% !important;
   font-size: 13px;
-  background: #ffffff !important;
+  background: var(--color-bg-primary) !important;
 }
 
 .cm-editor .cm-gutters {
-  background: #f8fafc !important;
-  border-right: 1px solid #e2e8f0 !important;
-  color: #94a3b8 !important;
+  background: var(--color-bg-secondary) !important;
+  border-right: 1px solid var(--color-border-primary) !important;
+  color: var(--color-text-muted) !important;
 }
 
 .cm-editor .cm-content {
-  color: #0f172a !important;
+  color: var(--color-text-primary) !important;
 }
 
 .cm-editor .cm-activeLine {
@@ -112,34 +130,43 @@
 
 /* React Flow overrides */
 .react-flow__background {
-  background: #f8fafc !important;
+  background: var(--color-bg-secondary) !important;
 }
 
 .react-flow__minimap {
-  background: #ffffff !important;
-  border: 1px solid #e2e8f0 !important;
+  background: var(--color-bg-primary) !important;
+  border: 1px solid var(--color-border-primary) !important;
   border-radius: 8px !important;
 }
 
 .react-flow__controls {
-  border: 1px solid #e2e8f0 !important;
+  border: 1px solid var(--color-border-primary) !important;
   border-radius: 8px !important;
   overflow: hidden;
 }
 
 .react-flow__controls-button {
-  background: #ffffff !important;
-  border-bottom: 1px solid #e2e8f0 !important;
-  fill: #475569 !important;
+  background: var(--color-bg-primary) !important;
+  border-bottom: 1px solid var(--color-border-primary) !important;
+  fill: var(--color-text-secondary) !important;
 }
 
 .react-flow__controls-button:hover {
-  background: #f1f5f9 !important;
+  background: var(--color-bg-hover) !important;
+}
+
+/* Dark mode entity node overrides */
+[data-theme="dark"] .react-flow__node {
+  color: var(--color-text-primary);
+}
+
+[data-theme="dark"] .react-flow__edge-text {
+  fill: var(--color-text-secondary) !important;
 }
 
 /* Allotment overrides */
 .sash-container .sash {
-  background: #e2e8f0 !important;
+  background: var(--color-border-primary) !important;
 }
 
 .sash-container .sash:hover {

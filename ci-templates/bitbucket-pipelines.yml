@@ -1,0 +1,83 @@
+# DataLex Model Quality — Bitbucket Pipelines
+# Copy this file to bitbucket-pipelines.yml in your repository.
+#
+# Prerequisites:
+#   - Python 3.9+ available in the CI image
+#   - DataLex CLI available (pip install -r requirements.txt)
+#   - Model files in **/*.model.yaml
+#   - Policy pack in policies/default.policy.yaml
+
+image: python:3.11-slim
+
+definitions:
+  steps:
+    - step: &validate
+        name: Validate Models
+        caches:
+          - pip
+        script:
+          - pip install --upgrade pip
+          - pip install -r requirements.txt
+          - ./dm validate-all --schema schemas/model.schema.json
+
+    - step: &policy-check
+        name: Policy Check
+        caches:
+          - pip
+        script:
+          - pip install --upgrade pip
+          - pip install -r requirements.txt
+          - |
+            for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
+              echo "Policy check: ${model}"
+              ./dm policy-check "${model}" \
+                --policy policies/default.policy.yaml \
+                --schema schemas/model.schema.json
+            done
+
+    - step: &breaking-change-gate
+        name: Breaking Change Gate
+        caches:
+          - pip
+        script:
+          - pip install --upgrade pip
+          - pip install -r requirements.txt
+          - apt-get update && apt-get install -y git
+          - |
+            set -euo pipefail
+            git fetch origin "${BITBUCKET_PR_DESTINATION_BRANCH}" --depth=1
+
+            changed_files=$(git diff --name-only "origin/${BITBUCKET_PR_DESTINATION_BRANCH}"...HEAD -- '*.model.yaml')
+
+            if [ -z "$changed_files" ]; then
+              echo "No changed .model.yaml files."
+              exit 0
+            fi
+
+            echo "$changed_files" | while IFS= read -r model_path; do
+              echo "Checking ${model_path}"
+              if git cat-file -e "origin/${BITBUCKET_PR_DESTINATION_BRANCH}:${model_path}" 2>/dev/null; then
+                git show "origin/${BITBUCKET_PR_DESTINATION_BRANCH}:${model_path}" > /tmp/base-model.yaml
+                if [ -f "${model_path}" ]; then
+                  ./dm gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
+                else
+                  echo "Deleted model file '${model_path}' is treated as breaking."
+                  exit 2
+                fi
+              else
+                if [ -f "${model_path}" ]; then
+                  ./dm validate "${model_path}" --schema schemas/model.schema.json
+                fi
+              fi
+            done
+
+pipelines:
+  default:
+    - step: *validate
+    - step: *policy-check
+
+  pull-requests:
+    '**':
+      - step: *validate
+      - step: *policy-check
+      - step: *breaking-change-gate

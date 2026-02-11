@@ -2,7 +2,11 @@ import express from "express";
 import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat } from "fs/promises";
 import { join, relative, extname, basename } from "path";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, writeFileSync, unlinkSync, rmdirSync } from "fs";
+import { execFileSync } from "child_process";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const yaml = require("js-yaml");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -322,6 +326,201 @@ app.get("/api/projects/:id/model-graph", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Import schema files (SQL, DBML, Spark Schema)
+app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
+  try {
+    const { format, content, filename, modelName } = req.body;
+    if (!format || !content) {
+      return res.status(400).json({ error: "Missing format or content" });
+    }
+
+    const formatMap = {
+      sql: "sql",
+      dbml: "dbml",
+      "spark-schema": "spark-schema",
+    };
+    const importFormat = formatMap[format];
+    if (!importFormat) {
+      return res.status(400).json({ error: `Unsupported format: ${format}. Supported: sql, dbml, spark-schema` });
+    }
+
+    // Write content to temp file
+    const tmpDir = join(REPO_ROOT, ".tmp-import");
+    mkdirSync(tmpDir, { recursive: true });
+    const ext = { sql: ".sql", dbml: ".dbml", "spark-schema": ".json" }[format];
+    const tmpFile = join(tmpDir, `import_${Date.now()}${ext}`);
+    writeFileSync(tmpFile, content, "utf-8");
+
+    const args = [
+      join(REPO_ROOT, "dm"),
+      "import",
+      importFormat,
+      tmpFile,
+      "--model-name",
+      modelName || "imported_model",
+    ];
+
+    let yamlOutput;
+    try {
+      yamlOutput = execFileSync("python3", args, {
+        encoding: "utf-8",
+        timeout: 30000,
+      });
+    } finally {
+      try { unlinkSync(tmpFile); } catch (_) {}
+      try { rmdirSync(tmpDir); } catch (_) {}
+    }
+    let model;
+    try {
+      // The output may contain issue lines before the YAML
+      const yamlStart = yamlOutput.indexOf("model:");
+      const yamlText = yamlStart >= 0 ? yamlOutput.substring(yamlStart) : yamlOutput;
+      model = yaml.load(yamlText);
+    } catch (_) {
+      model = null;
+    }
+
+    const entities = model?.entities || [];
+    const relationships = model?.relationships || [];
+    const indexes = model?.indexes || [];
+    const fieldCount = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
+
+    res.json({
+      success: true,
+      entityCount: entities.length,
+      fieldCount,
+      relationshipCount: relationships.length,
+      indexCount: indexes.length,
+      yaml: yamlOutput.indexOf("model:") >= 0 ? yamlOutput.substring(yamlOutput.indexOf("model:")) : yamlOutput,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper: build connection args array from request params
+function buildConnArgs(params) {
+  const args = [];
+  if (params.host) { args.push("--host", params.host); }
+  if (params.port) { args.push("--port", String(params.port)); }
+  if (params.database) { args.push("--database", params.database); }
+  if (params.db_schema) { args.push("--db-schema", params.db_schema); }
+  if (params.user) { args.push("--user", params.user); }
+  if (params.password) { args.push("--password", params.password); }
+  if (params.warehouse) { args.push("--warehouse", params.warehouse); }
+  if (params.project) { args.push("--project", params.project); }
+  if (params.dataset) { args.push("--dataset", params.dataset); }
+  if (params.catalog) { args.push("--catalog", params.catalog); }
+  if (params.token) { args.push("--token", params.token); }
+  return args;
+}
+
+// List available database connectors
+app.get("/api/connectors", (req, res) => {
+  try {
+    const output = execFileSync("python3", [
+      join(REPO_ROOT, "dm"), "connectors", "--output-json",
+    ], { encoding: "utf-8", timeout: 10000 });
+    const connectors = JSON.parse(output);
+    res.json(connectors);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Test database connection
+app.post("/api/connectors/test", express.json(), async (req, res) => {
+  try {
+    const { connector, ...params } = req.body;
+    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+
+    const args = [join(REPO_ROOT, "dm"), "pull", connector, "--test", ...buildConnArgs(params)];
+
+    try {
+      const output = execFileSync("python3", args, { encoding: "utf-8", timeout: 30000 });
+      const ok = output.startsWith("OK");
+      res.json({ ok, message: output.trim() });
+    } catch (execErr) {
+      const stderr = execErr.stderr || execErr.message;
+      res.json({ ok: false, message: stderr.trim() });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// List schemas/datasets in a database
+app.post("/api/connectors/schemas", express.json(), async (req, res) => {
+  try {
+    const { connector, ...params } = req.body;
+    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+
+    const args = [join(REPO_ROOT, "dm"), "schemas", connector, "--output-json", ...buildConnArgs(params)];
+    const output = execFileSync("python3", args, { encoding: "utf-8", timeout: 30000 });
+    const schemas = JSON.parse(output);
+    res.json(schemas);
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: stderr });
+  }
+});
+
+// List tables in a schema
+app.post("/api/connectors/tables", express.json(), async (req, res) => {
+  try {
+    const { connector, ...params } = req.body;
+    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+
+    const args = [join(REPO_ROOT, "dm"), "tables", connector, "--output-json", ...buildConnArgs(params)];
+    const output = execFileSync("python3", args, { encoding: "utf-8", timeout: 30000 });
+    const tables = JSON.parse(output);
+    res.json(tables);
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: stderr });
+  }
+});
+
+// Pull schema from database
+app.post("/api/connectors/pull", express.json(), async (req, res) => {
+  try {
+    const { connector, model_name, tables, ...params } = req.body;
+    if (!connector) return res.status(400).json({ error: "Missing connector type" });
+
+    const args = [join(REPO_ROOT, "dm"), "pull", connector, ...buildConnArgs(params)];
+    if (model_name) { args.push("--model-name", model_name); }
+    if (tables) {
+      const tableList = typeof tables === "string" ? tables.split(",").map(t => t.trim()).filter(Boolean) : tables;
+      if (tableList.length) { args.push("--tables", ...tableList); }
+    }
+
+    const output = execFileSync("python3", args, { encoding: "utf-8", timeout: 60000 });
+
+    // Parse YAML output
+    const yamlStart = output.indexOf("model:");
+    const yamlText = yamlStart >= 0 ? output.substring(yamlStart) : output;
+    let model;
+    try { model = yaml.load(yamlText); } catch (_) { model = null; }
+
+    const entities = model?.entities || [];
+    const relationships = model?.relationships || [];
+    const indexes = model?.indexes || [];
+    const fieldCount = entities.reduce((sum, e) => sum + (e.fields || []).length, 0);
+
+    res.json({
+      success: true,
+      entityCount: entities.length,
+      fieldCount,
+      relationshipCount: relationships.length,
+      indexCount: indexes.length,
+      yaml: yamlText,
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: stderr });
   }
 });
 

@@ -58,13 +58,15 @@ function ProjectSection() {
 
   return (
     <div className="px-2 py-1">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <FolderOpen size={12} />
-        Projects
+      <div className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 flex-1 min-w-0 hover:text-text-secondary transition-colors"
+        >
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <FolderOpen size={12} />
+          Projects
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); openModal("addProject"); }}
           className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
@@ -72,7 +74,7 @@ function ProjectSection() {
         >
           <FolderPlus size={12} />
         </button>
-      </button>
+      </div>
 
       {expanded && (
         <div className="ml-1 space-y-0.5">

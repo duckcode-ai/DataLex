@@ -1,0 +1,155 @@
+# DataLex PR Comment Bot — GitHub Actions
+# Automatically posts diff summary and policy results as a PR comment.
+# Copy this file to .github/workflows/datalex-pr-comment.yml in your repository.
+#
+# Required permissions: pull-requests: write
+# Required: GITHUB_TOKEN (automatically available in GitHub Actions)
+
+name: DataLex PR Comment
+
+on:
+  pull_request:
+    paths:
+      - '**/*.model.yaml'
+
+permissions:
+  pull-requests: write
+
+jobs:
+  pr-comment:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install DataLex
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt
+
+      - name: Generate PR report
+        id: report
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_REF="origin/${{ github.base_ref }}"
+          git fetch origin "${{ github.base_ref }}" --depth=1
+
+          REPORT_FILE="/tmp/datalex-pr-report.md"
+          echo "## 📊 DataLex Model Quality Report" > "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+
+          mapfile -t changed_files < <(git diff --name-only "${BASE_REF}"...HEAD -- '*.model.yaml')
+
+          if [ "${#changed_files[@]}" -eq 0 ]; then
+            echo "No changed model files detected." >> "$REPORT_FILE"
+            echo "report_path=${REPORT_FILE}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "**Changed models:** ${#changed_files[@]}" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+
+          TOTAL_ERRORS=0
+          TOTAL_WARNINGS=0
+          HAS_BREAKING=false
+
+          for model_path in "${changed_files[@]}"; do
+            echo "### \`${model_path}\`" >> "$REPORT_FILE"
+            echo "" >> "$REPORT_FILE"
+
+            # Validation
+            if [ -f "${model_path}" ]; then
+              VAL_OUTPUT=$(./dm validate "${model_path}" --schema schemas/model.schema.json 2>&1) || true
+              if echo "$VAL_OUTPUT" | grep -q "\[ERROR\]"; then
+                echo "❌ **Validation errors found**" >> "$REPORT_FILE"
+                echo '```' >> "$REPORT_FILE"
+                echo "$VAL_OUTPUT" | grep "\[ERROR\]\|\[WARN\]" >> "$REPORT_FILE"
+                echo '```' >> "$REPORT_FILE"
+                TOTAL_ERRORS=$((TOTAL_ERRORS + 1))
+              else
+                echo "✅ Validation passed" >> "$REPORT_FILE"
+              fi
+
+              # Policy check
+              POLICY_OUTPUT=$(./dm policy-check "${model_path}" \
+                --policy policies/default.policy.yaml \
+                --schema schemas/model.schema.json \
+                --output-json 2>&1) || true
+              POLICY_ERRORS=$(echo "$POLICY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}).get('error_count',0))" 2>/dev/null || echo "0")
+              POLICY_WARNINGS=$(echo "$POLICY_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}).get('warning_count',0))" 2>/dev/null || echo "0")
+
+              if [ "$POLICY_ERRORS" -gt 0 ]; then
+                echo "❌ **Policy: ${POLICY_ERRORS} error(s), ${POLICY_WARNINGS} warning(s)**" >> "$REPORT_FILE"
+                TOTAL_ERRORS=$((TOTAL_ERRORS + POLICY_ERRORS))
+              elif [ "$POLICY_WARNINGS" -gt 0 ]; then
+                echo "⚠️ **Policy: ${POLICY_WARNINGS} warning(s)**" >> "$REPORT_FILE"
+              else
+                echo "✅ Policy check passed" >> "$REPORT_FILE"
+              fi
+              TOTAL_WARNINGS=$((TOTAL_WARNINGS + POLICY_WARNINGS))
+            fi
+
+            # Diff / breaking changes
+            if git cat-file -e "${BASE_REF}:${model_path}" 2>/dev/null && [ -f "${model_path}" ]; then
+              git show "${BASE_REF}:${model_path}" > /tmp/base-model.yaml
+              DIFF_OUTPUT=$(./dm diff /tmp/base-model.yaml "${model_path}" 2>&1) || true
+              BREAKING=$(echo "$DIFF_OUTPUT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('has_breaking_changes', False))" 2>/dev/null || echo "False")
+              SUMMARY=$(echo "$DIFF_OUTPUT" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+s = d.get('summary', {})
+parts = []
+if s.get('added_entities', 0): parts.append(f\"+{s['added_entities']} entities\")
+if s.get('removed_entities', 0): parts.append(f\"-{s['removed_entities']} entities\")
+if s.get('changed_entities', 0): parts.append(f\"~{s['changed_entities']} changed\")
+if s.get('added_relationships', 0): parts.append(f\"+{s['added_relationships']} rels\")
+if s.get('removed_relationships', 0): parts.append(f\"-{s['removed_relationships']} rels\")
+bc = s.get('breaking_change_count', 0)
+if bc: parts.append(f\"⚠️ {bc} breaking\")
+print(', '.join(parts) if parts else 'No changes')
+" 2>/dev/null || echo "Unable to parse diff")
+
+              echo "📋 **Diff:** ${SUMMARY}" >> "$REPORT_FILE"
+
+              if [ "$BREAKING" = "True" ]; then
+                echo "🚨 **Breaking changes detected!**" >> "$REPORT_FILE"
+                HAS_BREAKING=true
+              fi
+            elif [ ! -f "${model_path}" ]; then
+              echo "🗑️ **Model deleted** (breaking change)" >> "$REPORT_FILE"
+              HAS_BREAKING=true
+            else
+              echo "🆕 **New model file**" >> "$REPORT_FILE"
+            fi
+
+            echo "" >> "$REPORT_FILE"
+          done
+
+          # Summary
+          echo "---" >> "$REPORT_FILE"
+          echo "" >> "$REPORT_FILE"
+          if [ "$TOTAL_ERRORS" -gt 0 ] || [ "$HAS_BREAKING" = true ]; then
+            echo "### ❌ Result: Issues Found" >> "$REPORT_FILE"
+          elif [ "$TOTAL_WARNINGS" -gt 0 ]; then
+            echo "### ⚠️ Result: Passed with Warnings" >> "$REPORT_FILE"
+          else
+            echo "### ✅ Result: All Checks Passed" >> "$REPORT_FILE"
+          fi
+          echo "" >> "$REPORT_FILE"
+          echo "_Generated by [DataLex](https://github.com/duckcode-ai/DataLex) CI_" >> "$REPORT_FILE"
+
+          echo "report_path=${REPORT_FILE}" >> "$GITHUB_OUTPUT"
+
+      - name: Post PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: ${{ steps.report.outputs.report_path }}

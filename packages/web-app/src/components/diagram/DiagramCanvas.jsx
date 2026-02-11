@@ -12,6 +12,8 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import EntityNode from "./EntityNode";
+import SubjectAreaGroup from "./SubjectAreaGroup";
+import AnnotationNode from "./AnnotationNode";
 import DiagramToolbar from "./DiagramToolbar";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -20,7 +22,7 @@ import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
 import { runModelChecks } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
 
-const nodeTypes = { entityNode: EntityNode };
+const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, annotation: AnnotationNode };
 
 // Build adjacency map from edges (undirected)
 function adjacencyFromEdges(edges) {
@@ -206,6 +208,7 @@ function FlowCanvas() {
       if (vizSettings.layoutMode === "elk") {
         layoutResult = await layoutWithElk(filtered, filteredEdges, {
           density: vizSettings.layoutDensity,
+          groupBySubjectArea: vizSettings.groupBySubjectArea,
         });
       } else {
         layoutResult = fallbackGridLayout(filtered, filteredEdges, vizSettings.layoutDensity);
@@ -220,7 +223,9 @@ function FlowCanvas() {
         entitySearch
       );
 
-      setRfNodes(visualNodes);
+      // Merge group nodes (subject area backgrounds) before entity nodes
+      const groupNodes = layoutResult.groupNodes || [];
+      setRfNodes([...groupNodes, ...visualNodes]);
       setRfEdges(visualEdges);
       setLayoutDone(true);
     };
@@ -245,6 +250,30 @@ function FlowCanvas() {
   const onPaneClick = useCallback(() => {
     clearSelection();
   }, [clearSelection]);
+
+  // Annotation management
+  const addAnnotation = useCallback((position) => {
+    const id = `__annotation_${Date.now()}`;
+    const newNode = {
+      id,
+      type: "annotation",
+      position: position || { x: 100, y: 100 },
+      data: {
+        text: "",
+        colorIndex: Math.floor(Math.random() * 5),
+        onDelete: (nid) => setRfNodes((nds) => nds.filter((n) => n.id !== nid)),
+        onUpdate: (nid, text) => setRfNodes((nds) => nds.map((n) => n.id === nid ? { ...n, data: { ...n.data, text } } : n)),
+      },
+      draggable: true,
+    };
+    setRfNodes((nds) => [...nds, newNode]);
+  }, [setRfNodes]);
+
+  // Expose addAnnotation via window for toolbar access
+  React.useEffect(() => {
+    window.__dlAddAnnotation = addAnnotation;
+    return () => { delete window.__dlAddAnnotation; };
+  }, [addAnnotation]);
 
   return (
     <ReactFlow

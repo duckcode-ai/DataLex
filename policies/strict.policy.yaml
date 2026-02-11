@@ -1,7 +1,8 @@
 pack:
   name: strict_governance
-  version: 1.0.0
+  version: 2.0.0
   description: Strict policy profile for production-oriented model repositories.
+  extends: ../policies/default.policy.yaml
 
 policies:
   - id: ENTITY_TAG_REQUIRED
@@ -30,3 +31,58 @@ policies:
     severity: warn
     params:
       field_types: ["decimal(12,2)", "decimal(14,2)", "decimal(18,2)"]
+
+  - id: NAMING_CONVENTION_STRICT
+    type: naming_convention
+    severity: error
+    params:
+      entity_pattern: "^[A-Z][a-zA-Z0-9]*$"
+      field_pattern: "^[a-z][a-z0-9_]*$"
+      relationship_pattern: "^[a-z][a-z0-9_]*$"
+      index_pattern: "^idx_[a-z][a-z0-9_]*$"
+
+  - id: REQUIRE_INDEXES_STRICT
+    type: require_indexes
+    severity: error
+    params:
+      min_fields: 5
+      entity_types: [table]
+
+  - id: REQUIRE_OWNER_STRICT
+    type: require_owner
+    severity: error
+    params:
+      entity_types: [table]
+      require_email: true
+
+  - id: REQUIRE_SLA_PRODUCTION
+    type: require_sla
+    severity: error
+    params:
+      entity_types: [table]
+      required_tags: [GOLD]
+      require_freshness: true
+      require_quality_score: true
+
+  - id: DEPRECATION_CHECK_STRICT
+    type: deprecation_check
+    severity: error
+    params:
+      require_message: true
+      check_references: true
+
+  - id: REQUIRE_GOVERNANCE
+    type: custom_expression
+    severity: error
+    params:
+      scope: model
+      expression: "has_governance"
+      message: "Model '{name}' must define a governance section."
+
+  - id: REQUIRE_ENTITY_DESCRIPTION
+    type: custom_expression
+    severity: warn
+    params:
+      scope: entity
+      expression: "has_description"
+      message: "Entity '{name}' should have a description."

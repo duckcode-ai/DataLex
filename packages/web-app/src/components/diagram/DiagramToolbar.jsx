@@ -16,6 +16,9 @@ import {
   EyeOff,
   ArrowRightLeft,
   Boxes,
+  Download,
+  Image,
+  StickyNote,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -313,6 +316,14 @@ export default function DiagramToolbar() {
             {vizSettings.dimUnrelated ? <EyeOff size={11} /> : <Eye size={11} />}
           </ToolbarButton>
           <ToolbarButton
+            active={vizSettings.groupBySubjectArea}
+            onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)}
+            title="Group entities by subject area"
+          >
+            <Boxes size={11} />
+            Groups
+          </ToolbarButton>
+          <ToolbarButton
             active={showLegend}
             onClick={() => setShowLegend(!showLegend)}
             title="Relationship color legend"
@@ -329,6 +340,57 @@ export default function DiagramToolbar() {
           <Boxes size={10} />
           {visibleLimit > 0 ? `${visibleLimit} / ${totalEntities}` : totalEntities} entities
         </span>
+
+        {/* Annotations */}
+        <ToolbarButton
+          onClick={() => {
+            if (window.__dlAddAnnotation) {
+              window.__dlAddAnnotation({ x: Math.random() * 400 + 50, y: Math.random() * 200 + 50 });
+            }
+          }}
+          title="Add a note / annotation to the diagram"
+        >
+          <StickyNote size={11} />
+          Note
+        </ToolbarButton>
+
+        {/* Export */}
+        <ToolbarButton
+          onClick={() => {
+            const el = document.querySelector(".react-flow");
+            if (!el) return;
+            import("html-to-image").then(({ toPng }) => {
+              toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
+                const a = document.createElement("a");
+                a.href = dataUrl;
+                a.download = "datalex-diagram.png";
+                a.click();
+              });
+            });
+          }}
+          title="Export diagram as PNG"
+        >
+          <Image size={11} />
+          PNG
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => {
+            const el = document.querySelector(".react-flow");
+            if (!el) return;
+            import("html-to-image").then(({ toSvg }) => {
+              toSvg(el, { backgroundColor: "#ffffff" }).then((dataUrl) => {
+                const a = document.createElement("a");
+                a.href = dataUrl;
+                a.download = "datalex-diagram.svg";
+                a.click();
+              });
+            });
+          }}
+          title="Export diagram as SVG"
+        >
+          <Download size={11} />
+          SVG
+        </ToolbarButton>
 
         {/* Fullscreen */}
         <button

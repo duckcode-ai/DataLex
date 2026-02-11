@@ -1,6 +1,9 @@
 import argparse
 import glob
 import json
+import os
+import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -8,26 +11,40 @@ import yaml
 
 from dm_core import (
     compile_model,
+    diagnostics_as_json,
+    format_diagnostics,
+    generate_bash_completion,
     generate_changelog,
+    generate_fish_completion,
     generate_html_docs,
     generate_markdown_docs,
+    generate_migration,
     generate_sql_ddl,
+    generate_zsh_completion,
+    ConnectorConfig,
+    get_connector,
     import_dbml,
+    import_spark_schema,
     import_sql_ddl,
+    list_connectors,
     lint_issues,
     load_policy_pack,
+    load_policy_pack_with_inheritance,
     load_schema,
     load_yaml_model,
+    merge_policy_packs,
     policy_issues,
     project_diff,
     resolve_model,
     resolve_project,
+    run_diagnostics,
     schema_issues,
     semantic_diff,
     write_changelog,
     write_dbt_scaffold,
     write_html_docs,
     write_markdown_docs,
+    write_migration,
 )
 from dm_core.issues import Issue, has_errors, to_lines
 
@@ -422,7 +439,10 @@ def cmd_policy_check(args: argparse.Namespace) -> int:
     policy_schema = load_schema(args.policy_schema)
 
     model, model_issues = _validate_model_file(args.model, schema)
-    policy_pack = load_policy_pack(args.policy)
+    if getattr(args, "inherit", False):
+        policy_pack = load_policy_pack_with_inheritance(args.policy)
+    else:
+        policy_pack = load_policy_pack(args.policy)
     policy_pack_issues = schema_issues(policy_pack, policy_schema)
 
     _print_issue_block(f"Model checks ({args.model})", model_issues)
@@ -574,6 +594,164 @@ def cmd_import_dbml(args: argparse.Namespace) -> int:
         print(yaml.safe_dump(model, sort_keys=False))
 
     return 1 if has_errors(issues) else 0
+
+
+def cmd_import_spark_schema(args: argparse.Namespace) -> int:
+    text = Path(args.input).read_text(encoding="utf-8")
+    model = import_spark_schema(
+        schema_text=text,
+        model_name=args.model_name,
+        domain=args.domain,
+        owners=args.owner if args.owner else ["data-team@example.com"],
+        table_name=getattr(args, "table_name", None),
+    )
+
+    schema = load_schema(args.schema)
+    issues = _combined_issues(model, schema)
+    _print_issue_block("Imported model checks", issues)
+
+    if args.out:
+        _write_yaml(args.out, model)
+        print(f"Wrote imported YAML model: {args.out}")
+    else:
+        print(yaml.safe_dump(model, sort_keys=False))
+
+    return 1 if has_errors(issues) else 0
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    connector_type = args.connector
+    connector = get_connector(connector_type)
+    if connector is None:
+        print(f"Unknown connector: {connector_type}", file=sys.stderr)
+        print(f"Available: {', '.join(c['type'] for c in list_connectors())}", file=sys.stderr)
+        return 1
+
+    ok, msg = connector.check_driver()
+    if not ok:
+        print(f"Driver check failed: {msg}", file=sys.stderr)
+        return 1
+
+    config = ConnectorConfig(
+        connector_type=connector_type,
+        host=getattr(args, "host", "") or "",
+        port=getattr(args, "port", 0) or 0,
+        database=getattr(args, "database", "") or "",
+        schema=getattr(args, "db_schema", "") or "",
+        user=getattr(args, "user", "") or "",
+        password=getattr(args, "password", "") or "",
+        warehouse=getattr(args, "warehouse", "") or "",
+        project=getattr(args, "project", "") or "",
+        dataset=getattr(args, "dataset", "") or "",
+        catalog=getattr(args, "catalog", "") or "",
+        token=getattr(args, "token", "") or "",
+        model_name=getattr(args, "model_name", "imported_model") or "imported_model",
+        domain=getattr(args, "domain", "imported") or "imported",
+        owners=[getattr(args, "owner", None)] if getattr(args, "owner", None) else None,
+        tables=getattr(args, "tables", None),
+        exclude_tables=getattr(args, "exclude_tables", None),
+    )
+
+    if getattr(args, "test", False):
+        ok, msg = connector.test_connection(config)
+        print(f"{'OK' if ok else 'FAIL'}: {msg}")
+        return 0 if ok else 1
+
+    print(f"Pulling schema from {connector.display_name}...")
+    result = connector.pull_schema(config)
+
+    print(f"\n{result.summary()}")
+
+    if result.warnings:
+        for w in result.warnings:
+            print(f"  [WARN] {w}")
+
+    if args.out:
+        _write_yaml(args.out, result.model)
+        print(f"\nWrote model: {args.out}")
+    else:
+        print("\n" + yaml.safe_dump(result.model, sort_keys=False))
+
+    return 0
+
+
+def cmd_connectors(args: argparse.Namespace) -> int:
+    connectors = list_connectors()
+    if getattr(args, "output_json", False):
+        print(json.dumps(connectors, indent=2))
+    else:
+        print("Available database connectors:\n")
+        for c in connectors:
+            status = "installed" if c["installed"] else "NOT INSTALLED"
+            print(f"  {c['type']:12s}  {c['name']:30s}  driver: {c['driver']:25s}  [{status}]")
+        print(f"\nUsage: dm pull <connector> --host <host> --database <db> --user <user> --password <pass> --out model.yaml")
+    return 0
+
+
+def _build_connector_config(args: argparse.Namespace) -> "ConnectorConfig":
+    return ConnectorConfig(
+        connector_type=args.connector,
+        host=getattr(args, "host", "") or "",
+        port=getattr(args, "port", 0) or 0,
+        database=getattr(args, "database", "") or "",
+        schema=getattr(args, "db_schema", "") or "",
+        user=getattr(args, "user", "") or "",
+        password=getattr(args, "password", "") or "",
+        warehouse=getattr(args, "warehouse", "") or "",
+        project=getattr(args, "project", "") or "",
+        dataset=getattr(args, "dataset", "") or "",
+        catalog=getattr(args, "catalog", "") or "",
+        token=getattr(args, "token", "") or "",
+    )
+
+
+def cmd_schemas(args: argparse.Namespace) -> int:
+    connector = get_connector(args.connector)
+    if connector is None:
+        print(f"Unknown connector: {args.connector}", file=sys.stderr)
+        return 1
+    ok, msg = connector.check_driver()
+    if not ok:
+        print(f"Driver check failed: {msg}", file=sys.stderr)
+        return 1
+
+    config = _build_connector_config(args)
+    schemas = connector.list_schemas(config)
+
+    if getattr(args, "output_json", False):
+        print(json.dumps(schemas, indent=2))
+    else:
+        print(f"Schemas in {connector.display_name} ({config.database or config.project or 'default'}):\n")
+        for s in schemas:
+            print(f"  {s['name']:30s}  {s['table_count']:4d} tables")
+    return 0
+
+
+def cmd_tables(args: argparse.Namespace) -> int:
+    connector = get_connector(args.connector)
+    if connector is None:
+        print(f"Unknown connector: {args.connector}", file=sys.stderr)
+        return 1
+    ok, msg = connector.check_driver()
+    if not ok:
+        print(f"Driver check failed: {msg}", file=sys.stderr)
+        return 1
+
+    config = _build_connector_config(args)
+    tables = connector.list_tables(config)
+
+    if getattr(args, "output_json", False):
+        print(json.dumps(tables, indent=2))
+    else:
+        schema_label = config.schema or config.dataset or "default"
+        print(f"Tables in {connector.display_name} / {schema_label}:\n")
+        print(f"  {'TABLE':30s}  {'TYPE':8s}  {'COLUMNS':>8s}  {'ROWS':>12s}")
+        print(f"  {'-'*30}  {'-'*8}  {'-'*8}  {'-'*12}")
+        for t in tables:
+            rows = str(t.get("row_count") or "") if t.get("row_count") is not None else "-"
+            print(f"  {t['name']:30s}  {t['type']:8s}  {t['column_count']:>8d}  {rows:>12s}")
+        print(f"\n  Total: {len(tables)} tables")
+    return 0
 
 
 def cmd_generate_docs(args: argparse.Namespace) -> int:
@@ -823,6 +1001,108 @@ def cmd_policy_schema(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    project_dir = getattr(args, "path", ".")
+    results = run_diagnostics(project_dir)
+
+    if getattr(args, "output_json", False):
+        print(json.dumps(diagnostics_as_json(results), indent=2))
+    else:
+        print(format_diagnostics(results))
+
+    error_count = sum(1 for r in results if r.status == "error")
+    return 1 if error_count > 0 else 0
+
+
+def cmd_migrate(args: argparse.Namespace) -> int:
+    old_model = load_yaml_model(args.old)
+    new_model = load_yaml_model(args.new)
+    dialect = getattr(args, "dialect", "postgres")
+
+    if args.out:
+        write_migration(old_model, new_model, args.out, dialect=dialect)
+        print(f"Wrote migration SQL: {args.out}")
+    else:
+        sql = generate_migration(old_model, new_model, dialect=dialect)
+        print(sql)
+
+    return 0
+
+
+def cmd_completion(args: argparse.Namespace) -> int:
+    shell = args.shell
+    if shell == "bash":
+        print(generate_bash_completion())
+    elif shell == "zsh":
+        print(generate_zsh_completion())
+    elif shell == "fish":
+        print(generate_fish_completion())
+    else:
+        print(f"Unsupported shell: {shell}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    schema_path = getattr(args, "schema", None) or _default_schema_path()
+    schema = load_schema(schema_path)
+    watch_glob = getattr(args, "glob", "**/*.model.yaml")
+    interval = getattr(args, "interval", 2)
+    root = Path(".").resolve()
+
+    print(f"Watching for changes: {watch_glob} (every {interval}s)")
+    print("Press Ctrl+C to stop.\n")
+
+    mtimes: Dict[str, float] = {}
+
+    try:
+        while True:
+            current_files: Dict[str, float] = {}
+            for pattern in [watch_glob]:
+                for path in sorted(root.glob(pattern)):
+                    rel = str(path.relative_to(root))
+                    if ".git" in rel or "node_modules" in rel or ".venv" in rel:
+                        continue
+                    try:
+                        mtime = path.stat().st_mtime
+                        current_files[str(path)] = mtime
+                    except OSError:
+                        continue
+
+            changed: List[str] = []
+            for fpath, mtime in current_files.items():
+                if fpath not in mtimes or mtimes[fpath] != mtime:
+                    changed.append(fpath)
+
+            mtimes = current_files
+
+            for fpath in changed:
+                rel = str(Path(fpath).relative_to(root))
+                print(f"\n--- Changed: {rel} ---")
+                try:
+                    model = load_yaml_model(fpath)
+                    s_issues = schema_issues(model, schema)
+                    l_issues = lint_issues(model)
+                    all_issues = s_issues + l_issues
+
+                    if all_issues:
+                        for iss in all_issues:
+                            sev = iss.severity.upper()
+                            print(f"  [{sev}] {iss.code}: {iss.message}")
+                        error_count = sum(1 for i in all_issues if i.severity == "error")
+                        warn_count = sum(1 for i in all_issues if i.severity == "warn")
+                        print(f"  Result: {error_count} error(s), {warn_count} warning(s)")
+                    else:
+                        print("  \u2713 Valid")
+                except Exception as exc:
+                    print(f"  [ERROR] {exc}")
+
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print("\nWatch stopped.")
+        return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="dm", description="DataLex CLI")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -902,6 +1182,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to policy schema JSON",
     )
     policy_parser.add_argument("--output-json", action="store_true", help="Print policy output as JSON")
+    policy_parser.add_argument("--inherit", action="store_true", help="Resolve pack.extends inheritance chain before evaluation")
     policy_parser.set_defaults(func=cmd_policy_check)
 
     generate_parser = sub.add_parser("generate", help="Generate artifacts from model YAML")
@@ -972,6 +1253,66 @@ def build_parser() -> argparse.ArgumentParser:
     import_dbml_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_dbml_parser.set_defaults(func=cmd_import_dbml)
 
+    import_spark_parser = import_sub.add_parser("spark-schema", help="Import Spark schema JSON file")
+    import_spark_parser.add_argument("input", help="Path to Spark schema JSON file")
+    import_spark_parser.add_argument("--out", help="Write output YAML model file")
+    import_spark_parser.add_argument("--model-name", default="imported_spark_schema", help="Model name")
+    import_spark_parser.add_argument("--table-name", help="Table name (for single StructType schemas)")
+    import_spark_parser.add_argument("--domain", default="imported", help="Domain value")
+    import_spark_parser.add_argument("--owner", action="append", default=[], help="Owner email (repeatable)")
+    import_spark_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
+    import_spark_parser.set_defaults(func=cmd_import_spark_schema)
+
+    pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
+    pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
+    pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
+    pull_parser.add_argument("--port", type=int, help="Database port")
+    pull_parser.add_argument("--database", help="Database name")
+    pull_parser.add_argument("--db-schema", help="Schema name (default: public/PUBLIC/default)")
+    pull_parser.add_argument("--user", help="Database user")
+    pull_parser.add_argument("--password", help="Database password")
+    pull_parser.add_argument("--warehouse", help="Snowflake warehouse")
+    pull_parser.add_argument("--project", help="BigQuery project ID")
+    pull_parser.add_argument("--dataset", help="BigQuery dataset")
+    pull_parser.add_argument("--catalog", help="Databricks Unity Catalog name")
+    pull_parser.add_argument("--token", help="Access token (Databricks)")
+    pull_parser.add_argument("--tables", nargs="*", help="Only include these tables")
+    pull_parser.add_argument("--exclude-tables", nargs="*", help="Exclude these tables")
+    pull_parser.add_argument("--model-name", default="imported_model", help="Model name")
+    pull_parser.add_argument("--domain", default="imported", help="Domain value")
+    pull_parser.add_argument("--owner", help="Owner email")
+    pull_parser.add_argument("--out", help="Output YAML model file path")
+    pull_parser.add_argument("--test", action="store_true", help="Test connection only, do not pull schema")
+    pull_parser.set_defaults(func=cmd_pull)
+
+    connectors_parser = sub.add_parser("connectors", help="List available database connectors and driver status")
+    connectors_parser.add_argument("--output-json", action="store_true", help="Print as JSON")
+    connectors_parser.set_defaults(func=cmd_connectors)
+
+    # Common connection args helper
+    def _add_conn_args(p):
+        p.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
+        p.add_argument("--host", help="Database host")
+        p.add_argument("--port", type=int, help="Database port")
+        p.add_argument("--database", help="Database name")
+        p.add_argument("--db-schema", help="Schema name")
+        p.add_argument("--user", help="Database user")
+        p.add_argument("--password", help="Database password")
+        p.add_argument("--warehouse", help="Snowflake warehouse")
+        p.add_argument("--project", help="BigQuery project ID")
+        p.add_argument("--dataset", help="BigQuery dataset")
+        p.add_argument("--catalog", help="Databricks catalog")
+        p.add_argument("--token", help="Access token")
+        p.add_argument("--output-json", action="store_true", help="Print as JSON")
+
+    schemas_parser = sub.add_parser("schemas", help="List schemas/datasets in a database")
+    _add_conn_args(schemas_parser)
+    schemas_parser.set_defaults(func=cmd_schemas)
+
+    tables_parser = sub.add_parser("tables", help="List tables in a database schema")
+    _add_conn_args(tables_parser)
+    tables_parser.set_defaults(func=cmd_tables)
+
     resolve_parser = sub.add_parser("resolve", help="Resolve cross-model imports and show unified graph")
     resolve_parser.add_argument("model", help="Path to root model YAML")
     resolve_parser.add_argument(
@@ -1027,6 +1368,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to policy schema JSON",
     )
     policy_schema_parser.set_defaults(func=cmd_policy_schema)
+
+    doctor_parser = sub.add_parser("doctor", help="Diagnose project setup issues")
+    doctor_parser.add_argument("--path", default=".", help="Project directory to diagnose")
+    doctor_parser.add_argument("--output-json", action="store_true", help="Print diagnostics as JSON")
+    doctor_parser.set_defaults(func=cmd_doctor)
+
+    migrate_parser = sub.add_parser("migrate", help="Generate SQL migration between two model versions")
+    migrate_parser.add_argument("old", help="Old model YAML path")
+    migrate_parser.add_argument("new", help="New model YAML path")
+    migrate_parser.add_argument("--dialect", default="postgres", choices=["postgres", "snowflake", "bigquery", "databricks"])
+    migrate_parser.add_argument("--out", help="Output SQL migration file path")
+    migrate_parser.set_defaults(func=cmd_migrate)
+
+    completion_parser = sub.add_parser("completion", help="Generate shell completion script")
+    completion_parser.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
+    completion_parser.set_defaults(func=cmd_completion)
+
+    watch_parser = sub.add_parser("watch", help="Watch model files and validate on change")
+    watch_parser.add_argument("--glob", default="**/*.model.yaml", help="Glob pattern for model files")
+    watch_parser.add_argument("--interval", type=int, default=2, help="Poll interval in seconds")
+    watch_parser.add_argument("--schema", default=_default_schema_path(), help="Path to JSON schema")
+    watch_parser.set_defaults(func=cmd_watch)
 
     return parser
 

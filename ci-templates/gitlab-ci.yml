@@ -1,0 +1,75 @@
+# DataLex Model Quality — GitLab CI
+# Copy this file to .gitlab-ci.yml in your repository (or include it).
+#
+# Prerequisites:
+#   - Python 3.9+ available in the CI image
+#   - DataLex CLI available (pip install -r requirements.txt)
+#   - Model files in **/*.model.yaml
+#   - Policy pack in policies/default.policy.yaml
+
+stages:
+  - validate
+  - policy
+  - gate
+
+variables:
+  SCHEMA_PATH: schemas/model.schema.json
+  POLICY_PATH: policies/default.policy.yaml
+
+.datalex-setup: &datalex-setup
+  image: python:3.11-slim
+  before_script:
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+
+validate-models:
+  <<: *datalex-setup
+  stage: validate
+  script:
+    - ./dm validate-all --schema "$SCHEMA_PATH"
+
+policy-check:
+  <<: *datalex-setup
+  stage: policy
+  script:
+    - |
+      for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
+        echo "Policy check: ${model}"
+        ./dm policy-check "${model}" \
+          --policy "$POLICY_PATH" \
+          --schema "$SCHEMA_PATH"
+      done
+
+breaking-change-gate:
+  <<: *datalex-setup
+  stage: gate
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - |
+      set -euo pipefail
+      git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+
+      changed_files=$(git diff --name-only "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}"...HEAD -- '*.model.yaml')
+
+      if [ -z "$changed_files" ]; then
+        echo "No changed .model.yaml files."
+        exit 0
+      fi
+
+      echo "$changed_files" | while IFS= read -r model_path; do
+        echo "Checking ${model_path}"
+        if git cat-file -e "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:${model_path}" 2>/dev/null; then
+          git show "origin/${CI_MERGE_REQUEST_TARGET_BRANCH_NAME}:${model_path}" > /tmp/base-model.yaml
+          if [ -f "${model_path}" ]; then
+            ./dm gate /tmp/base-model.yaml "${model_path}" --schema "$SCHEMA_PATH"
+          else
+            echo "Deleted model file '${model_path}' is treated as breaking."
+            exit 2
+          fi
+        else
+          if [ -f "${model_path}" ]; then
+            ./dm validate "${model_path}" --schema "$SCHEMA_PATH"
+          fi
+        fi
+      done

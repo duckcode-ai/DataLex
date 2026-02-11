@@ -5,6 +5,9 @@ const useUiStore = create((set) => ({
   sidebarOpen: true,
   sidebarWidth: 260,
 
+  // Theme
+  theme: localStorage.getItem("dm_theme") || "light", // "light" | "dark"
+
   // Active view
   activeView: "modeling", // modeling | validation | diff | impact
 
@@ -25,6 +28,13 @@ const useUiStore = create((set) => ({
   toasts: [],
 
   // --- Actions ---
+  toggleTheme: () => set((s) => {
+    const next = s.theme === "light" ? "dark" : "light";
+    localStorage.setItem("dm_theme", next);
+    document.documentElement.setAttribute("data-theme", next);
+    return { theme: next };
+  }),
+
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
 

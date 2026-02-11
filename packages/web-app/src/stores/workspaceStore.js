@@ -78,6 +78,35 @@ const useWorkspaceStore = create((set, get) => ({
     });
   },
 
+  loadImportedYaml: (name, yamlContent) => {
+    const doc = {
+      id: `imported-${Date.now()}`,
+      name: name.endsWith(".model.yaml") ? name : `${name}.model.yaml`,
+      content: yamlContent,
+    };
+    const { offlineMode, localDocuments } = get();
+    if (offlineMode) {
+      const updated = [...localDocuments, doc];
+      set({
+        localDocuments: updated,
+        activeFile: doc,
+        activeFileContent: yamlContent,
+        originalContent: yamlContent,
+        isDirty: false,
+        openTabs: [...get().openTabs.filter((t) => t.id !== doc.id), doc],
+      });
+      localStorage.setItem("dm_offline_docs", JSON.stringify(updated));
+    } else {
+      set({
+        activeFile: doc,
+        activeFileContent: yamlContent,
+        originalContent: yamlContent,
+        isDirty: false,
+        openTabs: [...get().openTabs.filter((t) => t.id !== doc.id), doc],
+      });
+    }
+  },
+
   saveOfflineDocs: () => {
     const { localDocuments } = get();
     localStorage.setItem("dm_offline_docs", JSON.stringify(localDocuments));

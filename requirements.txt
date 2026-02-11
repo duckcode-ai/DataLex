@@ -1,2 +1,9 @@
 PyYAML>=6.0
 jsonschema>=4.0
+
+# Optional database connector drivers (install as needed):
+# pip install psycopg2-binary          # PostgreSQL
+# pip install mysql-connector-python   # MySQL
+# pip install snowflake-connector-python  # Snowflake
+# pip install google-cloud-bigquery    # BigQuery
+# pip install databricks-sql-connector # Databricks

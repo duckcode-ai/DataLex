@@ -1,9 +1,17 @@
-name: Model Quality
+# DataLex Model Quality — GitHub Actions
+# Copy this file to .github/workflows/datalex-quality.yml in your repository.
+#
+# Prerequisites:
+#   - Python 3.9+ installed
+#   - DataLex CLI available (pip install -r requirements.txt)
+#   - Model files in **/*.model.yaml
+#   - Policy pack in policies/default.policy.yaml
+
+name: DataLex Model Quality
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
 
 jobs:
@@ -21,34 +29,28 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Python dependencies
+      - name: Install DataLex
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
 
-      - name: Run unit tests
-        run: |
-          python3 -m unittest -v \
-            tests/test_mvp.py \
-            tests/test_real_scenarios.py \
-            tests/test_integrations.py \
-            tests/test_performance.py \
-            tests/test_policy_engine_v2.py \
-            tests/test_cli_dx.py \
-            tests/test_connectors.py
-
-      - name: Validate all model files
+      - name: Validate all models
         run: ./dm validate-all --schema schemas/model.schema.json
 
-      - name: Run default policy pack
-        run: ./dm policy-check model-examples/starter-commerce.model.yaml --policy policies/default.policy.yaml
+      - name: Run policy checks
+        run: |
+          for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
+            echo "Policy check: ${model}"
+            ./dm policy-check "${model}" \
+              --policy policies/default.policy.yaml \
+              --schema schemas/model.schema.json
+          done
 
-      - name: PR gate for changed model files
+      - name: PR gate — detect breaking changes
         if: github.event_name == 'pull_request'
         shell: bash
         run: |
           set -euo pipefail
-
           BASE_REF="origin/${{ github.base_ref }}"
           git fetch origin "${{ github.base_ref }}" --depth=1
 
@@ -61,10 +63,8 @@ jobs:
 
           for model_path in "${changed_files[@]}"; do
             echo "Checking ${model_path}"
-
             if git cat-file -e "${BASE_REF}:${model_path}" 2>/dev/null; then
               git show "${BASE_REF}:${model_path}" > /tmp/base-model.yaml
-
               if [ -f "${model_path}" ]; then
                 ./dm gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
               else

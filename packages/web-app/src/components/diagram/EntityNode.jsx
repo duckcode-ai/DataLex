@@ -186,10 +186,19 @@ export default function EntityNode({ data }) {
           </div>
         )}
 
-        {data.subject_area && (
-          <div className="mt-1 text-[9px] text-slate-500 truncate">
-            <Database size={8} className="inline mr-0.5" />
-            {data.subject_area}
+        {(data.subject_area || data.sla) && (
+          <div className="flex items-center gap-2 mt-1">
+            {data.subject_area && (
+              <span className="text-[9px] text-slate-500 truncate">
+                <Database size={8} className="inline mr-0.5" />
+                {data.subject_area}
+              </span>
+            )}
+            {data.sla && (
+              <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                SLA: {typeof data.sla === 'object' ? (data.sla.freshness || data.sla.quality_score || 'defined') : data.sla}
+              </span>
+            )}
           </div>
         )}
       </div>

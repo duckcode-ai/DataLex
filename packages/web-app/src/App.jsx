@@ -14,6 +14,10 @@ import ImpactPanel from "./components/panels/ImpactPanel";
 import HistoryPanel from "./components/panels/HistoryPanel";
 import ModelGraphPanel from "./components/panels/ModelGraphPanel";
 import DictionaryPanel from "./components/panels/DictionaryPanel";
+import ImportPanel from "./components/panels/ImportPanel";
+import ConnectorsPanel from "./components/panels/ConnectorsPanel";
+import GlobalSearchPanel from "./components/panels/GlobalSearchPanel";
+import KeyboardShortcutsPanel from "./components/panels/KeyboardShortcutsPanel";
 
 import useUiStore from "./stores/uiStore";
 import useWorkspaceStore from "./stores/workspaceStore";
@@ -29,6 +33,8 @@ import {
   FolderPlus,
   Plus,
   AlertCircle,
+  Search,
+  Database,
 } from "lucide-react";
 
 const BOTTOM_TABS = [
@@ -38,6 +44,9 @@ const BOTTOM_TABS = [
   { id: "impact", label: "Impact", icon: Network },
   { id: "model-graph", label: "Model Graph", icon: Network },
   { id: "dictionary", label: "Dictionary", icon: Columns3 },
+  { id: "import", label: "Import", icon: Plus },
+  { id: "connectors", label: "Connectors", icon: Database },
+  { id: "search", label: "Search", icon: Search },
   { id: "history", label: "History", icon: Clock },
 ];
 
@@ -176,6 +185,12 @@ function BottomPanelContent({ tab }) {
       return <ModelGraphPanel />;
     case "dictionary":
       return <DictionaryPanel />;
+    case "import":
+      return <ImportPanel />;
+    case "connectors":
+      return <ConnectorsPanel />;
+    case "search":
+      return <GlobalSearchPanel />;
     case "history":
       return <HistoryPanel />;
     default:
@@ -214,18 +229,65 @@ export default function App() {
   const { activeModal, bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel } = useUiStore();
   const { error, clearError } = useWorkspaceStore();
   const { selectedEntityId } = useDiagramStore();
+  const [showShortcuts, setShowShortcuts] = useState(false);
+
+  // Initialize theme on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("dm_theme") || "light";
+    document.documentElement.setAttribute("data-theme", saved);
+  }, []);
 
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+      const tag = (e.target.tagName || "").toLowerCase();
+      const isInput = tag === "input" || tag === "textarea" || e.target.isContentEditable;
+      const meta = e.metaKey || e.ctrlKey;
+
+      // ⌘+S — Save
+      if (meta && e.key === "s") {
         e.preventDefault();
         useWorkspaceStore.getState().saveCurrentFile();
+        return;
+      }
+      // ⌘+K — Global search
+      if (meta && e.key === "k") {
+        e.preventDefault();
+        setBottomPanelTab("search");
+        return;
+      }
+      // ⌘+\ — Toggle sidebar
+      if (meta && e.key === "\\") {
+        e.preventDefault();
+        useUiStore.getState().toggleSidebar();
+        return;
+      }
+      // ⌘+J — Toggle bottom panel
+      if (meta && e.key === "j") {
+        e.preventDefault();
+        toggleBottomPanel();
+        return;
+      }
+      // ⌘+D — Toggle dark mode
+      if (meta && e.key === "d") {
+        e.preventDefault();
+        useUiStore.getState().toggleTheme();
+        return;
+      }
+      // ? — Show shortcuts (only when not in input)
+      if (!isInput && e.key === "?") {
+        setShowShortcuts((v) => !v);
+        return;
+      }
+      // Esc — close shortcuts
+      if (e.key === "Escape" && showShortcuts) {
+        setShowShortcuts(false);
+        return;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, []);
+  }, [showShortcuts, setBottomPanelTab, toggleBottomPanel]);
 
   // Auto-open properties panel when entity selected
   useEffect(() => {
@@ -324,6 +386,7 @@ export default function App() {
       {/* Modals */}
       {activeModal === "addProject" && <AddProjectModal />}
       {activeModal === "newFile" && <NewFileModal />}
+      {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 
       {/* Toasts */}
       <ToastContainer />

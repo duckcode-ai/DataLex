@@ -10,6 +10,8 @@ import {
   AlertTriangle,
   CheckCircle2,
   Loader2,
+  Moon,
+  Sun,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -28,6 +30,7 @@ export default function TopBar() {
   } = useWorkspaceStore();
 
   const { model } = useDiagramStore();
+  const { theme, toggleTheme } = useUiStore();
   const modelMeta = model?.model || {};
 
   return (
@@ -106,6 +109,13 @@ export default function TopBar() {
           {loading && (
             <Loader2 size={14} className="text-text-muted animate-spin" />
           )}
+          <button
+            onClick={toggleTheme}
+            className="p-1.5 rounded-md text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors"
+            title={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
+          >
+            {theme === "light" ? <Moon size={14} /> : <Sun size={14} />}
+          </button>
           <button
             onClick={saveCurrentFile}
             disabled={!isDirty || !activeFile}

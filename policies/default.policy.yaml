@@ -1,7 +1,7 @@
 pack:
   name: default_governance
-  version: 1.0.0
-  description: Baseline policy checks for MVP repositories.
+  version: 2.0.0
+  description: Baseline policy checks for DataLex repositories.
 
 policies:
   - id: ENTITY_TAG_BASELINE
@@ -24,3 +24,23 @@ policies:
       field_tags: [PII, PCI]
       field_name_regex: "(^email$|^phone$|^ssn$|_token$)"
       allowed_classifications: [PII, PCI, CONFIDENTIAL]
+
+  - id: NAMING_CONVENTION_BASELINE
+    type: naming_convention
+    severity: warn
+    params:
+      entity_pattern: "^[A-Z][a-zA-Z0-9]*$"
+      field_pattern: "^[a-z][a-z0-9_]*$"
+
+  - id: REQUIRE_OWNER_BASELINE
+    type: require_owner
+    severity: warn
+    params:
+      entity_types: [table]
+
+  - id: DEPRECATION_CHECK
+    type: deprecation_check
+    severity: warn
+    params:
+      require_message: true
+      check_references: true

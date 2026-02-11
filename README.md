@@ -117,7 +117,8 @@ Add screenshots here after launch:
 - Semantic diff between model versions with index change tracking
 - Quality gate for CI pipelines (block breaking changes)
 - Generate SQL (Postgres, Snowflake, BigQuery, Databricks), dbt models, and metadata JSON
-- Import from SQL DDL and DBML formats
+- Import from SQL DDL, DBML, and Spark schema JSON files
+- **Database connectors** — Pull schema from PostgreSQL, MySQL, Snowflake, BigQuery, and Databricks (`dm pull`)
 - Policy-based governance checks
 - Auto-format YAML to canonical style (`dm fmt`)
 - Model statistics and coverage reporting (`dm stats`)
@@ -126,6 +127,20 @@ Add screenshots here after launch:
 - **Multi-model init** — Scaffold multi-file projects (`dm init --multi-model`)
 - **Data dictionary generation** — HTML and Markdown docs (`dm generate docs`)
 - **Auto-changelog** — Generate changelogs from model diffs (`dm generate changelog`)
+- **Spark schema import** — `dm import spark-schema` (StructType JSON, Databricks catalog exports)
+- **Connector status** — `dm connectors` to check installed drivers
+
+### Advanced Import & Database Connectors
+- **Enhanced SQL DDL** — Views, materialized views, CREATE INDEX, DEFAULT values, CHECK constraints, schema-qualified names, foreign key flags
+- **Spark schema** — Import StructType JSON from `df.schema.json()`, Databricks catalog exports, arrays of named table schemas. Full Spark type mapping including decimal, complex types (array/map/struct → json), metadata comments, and sensitivity.
+- **Database connectors** — Pull schema directly from live databases:
+  - **PostgreSQL** — tables, columns, PKs, FKs, unique constraints, indexes via `information_schema` + `pg_indexes`
+  - **MySQL** — tables, columns (PK/UNI from COLUMN_KEY), FKs, indexes via `information_schema`
+  - **Snowflake** — tables, columns, PKs via `SHOW PRIMARY KEYS`, FKs via `SHOW IMPORTED KEYS`
+  - **BigQuery** — tables, columns, PKs, FKs from `INFORMATION_SCHEMA` views
+  - **Databricks** — tables via `SHOW TABLES`, columns via `DESCRIBE TABLE`, PKs/FKs from Unity Catalog
+- **Connector framework** — `BaseConnector` ABC, `ConnectorConfig`, `ConnectorResult`, driver checks, table include/exclude filters, registry
+- **Drag-and-drop import** — Drop SQL, DBML, or Spark schema files directly into the web UI Import panel
 
 ### Documentation & Data Dictionary
 - **HTML data dictionary** — Self-contained, searchable single-page site with entity catalog, field details, relationship map, indexes, glossary, and data classifications
@@ -141,9 +156,20 @@ Add screenshots here after launch:
 - **Model Graph panel** — Visualize cross-model dependencies in the web UI
 - **Cross-model relationship badges** — Relationships spanning models are highlighted
 
+### Web UI Enterprise Features
+- **Subject area grouping** — Entities clustered by `subject_area` with color-coded dashed borders in the diagram. Toggle via toolbar button
+- **Enhanced entity nodes** — SLA indicator badges, sensitivity labels, full badge set (PK, FK, UQ, IDX, COMP, CHK, DEF)
+- **Diagram export** — Export diagrams as PNG (2× resolution) or SVG via toolbar buttons
+- **Dark mode** — Full dark theme toggle (Moon/Sun button in TopBar), persisted to localStorage
+- **Schema-aware YAML autocomplete** — IntelliSense-style completions for model keys, types, cardinalities, sensitivity levels, and boolean values
+- **Inline validation errors** — Real-time lint diagnostics in the editor gutter with error/warning severity markers
+- **Global search** — Search across entities, fields, tags, descriptions, and glossary terms with category filters
+- **Diagram annotations** — Draggable sticky-note nodes with 5 color variants, inline editing, and delete
+- **Keyboard shortcuts panel** — Press `?` to view all shortcuts. Full reference modal with grouped categories
+
 ### Other
 - **Offline mode** — Works without the API server using browser localStorage
-- **Keyboard shortcuts** — `Cmd+S` / `Ctrl+S` to save
+- **Keyboard shortcuts** — `⌘+S` save, `⌘+K` global search, `⌘+\` toggle sidebar, `⌘+J` toggle bottom panel, `⌘+D` dark mode, `?` shortcuts panel
 - **Local project folders** — Point to any folder containing `*.model.yaml` files
 
 ---
@@ -349,8 +375,31 @@ chmod +x dm
 ./dm policy-check model-examples/starter-commerce.model.yaml \
   --policy policies/default.policy.yaml
 
+# Check with policy inheritance (resolves pack.extends)
+./dm policy-check model-examples/starter-commerce.model.yaml \
+  --policy policies/strict.policy.yaml --inherit
+
 # Validate all models in a directory
 ./dm validate-all --glob "**/*.model.yaml"
+```
+
+### Developer Experience
+
+```bash
+# Diagnose project setup issues
+./dm doctor
+./dm doctor --path /path/to/project --output-json
+
+# Generate SQL migration between model versions
+./dm migrate old-model.yaml new-model.yaml --dialect postgres --out migration.sql
+
+# Shell completion (add to ~/.bashrc, ~/.zshrc, or fish config)
+eval "$(./dm completion bash)"
+eval "$(./dm completion zsh)"
+./dm completion fish > ~/.config/fish/completions/dm.fish
+
+# Watch for model changes and validate on save
+./dm watch --glob "**/*.model.yaml" --interval 2
 ```
 
 ### Full Command List
@@ -364,20 +413,27 @@ chmod +x dm
 | `dm diff <old> <new>` | Semantic diff between versions |
 | `dm gate <old> <new>` | Quality gate (CI-friendly) |
 | `dm validate-all` | Validate all models in a directory |
-| `dm policy-check <model>` | Check governance policies |
+| `dm policy-check <model>` | Check governance policies (`--inherit` for pack inheritance) |
 | `dm generate sql <model>` | Generate SQL DDL (postgres/snowflake/bigquery/databricks) |
 | `dm generate dbt <model>` | Generate dbt models with v2 metadata |
 | `dm generate metadata <model>` | Generate metadata JSON |
-| `dm import sql <file>` | Import from SQL DDL |
+| `dm generate docs <model>` | Generate HTML/Markdown data dictionary |
+| `dm generate changelog <old> <new>` | Generate changelog from model diff |
+| `dm import sql <file>` | Import from SQL DDL (views, indexes, defaults, checks) |
 | `dm import dbml <file>` | Import from DBML |
+| `dm import spark-schema <file>` | Import from Spark schema JSON (StructType, Databricks exports) |
+| `dm pull <connector>` | Pull schema from a live database (postgres/mysql/snowflake/bigquery/databricks) |
+| `dm connectors` | List available database connectors and driver status |
 | `dm fmt <model>` | Auto-format YAML to canonical style |
 | `dm stats <model>` | Print model statistics |
 | `dm resolve <model>` | Resolve cross-model imports and show unified graph |
 | `dm resolve-project <dir>` | Resolve all models in a project directory |
 | `dm diff-all <old-dir> <new-dir>` | Semantic diff between two model directories |
+| `dm migrate <old> <new>` | Generate SQL migration scripts between model versions |
+| `dm doctor` | Diagnose project setup issues |
+| `dm completion <shell>` | Generate shell completion (bash/zsh/fish) |
+| `dm watch` | Watch model files and validate on change |
 | `dm init --multi-model` | Initialize a multi-model project structure |
-| `dm generate docs <model>` | Generate HTML/Markdown data dictionary |
-| `dm generate changelog <old> <new>` | Generate changelog from model diff |
 | `dm print-schema` | Print the model JSON schema |
 | `dm print-policy-schema` | Print the policy JSON schema |
 
@@ -477,10 +533,53 @@ For the full YAML specification, see [`docs/yaml-spec-v2.md`](docs/yaml-spec-v2.
 
 Policy packs define governance rules that are checked against your models:
 
-| Policy | Description |
-|--------|-------------|
-| `policies/default.policy.yaml` | Baseline governance (naming conventions, required fields) |
-| `policies/strict.policy.yaml` | Stricter production rules (classification required, no nullable PKs) |
+| Policy Pack | Description |
+|-------------|-------------|
+| `policies/default.policy.yaml` | Baseline governance (naming conventions, tags, descriptions, classification, owner, deprecation) |
+| `policies/strict.policy.yaml` | Strict production rules (extends default, adds indexes, SLA, email owners, custom expressions) |
+
+### Policy Types
+
+| Type | Description |
+|------|-------------|
+| `require_entity_tags` | Entities must include specific tags (any/all mode) |
+| `require_field_descriptions` | Fields must have descriptions (optional PK exemption) |
+| `classification_required_for_tags` | Fields matching tags/regex must have governance classification |
+| `rule_target_required` | Fields of specific types must have rule targets |
+| `naming_convention` | Regex patterns for entity, field, relationship, and index names |
+| `require_indexes` | Tables with ≥ N fields must have indexes |
+| `require_owner` | Entities must have an owner (optional email validation) |
+| `require_sla` | Entities must define SLA (filterable by tags and entity types) |
+| `deprecation_check` | Deprecated fields must have migration messages; warns on references |
+| `custom_expression` | User-defined expressions evaluated per entity, field, or model |
+
+### Policy Inheritance
+
+Policy packs can extend other packs via `pack.extends`:
+
+```yaml
+pack:
+  name: strict_governance
+  version: 2.0.0
+  extends: ../policies/default.policy.yaml
+```
+
+Policies are merged by `id` — child definitions override parent. Use `--inherit` flag:
+
+```bash
+./dm policy-check model.yaml --policy policies/strict.policy.yaml --inherit
+```
+
+### CI Integration Templates
+
+Ready-to-use CI templates in `ci-templates/`:
+
+| Template | Platform |
+|----------|----------|
+| `github-actions.yml` | GitHub Actions — validate, policy-check, PR gate |
+| `gitlab-ci.yml` | GitLab CI — validate, policy, breaking change gate |
+| `bitbucket-pipelines.yml` | Bitbucket Pipelines — validate, policy, PR gate |
+| `pr-comment-bot.yml` | GitHub Actions — auto-post diff/policy summary as PR comment |
 
 Policy schema: `schemas/policy.schema.json`
 
@@ -517,6 +616,9 @@ DataLex/
 │   │   ├── vite.config.js
 │   │   └── package.json
 │   ├── core_engine/             # Python core: parser, linter, compiler, diff
+│   │   └── src/dm_core/
+│   │       ├── connectors/      # Database connectors (postgres, mysql, snowflake, bigquery, databricks)
+│   │       └── importers.py     # File importers (SQL DDL, DBML, Spark schema)
 │   └── cli/                     # Python CLI entry point
 ├── model-examples/              # Example YAML models
 │   ├── starter-commerce.model.yaml
@@ -646,8 +748,8 @@ cd packages/web-app && npm run build
 
 ### Ideas for contributions
 
-- Additional code generators (e.g. BigQuery, Redshift, Spark)
-- New import formats (e.g. Avro, Protobuf, JSON Schema)
+- Additional code generators (e.g. Redshift, Spark)
+- New database connectors (e.g. SQL Server, Oracle, Redshift, ClickHouse)
 - Dark theme toggle
 - Collaborative editing support
 - Additional layout algorithms
