@@ -33,7 +33,15 @@ export function modelToFlow(doc) {
 
   const entities = doc.entities;
   const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
+  const indexes = Array.isArray(doc.indexes) ? doc.indexes : [];
   const classifications = doc.governance?.classification || {};
+
+  const indexesByEntity = new Map();
+  for (const idx of indexes) {
+    const entity = idx?.entity || "";
+    if (!indexesByEntity.has(entity)) indexesByEntity.set(entity, []);
+    indexesByEntity.get(entity).push(idx);
+  }
 
   const entityByName = new Map();
   const fieldRefs = new Set();
@@ -54,6 +62,7 @@ export function modelToFlow(doc) {
   const nodes = entities.map((entity, index) => {
     const tags = Array.isArray(entity.tags) ? entity.tags : [];
     const fields = Array.isArray(entity.fields) ? entity.fields : [];
+    const entityIndexes = indexesByEntity.get(entity.name) || [];
     return {
       id: entity.name,
       type: "entityNode",
@@ -64,7 +73,13 @@ export function modelToFlow(doc) {
         description: entity.description || "",
         tags,
         fields,
-        classifications
+        classifications,
+        subject_area: entity.subject_area || "",
+        owner: entity.owner || "",
+        schema: entity.schema || "",
+        database: entity.database || "",
+        sla: entity.sla || null,
+        indexes: entityIndexes
       }
     };
   });
@@ -106,7 +121,8 @@ export function modelToFlow(doc) {
         name: relName,
         fromRef: sourceRef,
         toRef: targetRef,
-        cardinality
+        cardinality,
+        description: rel?.description || ""
       },
       style: { stroke: edgeColor, strokeWidth: 2 },
       labelStyle: { fill: "#475569", fontSize: 10, fontWeight: 600 },

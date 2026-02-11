@@ -218,6 +218,113 @@ app.post("/api/projects/:id/files", async (req, res) => {
   }
 });
 
+// Resolve cross-model imports for a project
+app.get("/api/projects/:id/model-graph", async (req, res) => {
+  try {
+    const projects = await loadProjects();
+    const project = projects.find((p) => p.id === req.params.id);
+    if (!project) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    // Find all model files and parse their imports
+    const files = await walkYamlFiles(project.path);
+    const modelFiles = files.filter(
+      (f) => f.name.endsWith(".model.yaml") || f.name.endsWith(".model.yml")
+    );
+
+    const models = [];
+    const crossModelRels = [];
+
+    // Parse each model file for its name, entities, and imports
+    for (const file of modelFiles) {
+      try {
+        const content = await readFile(file.fullPath, "utf-8");
+        // Simple YAML-like parsing for model metadata
+        const nameMatch = content.match(/^\s*name:\s*(.+)$/m);
+        const modelName = nameMatch ? nameMatch[1].trim() : file.name;
+
+        // Extract entity names
+        const entityNames = [];
+        const entityRegex = /^\s*-\s*name:\s*([A-Z][A-Za-z0-9]*)\s*$/gm;
+        let match;
+        while ((match = entityRegex.exec(content)) !== null) {
+          entityNames.push(match[1]);
+        }
+
+        // Extract imports
+        const imports = [];
+        const importSection = content.match(/imports:\s*\n((?:\s+-[^\n]+\n?)*)/);
+        if (importSection) {
+          const importModelRegex = /model:\s*(\S+)/g;
+          let im;
+          while ((im = importModelRegex.exec(importSection[1])) !== null) {
+            imports.push(im[1]);
+          }
+        }
+
+        models.push({
+          name: modelName,
+          file: file.fullPath,
+          path: file.path,
+          entities: entityNames,
+          entity_count: entityNames.length,
+          imports,
+        });
+      } catch (_err) {
+        // Skip unparseable files
+      }
+    }
+
+    // Build entity-to-model map
+    const entityToModel = {};
+    for (const m of models) {
+      for (const e of m.entities) {
+        entityToModel[e] = m.name;
+      }
+    }
+
+    // Find cross-model relationships by scanning relationship sections
+    for (const file of modelFiles) {
+      try {
+        const content = await readFile(file.fullPath, "utf-8");
+        const nameMatch = content.match(/^\s*name:\s*(.+)$/m);
+        const modelName = nameMatch ? nameMatch[1].trim() : file.name;
+
+        // Find relationship from/to references
+        const relRegex = /from:\s*([A-Z][A-Za-z0-9]*)\.(\w+)\s*\n\s*to:\s*([A-Z][A-Za-z0-9]*)\.(\w+)/g;
+        let rm;
+        while ((rm = relRegex.exec(content)) !== null) {
+          const fromEntity = rm[1];
+          const toEntity = rm[3];
+          const fromModel = entityToModel[fromEntity] || modelName;
+          const toModel = entityToModel[toEntity] || modelName;
+          if (fromModel !== toModel) {
+            crossModelRels.push({
+              from_model: fromModel,
+              to_model: toModel,
+              from_entity: fromEntity,
+              to_entity: toEntity,
+            });
+          }
+        }
+      } catch (_err) {
+        // skip
+      }
+    }
+
+    res.json({
+      projectId: project.id,
+      model_count: models.length,
+      total_entities: models.reduce((sum, m) => sum + m.entity_count, 0),
+      models,
+      cross_model_relationships: crossModelRels,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
   console.log(`[datalex] Repo root: ${REPO_ROOT}`);

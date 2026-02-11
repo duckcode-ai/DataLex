@@ -28,6 +28,7 @@ const NAV_ITEMS = [
   { id: "validation", label: "Validation", icon: ShieldCheck },
   { id: "diff", label: "Diff & Gate", icon: GitCompare },
   { id: "impact", label: "Impact", icon: Network },
+  { id: "model-graph", label: "Model Graph", icon: Network },
 ];
 
 function ProjectSection() {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.com/schemas/model.schema.json",
-  "title": "DataLex YAML v1",
+  "title": "DataLex YAML v2",
   "type": "object",
   "required": [
     "model",
@@ -23,6 +23,11 @@
         "name": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "spec_version": {
+          "type": "integer",
+          "enum": [1, 2],
+          "default": 2
         },
         "version": {
           "type": "string",
@@ -47,6 +52,17 @@
             "approved",
             "deprecated"
           ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "imports": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/import_ref"
+          },
+          "description": "Cross-model imports for multi-file projects"
         }
       }
     },
@@ -64,6 +80,13 @@
         "$ref": "#/$defs/relationship"
       }
     },
+    "indexes": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/index"
+      }
+    },
     "governance": {
       "type": "object",
       "additionalProperties": false,
@@ -77,7 +100,8 @@
               "INTERNAL",
               "CONFIDENTIAL",
               "PII",
-              "PCI"
+              "PCI",
+              "PHI"
             ]
           }
         },
@@ -87,7 +111,26 @@
             "type": "string",
             "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
           }
+        },
+        "retention": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "period": {
+              "type": "string"
+            },
+            "policy": {
+              "type": "string"
+            }
+          }
         }
+      }
+    },
+    "glossary": {
+      "type": "array",
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/glossary_term"
       }
     },
     "rules": {
@@ -119,7 +162,10 @@
           "type": "string",
           "enum": [
             "table",
-            "view"
+            "view",
+            "materialized_view",
+            "external_table",
+            "snapshot"
           ]
         },
         "description": {
@@ -129,6 +175,38 @@
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "schema": {
+          "type": "string",
+          "description": "Database schema or dataset name"
+        },
+        "database": {
+          "type": "string",
+          "description": "Database or catalog name"
+        },
+        "subject_area": {
+          "type": "string",
+          "description": "Logical domain grouping for diagrams"
+        },
+        "owner": {
+          "type": "string",
+          "description": "Entity-level owner email or team"
+        },
+        "sla": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "freshness": {
+              "type": "string",
+              "description": "Max acceptable data staleness e.g. 24h, 1d"
+            },
+            "quality_score": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "Target quality score percentage"
+            }
           }
         },
         "fields": {
@@ -165,6 +243,10 @@
         "unique": {
           "type": "boolean"
         },
+        "foreign_key": {
+          "type": "boolean",
+          "description": "Marks this field as a foreign key"
+        },
         "description": {
           "type": "string"
         },
@@ -173,6 +255,47 @@
           "items": {
             "type": "string"
           }
+        },
+        "default": {
+          "description": "Default value for the column",
+          "type": ["string", "number", "boolean", "null"]
+        },
+        "check": {
+          "type": "string",
+          "description": "Check constraint expression"
+        },
+        "computed": {
+          "type": "boolean",
+          "description": "Whether this is a computed/virtual column"
+        },
+        "computed_expression": {
+          "type": "string",
+          "description": "SQL expression for computed columns"
+        },
+        "sensitivity": {
+          "type": "string",
+          "enum": [
+            "public",
+            "internal",
+            "confidential",
+            "restricted"
+          ],
+          "description": "Field-level data sensitivity classification"
+        },
+        "examples": {
+          "type": "array",
+          "items": {
+            "type": ["string", "number", "boolean", "null"]
+          },
+          "description": "Example values for documentation"
+        },
+        "deprecated": {
+          "type": "boolean",
+          "description": "Whether this field is deprecated"
+        },
+        "deprecated_message": {
+          "type": "string",
+          "description": "Migration guidance for deprecated fields"
         }
       }
     },
@@ -215,6 +338,132 @@
             "set_null",
             "no_action"
           ]
+        },
+        "on_update": {
+          "type": "string",
+          "enum": [
+            "restrict",
+            "cascade",
+            "set_null",
+            "no_action"
+          ]
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the relationship"
+        }
+      }
+    },
+    "index": {
+      "type": "object",
+      "required": [
+        "name",
+        "entity",
+        "fields"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "entity": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Za-z0-9]*$"
+        },
+        "fields": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$"
+          }
+        },
+        "unique": {
+          "type": "boolean",
+          "default": false
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "btree",
+            "hash",
+            "gin",
+            "gist",
+            "brin"
+          ],
+          "default": "btree"
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "glossary_term": {
+      "type": "object",
+      "required": [
+        "term",
+        "definition"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "term": {
+          "type": "string",
+          "minLength": 1
+        },
+        "abbreviation": {
+          "type": "string"
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "owner": {
+          "type": "string"
+        },
+        "related_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]*\\.[a-z][a-z0-9_]*$"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "import_ref": {
+      "type": "object",
+      "required": [
+        "model"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "model": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Name of the model to import (matches the model.name field in the target file)"
+        },
+        "alias": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Short alias for referencing imported entities (e.g. alias.Entity.field)"
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Za-z0-9]*$"
+          },
+          "description": "Specific entities to import. If omitted, all entities are imported."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative file path to the model file. If omitted, resolved by model name convention."
         }
       }
     },

@@ -1,6 +1,9 @@
-from typing import Any, Dict, List, Tuple
+import glob
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dm_core.canonical import compile_model
+from dm_core.loader import load_yaml_model
 
 
 def _index_entities(model: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -18,6 +21,30 @@ def _relationship_key(relationship: Dict[str, Any]) -> Tuple[str, str, str, str]
         relationship.get("to", ""),
         relationship.get("cardinality", ""),
     )
+
+
+def _index_key(idx: Dict[str, Any]) -> str:
+    fields = ",".join(idx.get("fields", []))
+    return f"{idx.get('name', '')}|{idx.get('entity', '')}|{fields}|{idx.get('unique', False)}"
+
+
+def _diff_indexes(
+    old_canonical: Dict[str, Any], new_canonical: Dict[str, Any]
+) -> Tuple[List[str], List[str], List[str]]:
+    old_indexes = {_index_key(idx) for idx in old_canonical.get("indexes", [])}
+    new_indexes = {_index_key(idx) for idx in new_canonical.get("indexes", [])}
+
+    old_names = {idx.get("name", "") for idx in old_canonical.get("indexes", [])}
+    new_names = {idx.get("name", "") for idx in new_canonical.get("indexes", [])}
+
+    added = sorted(new_names - old_names)
+    removed = sorted(old_names - new_names)
+    breaking: List[str] = []
+    for name in removed:
+        if name:
+            breaking.append(f"Index removed: {name}")
+
+    return added, removed, breaking
 
 
 def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[str, Any]:
@@ -106,6 +133,9 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
     for entity in removed_entities:
         breaking_changes.append(f"Entity removed: {entity}")
 
+    added_indexes, removed_indexes, index_breaking = _diff_indexes(old_canonical, new_canonical)
+    breaking_changes.extend(index_breaking)
+
     return {
         "summary": {
             "added_entities": len(added_entities),
@@ -113,6 +143,8 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
             "changed_entities": len(changed_entities),
             "added_relationships": len(added_relationships),
             "removed_relationships": len(removed_relationships),
+            "added_indexes": len(added_indexes),
+            "removed_indexes": len(removed_indexes),
             "breaking_change_count": len(sorted(set(breaking_changes))),
         },
         "added_entities": added_entities,
@@ -120,6 +152,85 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
         "changed_entities": changed_entities,
         "added_relationships": added_relationships,
         "removed_relationships": removed_relationships,
+        "added_indexes": added_indexes,
+        "removed_indexes": removed_indexes,
         "breaking_changes": sorted(set(breaking_changes)),
         "has_breaking_changes": bool(breaking_changes),
+    }
+
+
+def _find_model_files(directory: str) -> Dict[str, str]:
+    """Find all model YAML files in a directory, keyed by model name."""
+    dir_path = Path(directory).resolve()
+    models: Dict[str, str] = {}
+    for pattern in ["**/*.model.yaml", "**/*.model.yml"]:
+        for path in sorted(dir_path.glob(pattern)):
+            try:
+                data = load_yaml_model(str(path))
+                name = data.get("model", {}).get("name", "")
+                if name:
+                    models[name] = str(path)
+            except Exception:
+                continue
+    return models
+
+
+def project_diff(
+    old_dir: str,
+    new_dir: str,
+) -> Dict[str, Any]:
+    """Compare two directories of model files and produce a project-level diff.
+
+    Returns a summary of added/removed/changed models and per-model diffs.
+    """
+    old_models = _find_model_files(old_dir)
+    new_models = _find_model_files(new_dir)
+
+    old_names = set(old_models.keys())
+    new_names = set(new_models.keys())
+
+    added_models = sorted(new_names - old_names)
+    removed_models = sorted(old_names - new_names)
+    common_models = sorted(old_names & new_names)
+
+    model_diffs: Dict[str, Dict[str, Any]] = {}
+    all_breaking: List[str] = []
+
+    for name in common_models:
+        old_model = load_yaml_model(old_models[name])
+        new_model = load_yaml_model(new_models[name])
+        diff = semantic_diff(old_model, new_model)
+
+        has_changes = (
+            diff["summary"]["added_entities"] > 0
+            or diff["summary"]["removed_entities"] > 0
+            or diff["summary"]["changed_entities"] > 0
+            or diff["summary"]["added_relationships"] > 0
+            or diff["summary"]["removed_relationships"] > 0
+            or diff["summary"]["added_indexes"] > 0
+            or diff["summary"]["removed_indexes"] > 0
+        )
+
+        if has_changes:
+            model_diffs[name] = diff
+            for bc in diff["breaking_changes"]:
+                all_breaking.append(f"[{name}] {bc}")
+
+    for name in removed_models:
+        all_breaking.append(f"Model removed: {name}")
+
+    return {
+        "summary": {
+            "added_models": len(added_models),
+            "removed_models": len(removed_models),
+            "changed_models": len(model_diffs),
+            "unchanged_models": len(common_models) - len(model_diffs),
+            "breaking_change_count": len(all_breaking),
+        },
+        "added_models": added_models,
+        "removed_models": removed_models,
+        "changed_models": list(model_diffs.keys()),
+        "model_diffs": model_diffs,
+        "breaking_changes": sorted(all_breaking),
+        "has_breaking_changes": bool(all_breaking),
     }

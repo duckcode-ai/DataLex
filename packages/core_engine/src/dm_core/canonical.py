@@ -33,11 +33,31 @@ def _sort_rules(rules: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sorted(rules, key=lambda item: (item.get("name", ""), item.get("target", "")))
 
 
+def _sort_indexes(indexes: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return sorted(
+        deepcopy(indexes),
+        key=lambda item: (item.get("name", ""), item.get("entity", "")),
+    )
+
+
+def _sort_glossary(glossary: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sorted_terms = []
+    for term in glossary:
+        cloned = deepcopy(term)
+        if "related_fields" in cloned and isinstance(cloned["related_fields"], list):
+            cloned["related_fields"] = sorted(cloned["related_fields"])
+        if "tags" in cloned and isinstance(cloned["tags"], list):
+            cloned["tags"] = sorted(cloned["tags"])
+        sorted_terms.append(cloned)
+    return sorted(sorted_terms, key=lambda item: item.get("term", ""))
+
+
 def compile_model(model: Dict[str, Any]) -> Dict[str, Any]:
     canonical: Dict[str, Any] = {
         "model": deepcopy(model.get("model", {})),
         "entities": _sort_entities(model.get("entities", [])),
         "relationships": _sort_relationships(model.get("relationships", [])),
+        "indexes": _sort_indexes(model.get("indexes", [])),
         "rules": _sort_rules(model.get("rules", [])),
     }
 
@@ -52,6 +72,7 @@ def compile_model(model: Dict[str, Any]) -> Dict[str, Any]:
         governance["stewards"] = {key: stewards[key] for key in sorted(stewards.keys())}
 
     canonical["governance"] = governance
+    canonical["glossary"] = _sort_glossary(model.get("glossary", []))
     canonical["display"] = deepcopy(model.get("display", {}))
 
     owners = canonical["model"].get("owners")

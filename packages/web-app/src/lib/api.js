@@ -52,3 +52,7 @@ export async function createProjectFile(projectId, name, content = "") {
     body: JSON.stringify({ name, content }),
   });
 }
+
+export async function fetchModelGraph(projectId) {
+  return request(`/projects/${projectId}/model-graph`);
+}

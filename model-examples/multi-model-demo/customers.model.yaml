@@ -1,0 +1,127 @@
+model:
+  name: customers
+  spec_version: 2
+  version: 1.0.0
+  domain: customer
+  owners:
+    - customer-team@company.com
+  state: approved
+  description: Customer domain model - shared dimension for other models
+
+entities:
+  - name: Customer
+    type: table
+    description: Core customer master record
+    tags: [PII, GOLD]
+    schema: analytics
+    subject_area: customer_domain
+    owner: customer-team@company.com
+    sla:
+      freshness: 24h
+      quality_score: 99.5
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Unique customer identifier
+      - name: email
+        type: string
+        nullable: false
+        unique: true
+        sensitivity: restricted
+      - name: first_name
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: last_name
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: customer_status
+        type: string
+        nullable: false
+        default: "active"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: Address
+    type: table
+    description: Customer addresses
+    tags: [PII]
+    schema: analytics
+    subject_area: customer_domain
+    fields:
+      - name: address_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: line_1
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: city_name
+        type: string
+        nullable: false
+      - name: postal_code
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: country_code
+        type: string
+        nullable: false
+        default: "US"
+
+  - name: CustomerSegment
+    type: table
+    description: Customer segmentation definitions
+    schema: analytics
+    subject_area: customer_domain
+    fields:
+      - name: segment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: segment_name
+        type: string
+        nullable: false
+        unique: true
+      - name: description
+        type: string
+        nullable: true
+
+relationships:
+  - name: customer_addresses
+    from: Customer.customer_id
+    to: Address.customer_id
+    cardinality: one_to_many
+    description: Customer has multiple addresses
+
+indexes:
+  - name: idx_customer_email
+    entity: Customer
+    fields: [email]
+    unique: true
+  - name: idx_address_customer
+    entity: Address
+    fields: [customer_id]
+
+governance:
+  classification:
+    Customer.email: PII
+    Customer.first_name: PII
+    Customer.last_name: PII
+    Address.line_1: PII
+    Address.postal_code: PII
+
+glossary:
+  - term: Customer
+    definition: An individual or organization that has purchased or registered with the company
+    owner: customer-team@company.com
+    related_fields:
+      - Customer.customer_id

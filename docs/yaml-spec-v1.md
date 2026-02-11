@@ -1,5 +1,7 @@
 # YAML Spec v1 (MVP)
 
+> **Note:** YAML Spec v2 is now available with enterprise features including indexes, glossary, new entity types, field-level sensitivity, computed columns, and more. See [yaml-spec-v2.md](yaml-spec-v2.md). All v1 models are fully backward compatible with v2.
+
 ## Purpose
 Define data models in a strict, readable YAML format that can be validated, versioned, and rendered.
 

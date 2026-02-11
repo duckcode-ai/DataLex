@@ -12,6 +12,8 @@ import ValidationPanel from "./components/panels/ValidationPanel";
 import DiffPanel from "./components/panels/DiffPanel";
 import ImpactPanel from "./components/panels/ImpactPanel";
 import HistoryPanel from "./components/panels/HistoryPanel";
+import ModelGraphPanel from "./components/panels/ModelGraphPanel";
+import DictionaryPanel from "./components/panels/DictionaryPanel";
 
 import useUiStore from "./stores/uiStore";
 import useWorkspaceStore from "./stores/workspaceStore";
@@ -34,6 +36,8 @@ const BOTTOM_TABS = [
   { id: "validation", label: "Validation", icon: ShieldCheck },
   { id: "diff", label: "Diff & Gate", icon: GitCompare },
   { id: "impact", label: "Impact", icon: Network },
+  { id: "model-graph", label: "Model Graph", icon: Network },
+  { id: "dictionary", label: "Dictionary", icon: Columns3 },
   { id: "history", label: "History", icon: Clock },
 ];
 
@@ -168,6 +172,10 @@ function BottomPanelContent({ tab }) {
       return <DiffPanel />;
     case "impact":
       return <ImpactPanel />;
+    case "model-graph":
+      return <ModelGraphPanel />;
+    case "dictionary":
+      return <DictionaryPanel />;
     case "history":
       return <HistoryPanel />;
     default:

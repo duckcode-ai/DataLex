@@ -1,0 +1,167 @@
+model:
+  name: products
+  spec_version: 2
+  version: 1.0.0
+  domain: catalog
+  owners:
+    - product-team@company.com
+  state: approved
+  description: Product catalog domain model
+  imports:
+    - model: orders
+      alias: ord
+      entities: [OrderItem]
+
+entities:
+  - name: Product
+    type: table
+    description: Product catalog master
+    tags: [GOLD]
+    schema: analytics
+    subject_area: product_domain
+    owner: product-team@company.com
+    sla:
+      freshness: 12h
+      quality_score: 99.0
+    fields:
+      - name: product_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: sku
+        type: string
+        nullable: false
+        unique: true
+        description: Stock keeping unit
+      - name: product_name
+        type: string
+        nullable: false
+      - name: category_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: unit_price
+        type: decimal(10,2)
+        nullable: false
+        check: "unit_price >= 0"
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: Category
+    type: table
+    description: Product category hierarchy
+    schema: analytics
+    subject_area: product_domain
+    fields:
+      - name: category_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: category_name
+        type: string
+        nullable: false
+      - name: parent_category_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: level
+        type: integer
+        nullable: false
+        default: 0
+
+  - name: Supplier
+    type: table
+    description: Product suppliers
+    schema: analytics
+    subject_area: supply_chain_domain
+    fields:
+      - name: supplier_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: supplier_name
+        type: string
+        nullable: false
+      - name: contact_email
+        type: string
+        nullable: true
+        sensitivity: internal
+      - name: country_code
+        type: string
+        nullable: false
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+
+  - name: Inventory
+    type: materialized_view
+    description: Current inventory levels
+    schema: analytics
+    subject_area: supply_chain_domain
+    sla:
+      freshness: 4h
+    fields:
+      - name: product_id
+        type: integer
+        nullable: false
+      - name: warehouse_code
+        type: string
+        nullable: false
+      - name: quantity_on_hand
+        type: integer
+        computed: true
+        computed_expression: "SUM(stock_movements.quantity)"
+
+relationships:
+  - name: product_category
+    from: Product.category_id
+    to: Category.category_id
+    cardinality: many_to_one
+    description: Product belongs to a category
+
+  - name: category_parent
+    from: Category.parent_category_id
+    to: Category.category_id
+    cardinality: many_to_one
+    description: Category hierarchy self-reference
+
+  - name: product_order_items
+    from: Product.product_id
+    to: OrderItem.product_id
+    cardinality: one_to_many
+    description: Product referenced in order items (cross-model)
+
+indexes:
+  - name: idx_product_sku
+    entity: Product
+    fields: [sku]
+    unique: true
+  - name: idx_product_category
+    entity: Product
+    fields: [category_id]
+
+glossary:
+  - term: Stock Keeping Unit
+    abbreviation: SKU
+    definition: Unique identifier for each distinct product
+    owner: product-team@company.com
+    related_fields:
+      - Product.sku
+    tags: [PRODUCT]
+
+  - term: Reorder Point
+    definition: Inventory level at which a new purchase order should be placed
+    owner: supply-chain@company.com
+    tags: [SUPPLY_CHAIN]
+
+rules:
+  - name: valid_unit_price
+    target: Product.unit_price
+    expression: "value >= 0"
+    severity: error

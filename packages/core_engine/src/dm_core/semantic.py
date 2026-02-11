@@ -6,7 +6,9 @@ from dm_core.issues import Issue
 PASCAL_CASE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 SNAKE_CASE = re.compile(r"^[a-z][a-z0-9_]*$")
 REL_REF = re.compile(r"^[A-Z][A-Za-z0-9]*\.[a-z][a-z0-9_]*$")
-ALLOWED_CLASSIFICATIONS = {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "PII", "PCI"}
+ALLOWED_CLASSIFICATIONS = {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "PII", "PCI", "PHI"}
+ALLOWED_SENSITIVITY = {"public", "internal", "confidential", "restricted"}
+PK_REQUIRED_TYPES = {"table"}
 
 
 def _entity_field_refs(model: Dict[str, Any]) -> Set[str]:
@@ -18,6 +20,25 @@ def _entity_field_refs(model: Dict[str, Any]) -> Set[str]:
             if entity_name and field_name:
                 refs.add(f"{entity_name}.{field_name}")
     return refs
+
+
+def _entity_names(model: Dict[str, Any]) -> Set[str]:
+    return {entity.get("name", "") for entity in model.get("entities", []) if entity.get("name")}
+
+
+def _entity_field_names(model: Dict[str, Any]) -> Dict[str, Set[str]]:
+    result: Dict[str, Set[str]] = {}
+    for entity in model.get("entities", []):
+        entity_name = entity.get("name", "")
+        if not entity_name:
+            continue
+        names: Set[str] = set()
+        for field in entity.get("fields", []):
+            field_name = field.get("name", "")
+            if field_name:
+                names.add(field_name)
+        result[entity_name] = names
+    return result
 
 
 def _relationship_graph(model: Dict[str, Any]) -> Dict[str, Set[str]]:
@@ -55,12 +76,93 @@ def _has_cycle(graph: Dict[str, Set[str]]) -> bool:
     return False
 
 
+def _lint_indexes(model: Dict[str, Any], entity_field_map: Dict[str, Set[str]]) -> List[Issue]:
+    issues: List[Issue] = []
+    seen_index_names: Set[str] = set()
+
+    for idx_def in model.get("indexes", []):
+        idx_name = idx_def.get("name", "")
+        entity_name = idx_def.get("entity", "")
+        idx_fields = idx_def.get("fields", [])
+
+        if idx_name in seen_index_names:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="DUPLICATE_INDEX",
+                    message=f"Duplicate index name '{idx_name}'.",
+                    path="/indexes",
+                )
+            )
+        else:
+            seen_index_names.add(idx_name)
+
+        if entity_name and entity_name not in entity_field_map:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code="INDEX_ENTITY_NOT_FOUND",
+                    message=f"Index '{idx_name}' references non-existent entity '{entity_name}'.",
+                    path="/indexes",
+                )
+            )
+            continue
+
+        entity_fields = entity_field_map.get(entity_name, set())
+        for field_name in idx_fields:
+            if field_name and field_name not in entity_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="INDEX_FIELD_NOT_FOUND",
+                        message=f"Index '{idx_name}' references non-existent field '{entity_name}.{field_name}'.",
+                        path="/indexes",
+                    )
+                )
+
+    return issues
+
+
+def _lint_glossary(model: Dict[str, Any], refs: Set[str]) -> List[Issue]:
+    issues: List[Issue] = []
+    seen_terms: Set[str] = set()
+
+    for term_def in model.get("glossary", []):
+        term = term_def.get("term", "")
+
+        if term in seen_terms:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="DUPLICATE_GLOSSARY_TERM",
+                    message=f"Duplicate glossary term '{term}'.",
+                    path="/glossary",
+                )
+            )
+        else:
+            seen_terms.add(term)
+
+        for field_ref in term_def.get("related_fields", []):
+            if field_ref and field_ref not in refs:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="GLOSSARY_REF_NOT_FOUND",
+                        message=f"Glossary term '{term}' references non-existent field '{field_ref}'.",
+                        path="/glossary",
+                    )
+                )
+
+    return issues
+
+
 def lint_issues(model: Dict[str, Any]) -> List[Issue]:
     issues: List[Issue] = []
 
     entities = model.get("entities", [])
     seen_entities: Set[str] = set()
     refs = _entity_field_refs(model)
+    entity_field_map = _entity_field_names(model)
 
     for entity in entities:
         entity_name = entity.get("name", "")
@@ -118,7 +220,29 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
             if field.get("primary_key") is True:
                 has_pk = True
 
-        if entity.get("type") == "table" and not has_pk:
+            if field.get("computed") is True and not field.get("computed_expression"):
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="MISSING_COMPUTED_EXPRESSION",
+                        message=f"Computed field '{entity_name}.{name}' should have a computed_expression.",
+                        path=f"/entities/{entity_name}/fields",
+                    )
+                )
+
+            if field.get("deprecated") is True:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="DEPRECATED_FIELD",
+                        message=f"Field '{entity_name}.{name}' is deprecated."
+                        + (f" {field['deprecated_message']}" if field.get("deprecated_message") else ""),
+                        path=f"/entities/{entity_name}/fields",
+                    )
+                )
+
+        entity_type = entity.get("type", "table")
+        if entity_type in PK_REQUIRED_TYPES and not has_pk:
             issues.append(
                 Issue(
                     severity="error",
@@ -191,6 +315,9 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
                         path="/governance/classification",
                     )
                 )
+
+    issues.extend(_lint_indexes(model, entity_field_map))
+    issues.extend(_lint_glossary(model, refs))
 
     graph = _relationship_graph(model)
     if graph and _has_cycle(graph):

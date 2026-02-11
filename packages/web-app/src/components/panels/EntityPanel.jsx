@@ -9,6 +9,11 @@ import {
   FileText,
   ArrowRightLeft,
   Shield,
+  Database,
+  User,
+  Clock,
+  ListOrdered,
+  AlertTriangle,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -33,6 +38,8 @@ export default function EntityPanel() {
   }
 
   const classifications = model?.governance?.classification || {};
+  const imports = model?.model?.imports || [];
+  const localEntityNames = new Set((model?.entities || []).map((e) => e.name));
   const relationships = (model?.relationships || []).filter((r) => {
     const fromEntity = r.from?.split(".")[0];
     const toEntity = r.to?.split(".")[0];
@@ -92,6 +99,54 @@ export default function EntityPanel() {
             placeholder="PII, GOLD, ..."
           />
         </div>
+
+        {/* v2 Entity Properties */}
+        {(selectedEntity.schema || selectedEntity.database || selectedEntity.subject_area || selectedEntity.owner || selectedEntity.sla) && (
+          <div>
+            <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
+              <Database size={10} />
+              Properties
+            </label>
+            <div className="space-y-1 text-[11px]">
+              {selectedEntity.schema && (
+                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
+                  <span className="text-text-muted">Schema</span>
+                  <span className="ml-auto text-text-primary font-mono">{selectedEntity.schema}</span>
+                </div>
+              )}
+              {selectedEntity.database && (
+                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
+                  <span className="text-text-muted">Database</span>
+                  <span className="ml-auto text-text-primary font-mono">{selectedEntity.database}</span>
+                </div>
+              )}
+              {selectedEntity.subject_area && (
+                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
+                  <span className="text-text-muted">Subject Area</span>
+                  <span className="ml-auto text-text-primary">{selectedEntity.subject_area}</span>
+                </div>
+              )}
+              {selectedEntity.owner && (
+                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
+                  <User size={10} className="text-text-muted shrink-0" />
+                  <span className="text-text-muted">Owner</span>
+                  <span className="ml-auto text-text-primary">{selectedEntity.owner}</span>
+                </div>
+              )}
+              {selectedEntity.sla && (
+                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
+                  <Clock size={10} className="text-text-muted shrink-0" />
+                  <span className="text-text-muted">SLA</span>
+                  <span className="ml-auto text-text-primary">
+                    {selectedEntity.sla.freshness && `Freshness: ${selectedEntity.sla.freshness}`}
+                    {selectedEntity.sla.freshness && selectedEntity.sla.quality_score != null && " · "}
+                    {selectedEntity.sla.quality_score != null && `Quality: ${selectedEntity.sla.quality_score}%`}
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Fields */}
         <div>
@@ -181,23 +236,66 @@ export default function EntityPanel() {
               Relationships ({relationships.length})
             </label>
             <div className="space-y-1">
-              {relationships.map((rel) => (
+              {relationships.map((rel) => {
+                const fromEntity = rel.from?.split(".")[0] || "";
+                const toEntity = rel.to?.split(".")[0] || "";
+                const isCrossModel =
+                  (fromEntity && !localEntityNames.has(fromEntity)) ||
+                  (toEntity && !localEntityNames.has(toEntity));
+                return (
+                  <div
+                    key={rel.name}
+                    className={`flex items-center gap-2 px-2 py-1.5 border rounded-md text-[11px] ${
+                      isCrossModel
+                        ? "bg-indigo-50 border-indigo-200"
+                        : "bg-bg-primary border-border-primary"
+                    }`}
+                  >
+                    <span className="text-text-primary font-medium">{rel.name}</span>
+                    <span className="text-text-muted">
+                      {rel.from} → {rel.to}
+                    </span>
+                    {isCrossModel && (
+                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-indigo-100 text-indigo-600">
+                        CROSS-MODEL
+                      </span>
+                    )}
+                    <span className={`ml-auto px-1.5 py-0 rounded text-[9px] font-semibold ${
+                      rel.cardinality === "one_to_one" ? "bg-green-50 text-green-700" :
+                      rel.cardinality === "one_to_many" ? "bg-blue-50 text-blue-700" :
+                      rel.cardinality === "many_to_one" ? "bg-purple-50 text-purple-700" :
+                      "bg-orange-50 text-orange-700"
+                    }`}>
+                      {rel.cardinality?.replace(/_/g, ":")}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Indexes */}
+        {(model?.indexes || []).filter((idx) => idx.entity === selectedEntityId).length > 0 && (
+          <div>
+            <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
+              <ListOrdered size={10} />
+              Indexes ({(model?.indexes || []).filter((idx) => idx.entity === selectedEntityId).length})
+            </label>
+            <div className="space-y-1">
+              {(model?.indexes || []).filter((idx) => idx.entity === selectedEntityId).map((idx) => (
                 <div
-                  key={rel.name}
+                  key={idx.name}
                   className="flex items-center gap-2 px-2 py-1.5 bg-bg-primary border border-border-primary rounded-md text-[11px]"
                 >
-                  <span className="text-text-primary font-medium">{rel.name}</span>
-                  <span className="text-text-muted">
-                    {rel.from} → {rel.to}
-                  </span>
-                  <span className={`ml-auto px-1.5 py-0 rounded text-[9px] font-semibold ${
-                    rel.cardinality === "one_to_one" ? "bg-green-50 text-green-700" :
-                    rel.cardinality === "one_to_many" ? "bg-blue-50 text-blue-700" :
-                    rel.cardinality === "many_to_one" ? "bg-purple-50 text-purple-700" :
-                    "bg-orange-50 text-orange-700"
-                  }`}>
-                    {rel.cardinality?.replace(/_/g, ":")}
-                  </span>
+                  <code className="text-text-primary font-mono">{idx.name}</code>
+                  <span className="text-text-muted">{(idx.fields || []).join(", ")}</span>
+                  {idx.unique && (
+                    <span className="ml-auto px-1.5 py-0 rounded text-[9px] font-semibold bg-cyan-50 text-cyan-700">UNIQUE</span>
+                  )}
+                  {idx.type && idx.type !== "btree" && (
+                    <span className="px-1.5 py-0 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">{idx.type}</span>
+                  )}
                 </div>
               ))}
             </div>

@@ -85,13 +85,15 @@ Add screenshots here after launch:
 - **Resizable panes** — Drag the divider to allocate space between editor and diagram
 
 ### Entity Nodes
-- **Color-coded by type** (table, view, etc.)
-- **Field badges** — PK (primary key), FK (foreign key), UQ (unique) indicators
-- **Governance tags** — PII, GOLD, and custom classification badges
+- **Color-coded by type** — table, view, materialized_view, external_table, snapshot
+- **Field badges** — PK, FK, UQ, IDX (indexed), COMP (computed), CHK (check), DEF (default), sensitivity
+- **Governance tags** — PII, PCI, PHI, GOLD, and custom classification badges
+- **Deprecated fields** — Strikethrough styling with warning icon
+- **Subject area labels** — Logical domain grouping displayed on entity header
 - **Collapsible fields** — Show all fields, keys only, or top 8
 
 ### Review Panels
-- **Entity Properties** — View and edit entity details, fields, and tags
+- **Entity Properties** — View and edit entity details, fields, tags, schema/database, subject area, owner, SLA, and indexes
 - **Validation** — Real-time model quality checks with error/warning/info severity
 - **Diff & Gate** — Semantic diff between model versions with breaking change detection
 - **Impact Analysis** — Upstream/downstream dependency analysis
@@ -112,11 +114,32 @@ Add screenshots here after launch:
 
 ### CLI Toolchain
 - Validate, lint, and compile YAML models
-- Semantic diff between model versions
+- Semantic diff between model versions with index change tracking
 - Quality gate for CI pipelines (block breaking changes)
-- Generate SQL (Postgres/Snowflake), dbt models, and metadata JSON
+- Generate SQL (Postgres, Snowflake, BigQuery, Databricks), dbt models, and metadata JSON
 - Import from SQL DDL and DBML formats
 - Policy-based governance checks
+- Auto-format YAML to canonical style (`dm fmt`)
+- Model statistics and coverage reporting (`dm stats`)
+- **Multi-model resolution** — Resolve cross-file imports (`dm resolve`, `dm resolve-project`)
+- **Project-level diff** — Compare entire model directories (`dm diff-all`)
+- **Multi-model init** — Scaffold multi-file projects (`dm init --multi-model`)
+- **Data dictionary generation** — HTML and Markdown docs (`dm generate docs`)
+- **Auto-changelog** — Generate changelogs from model diffs (`dm generate changelog`)
+
+### Documentation & Data Dictionary
+- **HTML data dictionary** — Self-contained, searchable single-page site with entity catalog, field details, relationship map, indexes, glossary, and data classifications
+- **Markdown export** — GitHub wiki / Confluence-ready Markdown with full model documentation
+- **Auto-changelog** — Generate structured changelogs from semantic diffs between model versions
+- **Dictionary panel** — Browse the full data dictionary inline in the web UI with search across entities, fields, tags, and glossary
+
+### Multi-Model Support
+- **Cross-file imports** — Reference entities from other model files via `model.imports`
+- **Transitive resolution** — Imports are resolved recursively across the dependency graph
+- **Circular import detection** — Errors on circular dependencies
+- **Entity filtering** — Import specific entities or all entities from a model
+- **Model Graph panel** — Visualize cross-model dependencies in the web UI
+- **Cross-model relationship badges** — Relationships spanning models are highlighted
 
 ### Other
 - **Offline mode** — Works without the API server using browser localStorage
@@ -286,14 +309,27 @@ chmod +x dm
 ### Code Generation
 
 ```bash
-# Generate SQL DDL (Postgres or Snowflake)
+# Generate SQL DDL (Postgres, Snowflake, BigQuery, or Databricks)
 ./dm generate sql model-examples/starter-commerce.model.yaml --dialect postgres --out model.sql
+./dm generate sql model-examples/enterprise-dwh.model.yaml --dialect bigquery --out model_bq.sql
 
-# Generate dbt models
+# Generate dbt models (includes v2 metadata: sensitivity, tags, owner)
 ./dm generate dbt model-examples/starter-commerce.model.yaml --out-dir ./dbt
 
 # Generate metadata JSON
 ./dm generate metadata model-examples/starter-commerce.model.yaml --out metadata.json
+```
+
+### Formatting & Stats
+
+```bash
+# Auto-format YAML to canonical style
+./dm fmt model-examples/enterprise-dwh.model.yaml
+./dm fmt model-examples/enterprise-dwh.model.yaml --write  # in-place
+
+# Print model statistics
+./dm stats model-examples/enterprise-dwh.model.yaml
+./dm stats model-examples/enterprise-dwh.model.yaml --output-json
 ```
 
 ### Import
@@ -329,11 +365,19 @@ chmod +x dm
 | `dm gate <old> <new>` | Quality gate (CI-friendly) |
 | `dm validate-all` | Validate all models in a directory |
 | `dm policy-check <model>` | Check governance policies |
-| `dm generate sql <model>` | Generate SQL DDL |
-| `dm generate dbt <model>` | Generate dbt models |
+| `dm generate sql <model>` | Generate SQL DDL (postgres/snowflake/bigquery/databricks) |
+| `dm generate dbt <model>` | Generate dbt models with v2 metadata |
 | `dm generate metadata <model>` | Generate metadata JSON |
 | `dm import sql <file>` | Import from SQL DDL |
 | `dm import dbml <file>` | Import from DBML |
+| `dm fmt <model>` | Auto-format YAML to canonical style |
+| `dm stats <model>` | Print model statistics |
+| `dm resolve <model>` | Resolve cross-model imports and show unified graph |
+| `dm resolve-project <dir>` | Resolve all models in a project directory |
+| `dm diff-all <old-dir> <new-dir>` | Semantic diff between two model directories |
+| `dm init --multi-model` | Initialize a multi-model project structure |
+| `dm generate docs <model>` | Generate HTML/Markdown data dictionary |
+| `dm generate changelog <old> <new>` | Generate changelog from model diff |
 | `dm print-schema` | Print the model JSON schema |
 | `dm print-policy-schema` | Print the policy JSON schema |
 
@@ -413,7 +457,19 @@ rules:
 | `many_to_one` | N:1 relationship |
 | `many_to_many` | N:N relationship |
 
-For the full YAML specification, see [`docs/yaml-spec-v1.md`](docs/yaml-spec-v1.md).
+For the full YAML specification, see [`docs/yaml-spec-v2.md`](docs/yaml-spec-v2.md) (v1 spec: [`docs/yaml-spec-v1.md`](docs/yaml-spec-v1.md)).
+
+### v2 Schema Highlights
+
+| Feature | Description |
+|---------|-------------|
+| **Entity types** | `table`, `view`, `materialized_view`, `external_table`, `snapshot` |
+| **Field properties** | `default`, `check`, `computed`, `sensitivity`, `examples`, `deprecated`, `foreign_key` |
+| **Indexes** | Named indexes with entity/field refs, unique flag, type (btree/hash/gin/gist/brin) |
+| **Glossary** | Business term definitions with field references and ownership |
+| **Entity metadata** | `schema`, `database`, `subject_area`, `owner`, `sla` |
+| **Governance** | PHI classification, retention policies |
+| **Relationships** | `on_update` action, `description` field |
 
 ---
 

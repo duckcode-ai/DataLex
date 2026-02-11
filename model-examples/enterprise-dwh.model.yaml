@@ -1,0 +1,970 @@
+model:
+  name: enterprise_dwh
+  spec_version: 2
+  version: 1.0.0
+  domain: analytics
+  owners:
+    - data-platform@company.com
+    - analytics-eng@company.com
+  state: approved
+  description: Enterprise data warehouse model demonstrating all v2 features
+
+entities:
+  - name: Customer
+    type: table
+    description: Core customer master record
+    tags: [PII, GOLD]
+    schema: analytics
+    database: warehouse
+    subject_area: customer_domain
+    owner: customer-team@company.com
+    sla:
+      freshness: 24h
+      quality_score: 99.5
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Unique customer identifier
+      - name: external_code
+        type: string
+        nullable: false
+        unique: true
+        description: External system customer code
+      - name: first_name
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: last_name
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: email
+        type: string
+        nullable: false
+        unique: true
+        sensitivity: restricted
+        check: "length(email) > 5"
+        examples: ["alice@example.com", "bob@company.org"]
+      - name: phone_number
+        type: string
+        nullable: true
+        sensitivity: confidential
+      - name: date_of_birth
+        type: date
+        nullable: true
+        sensitivity: restricted
+      - name: gender_code
+        type: string
+        nullable: true
+      - name: customer_status
+        type: string
+        nullable: false
+        default: "active"
+        check: "customer_status IN ('active', 'inactive', 'suspended')"
+      - name: loyalty_tier
+        type: string
+        nullable: true
+        description: Customer loyalty program tier
+        examples: ["bronze", "silver", "gold", "platinum"]
+      - name: lifetime_value
+        type: decimal(12,2)
+        nullable: true
+        default: "0.00"
+        description: Total revenue attributed to this customer
+      - name: default_address_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: marketing_opt_in
+        type: boolean
+        nullable: false
+        default: false
+      - name: risk_segment
+        type: string
+        nullable: true
+      - name: legacy_crm_id
+        type: string
+        nullable: true
+        deprecated: true
+        deprecated_message: "Migrated to external_code. Will be removed in v2.0.0"
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Address
+    type: table
+    description: Customer and supplier addresses
+    tags: [PII]
+    schema: analytics
+    subject_area: customer_domain
+    fields:
+      - name: address_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: line_1
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: line_2
+        type: string
+        nullable: true
+      - name: city_name
+        type: string
+        nullable: false
+      - name: state_code
+        type: string
+        nullable: false
+      - name: postal_code
+        type: string
+        nullable: false
+        sensitivity: confidential
+      - name: country_code
+        type: string
+        nullable: false
+        default: "US"
+      - name: address_type
+        type: string
+        nullable: false
+        default: "shipping"
+        check: "address_type IN ('shipping', 'billing', 'both')"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: Product
+    type: table
+    description: Product catalog master
+    tags: [GOLD]
+    schema: analytics
+    subject_area: product_domain
+    owner: product-team@company.com
+    sla:
+      freshness: 12h
+      quality_score: 99.0
+    fields:
+      - name: product_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: sku
+        type: string
+        nullable: false
+        unique: true
+        description: Stock keeping unit
+      - name: product_name
+        type: string
+        nullable: false
+      - name: category_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: brand_name
+        type: string
+        nullable: true
+      - name: unit_price
+        type: decimal(10,2)
+        nullable: false
+        check: "unit_price >= 0"
+      - name: cost_price
+        type: decimal(10,2)
+        nullable: true
+        sensitivity: internal
+      - name: weight_kg
+        type: decimal(6,3)
+        nullable: true
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+      - name: launch_date
+        type: date
+        nullable: true
+      - name: discontinued_date
+        type: date
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: Category
+    type: table
+    description: Product category hierarchy
+    schema: analytics
+    subject_area: product_domain
+    fields:
+      - name: category_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: category_name
+        type: string
+        nullable: false
+      - name: parent_category_id
+        type: integer
+        nullable: true
+        foreign_key: true
+        description: Self-referencing parent for hierarchy
+      - name: level
+        type: integer
+        nullable: false
+        default: 0
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+
+  - name: Order
+    type: table
+    description: Customer orders
+    tags: [GOLD]
+    schema: analytics
+    subject_area: order_domain
+    owner: order-team@company.com
+    sla:
+      freshness: 1h
+      quality_score: 99.9
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_number
+        type: string
+        nullable: false
+        unique: true
+        description: Human-readable order number
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: order_date
+        type: timestamp
+        nullable: false
+      - name: status
+        type: string
+        nullable: false
+        default: "pending"
+        check: "status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled', 'returned')"
+      - name: shipping_address_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: billing_address_id
+        type: integer
+        nullable: true
+        foreign_key: true
+      - name: subtotal
+        type: decimal(12,2)
+        nullable: false
+        check: "subtotal >= 0"
+      - name: tax_amount
+        type: decimal(12,2)
+        nullable: false
+        default: "0.00"
+      - name: shipping_cost
+        type: decimal(10,2)
+        nullable: false
+        default: "0.00"
+      - name: total_amount
+        type: decimal(12,2)
+        nullable: false
+        check: "total_amount >= 0"
+      - name: currency_code
+        type: string
+        nullable: false
+        default: "USD"
+      - name: payment_method
+        type: string
+        nullable: true
+        sensitivity: internal
+      - name: channel
+        type: string
+        nullable: true
+        description: Sales channel (web, mobile, store, phone)
+      - name: created_at
+        type: timestamp
+        nullable: false
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: OrderItem
+    type: table
+    description: Individual line items within an order
+    schema: analytics
+    subject_area: order_domain
+    fields:
+      - name: order_item_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: quantity
+        type: integer
+        nullable: false
+        check: "quantity > 0"
+      - name: unit_price
+        type: decimal(10,2)
+        nullable: false
+      - name: discount_amount
+        type: decimal(10,2)
+        nullable: false
+        default: "0.00"
+      - name: line_total
+        type: decimal(12,2)
+        nullable: false
+        check: "line_total >= 0"
+
+  - name: Payment
+    type: table
+    description: Payment transactions
+    tags: [PCI, GOLD]
+    schema: analytics
+    subject_area: order_domain
+    sla:
+      freshness: 1h
+    fields:
+      - name: payment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: payment_method
+        type: string
+        nullable: false
+        sensitivity: internal
+      - name: card_last_four
+        type: string
+        nullable: true
+        sensitivity: restricted
+      - name: amount
+        type: decimal(12,2)
+        nullable: false
+        check: "amount > 0"
+      - name: currency_code
+        type: string
+        nullable: false
+        default: "USD"
+      - name: status
+        type: string
+        nullable: false
+        default: "pending"
+      - name: processed_at
+        type: timestamp
+        nullable: true
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: Supplier
+    type: table
+    description: Product suppliers and vendors
+    schema: analytics
+    subject_area: supply_chain_domain
+    fields:
+      - name: supplier_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: supplier_name
+        type: string
+        nullable: false
+      - name: contact_email
+        type: string
+        nullable: true
+        sensitivity: internal
+      - name: country_code
+        type: string
+        nullable: false
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+      - name: rating
+        type: decimal(3,2)
+        nullable: true
+        check: "rating >= 0 AND rating <= 5"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: ProductSupplier
+    type: table
+    description: Many-to-many junction between products and suppliers
+    schema: analytics
+    subject_area: supply_chain_domain
+    fields:
+      - name: product_supplier_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: supplier_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: lead_time_days
+        type: integer
+        nullable: true
+      - name: unit_cost
+        type: decimal(10,2)
+        nullable: true
+        sensitivity: internal
+      - name: is_primary
+        type: boolean
+        nullable: false
+        default: false
+
+  - name: Inventory
+    type: table
+    description: Current inventory levels by product and warehouse
+    schema: analytics
+    subject_area: supply_chain_domain
+    sla:
+      freshness: 4h
+      quality_score: 98.0
+    fields:
+      - name: inventory_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: warehouse_code
+        type: string
+        nullable: false
+      - name: quantity_on_hand
+        type: integer
+        nullable: false
+        default: 0
+        check: "quantity_on_hand >= 0"
+      - name: reorder_point
+        type: integer
+        nullable: true
+      - name: last_counted_at
+        type: timestamp
+        nullable: true
+      - name: updated_at
+        type: timestamp
+        nullable: false
+
+  - name: CustomerSegment
+    type: table
+    description: Customer segmentation definitions
+    schema: analytics
+    subject_area: customer_domain
+    fields:
+      - name: segment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: segment_name
+        type: string
+        nullable: false
+        unique: true
+      - name: description
+        type: string
+        nullable: true
+      - name: criteria_expression
+        type: string
+        nullable: true
+        description: SQL expression defining segment membership
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+
+  - name: Campaign
+    type: table
+    description: Marketing campaigns
+    schema: analytics
+    subject_area: marketing_domain
+    fields:
+      - name: campaign_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: campaign_name
+        type: string
+        nullable: false
+      - name: channel
+        type: string
+        nullable: false
+        description: Marketing channel (email, sms, push, social)
+      - name: start_date
+        type: date
+        nullable: false
+      - name: end_date
+        type: date
+        nullable: true
+      - name: budget
+        type: decimal(12,2)
+        nullable: true
+        sensitivity: internal
+      - name: status
+        type: string
+        nullable: false
+        default: "draft"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: CampaignResponse
+    type: table
+    description: Customer responses to marketing campaigns
+    schema: analytics
+    subject_area: marketing_domain
+    fields:
+      - name: response_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: campaign_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: response_type
+        type: string
+        nullable: false
+        description: Type of response (click, open, purchase, unsubscribe)
+      - name: response_at
+        type: timestamp
+        nullable: false
+      - name: revenue_attributed
+        type: decimal(12,2)
+        nullable: true
+
+  - name: ReturnRequest
+    type: table
+    description: Product return and refund requests
+    schema: analytics
+    subject_area: order_domain
+    fields:
+      - name: return_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: reason_code
+        type: string
+        nullable: false
+      - name: status
+        type: string
+        nullable: false
+        default: "requested"
+      - name: refund_amount
+        type: decimal(12,2)
+        nullable: true
+      - name: requested_at
+        type: timestamp
+        nullable: false
+      - name: resolved_at
+        type: timestamp
+        nullable: true
+
+  - name: AuditLog
+    type: table
+    description: System audit trail for compliance
+    tags: [GOLD]
+    schema: audit
+    subject_area: platform_domain
+    sla:
+      freshness: 5m
+      quality_score: 100.0
+    fields:
+      - name: audit_id
+        type: bigint
+        primary_key: true
+        nullable: false
+      - name: event_type
+        type: string
+        nullable: false
+      - name: entity_type
+        type: string
+        nullable: false
+      - name: entity_id
+        type: string
+        nullable: false
+      - name: actor_email
+        type: string
+        nullable: false
+        sensitivity: internal
+      - name: payload
+        type: json
+        nullable: true
+      - name: ip_address
+        type: string
+        nullable: true
+        sensitivity: confidential
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: DailySalesSummary
+    type: materialized_view
+    description: Pre-aggregated daily sales metrics
+    schema: analytics
+    subject_area: order_domain
+    sla:
+      freshness: 24h
+    fields:
+      - name: summary_date
+        type: date
+        nullable: false
+      - name: total_orders
+        type: integer
+        computed: true
+        computed_expression: "COUNT(DISTINCT order_id)"
+      - name: total_revenue
+        type: decimal(14,2)
+        computed: true
+        computed_expression: "SUM(total_amount)"
+      - name: avg_order_value
+        type: decimal(10,2)
+        computed: true
+        computed_expression: "AVG(total_amount)"
+      - name: unique_customers
+        type: integer
+        computed: true
+        computed_expression: "COUNT(DISTINCT customer_id)"
+
+  - name: CustomerLifetimeView
+    type: view
+    description: Customer lifetime value and activity summary
+    schema: analytics
+    subject_area: customer_domain
+    fields:
+      - name: customer_id
+        type: integer
+        nullable: false
+      - name: total_orders
+        type: integer
+        computed: true
+        computed_expression: "COUNT(orders.order_id)"
+      - name: total_spent
+        type: decimal(14,2)
+        computed: true
+        computed_expression: "SUM(orders.total_amount)"
+      - name: first_order_date
+        type: timestamp
+        computed: true
+        computed_expression: "MIN(orders.order_date)"
+      - name: last_order_date
+        type: timestamp
+        computed: true
+        computed_expression: "MAX(orders.order_date)"
+      - name: avg_order_value
+        type: decimal(10,2)
+        computed: true
+        computed_expression: "AVG(orders.total_amount)"
+
+  - name: ExternalWeatherData
+    type: external_table
+    description: External weather data for demand forecasting
+    schema: external
+    subject_area: analytics_domain
+    fields:
+      - name: observation_date
+        type: date
+        nullable: false
+      - name: location_code
+        type: string
+        nullable: false
+      - name: temperature_celsius
+        type: decimal(5,2)
+        nullable: true
+      - name: precipitation_mm
+        type: decimal(6,2)
+        nullable: true
+      - name: weather_condition
+        type: string
+        nullable: true
+
+  - name: InventorySnapshot
+    type: snapshot
+    description: Point-in-time inventory snapshots for trend analysis
+    schema: snapshots
+    subject_area: supply_chain_domain
+    fields:
+      - name: snapshot_id
+        type: bigint
+        nullable: false
+      - name: snapshot_date
+        type: date
+        nullable: false
+      - name: product_id
+        type: integer
+        nullable: false
+      - name: warehouse_code
+        type: string
+        nullable: false
+      - name: quantity_on_hand
+        type: integer
+        nullable: false
+
+relationships:
+  - name: customer_default_address
+    from: Customer.default_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+    description: Customer's default shipping address
+
+  - name: customer_orders
+    from: Customer.customer_id
+    to: Order.customer_id
+    cardinality: one_to_many
+    on_delete: restrict
+    description: Customer places orders
+
+  - name: order_shipping_address
+    from: Order.shipping_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+    description: Order shipping destination
+
+  - name: order_billing_address
+    from: Order.billing_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+    description: Order billing address
+
+  - name: order_items
+    from: Order.order_id
+    to: OrderItem.order_id
+    cardinality: one_to_many
+    on_delete: cascade
+    description: Order contains line items
+
+  - name: order_item_product
+    from: Product.product_id
+    to: OrderItem.product_id
+    cardinality: one_to_many
+    description: Product referenced in order items
+
+  - name: product_category
+    from: Product.category_id
+    to: Category.category_id
+    cardinality: many_to_one
+    description: Product belongs to a category
+
+  - name: category_parent
+    from: Category.parent_category_id
+    to: Category.category_id
+    cardinality: many_to_one
+    description: Category hierarchy self-reference
+
+  - name: order_payments
+    from: Order.order_id
+    to: Payment.order_id
+    cardinality: one_to_many
+    description: Payments for an order
+
+  - name: product_suppliers
+    from: Product.product_id
+    to: ProductSupplier.product_id
+    cardinality: one_to_many
+    description: Product supplied by multiple suppliers
+
+  - name: supplier_products
+    from: Supplier.supplier_id
+    to: ProductSupplier.supplier_id
+    cardinality: one_to_many
+    description: Supplier provides multiple products
+
+  - name: product_inventory
+    from: Product.product_id
+    to: Inventory.product_id
+    cardinality: one_to_many
+    description: Product inventory across warehouses
+
+  - name: campaign_responses
+    from: Campaign.campaign_id
+    to: CampaignResponse.campaign_id
+    cardinality: one_to_many
+    description: Campaign generates responses
+
+  - name: customer_campaign_responses
+    from: Customer.customer_id
+    to: CampaignResponse.customer_id
+    cardinality: one_to_many
+    description: Customer responds to campaigns
+
+  - name: order_returns
+    from: Order.order_id
+    to: ReturnRequest.order_id
+    cardinality: one_to_many
+    description: Order may have return requests
+
+indexes:
+  - name: idx_customer_email
+    entity: Customer
+    fields: [email]
+    unique: true
+  - name: idx_customer_external_code
+    entity: Customer
+    fields: [external_code]
+    unique: true
+  - name: idx_customer_status
+    entity: Customer
+    fields: [customer_status]
+    type: btree
+  - name: idx_order_customer
+    entity: Order
+    fields: [customer_id]
+  - name: idx_order_date
+    entity: Order
+    fields: [order_date]
+  - name: idx_order_status
+    entity: Order
+    fields: [status]
+  - name: idx_order_number
+    entity: Order
+    fields: [order_number]
+    unique: true
+  - name: idx_order_item_order
+    entity: OrderItem
+    fields: [order_id]
+  - name: idx_order_item_product
+    entity: OrderItem
+    fields: [product_id]
+  - name: idx_product_sku
+    entity: Product
+    fields: [sku]
+    unique: true
+  - name: idx_product_category
+    entity: Product
+    fields: [category_id]
+  - name: idx_payment_order
+    entity: Payment
+    fields: [order_id]
+  - name: idx_inventory_product
+    entity: Inventory
+    fields: [product_id, warehouse_code]
+    unique: true
+  - name: idx_audit_created
+    entity: AuditLog
+    fields: [created_at]
+    type: brin
+  - name: idx_audit_entity
+    entity: AuditLog
+    fields: [entity_type, entity_id]
+  - name: idx_campaign_response_customer
+    entity: CampaignResponse
+    fields: [customer_id]
+  - name: idx_campaign_response_campaign
+    entity: CampaignResponse
+    fields: [campaign_id]
+
+governance:
+  classification:
+    Customer.email: PII
+    Customer.phone_number: PII
+    Customer.date_of_birth: PII
+    Customer.first_name: PII
+    Customer.last_name: PII
+    Address.line_1: PII
+    Address.postal_code: PII
+    Payment.card_last_four: PCI
+    AuditLog.ip_address: CONFIDENTIAL
+  stewards:
+    customer_domain: customer-team@company.com
+    order_domain: order-team@company.com
+    product_domain: product-team@company.com
+    supply_chain_domain: supply-chain@company.com
+    platform_domain: platform-eng@company.com
+  retention:
+    period: 7y
+    policy: GDPR
+
+glossary:
+  - term: Customer Lifetime Value
+    abbreviation: CLV
+    definition: Total revenue attributed to a customer over their entire relationship with the company
+    owner: analytics-team@company.com
+    related_fields:
+      - Customer.lifetime_value
+    tags: [KPI, FINANCE]
+
+  - term: Average Order Value
+    abbreviation: AOV
+    definition: Mean total amount per order, calculated as total revenue divided by number of orders
+    owner: analytics-team@company.com
+    related_fields:
+      - Order.total_amount
+    tags: [KPI, FINANCE]
+
+  - term: Stock Keeping Unit
+    abbreviation: SKU
+    definition: Unique identifier for each distinct product and service that can be purchased
+    owner: product-team@company.com
+    related_fields:
+      - Product.sku
+    tags: [PRODUCT]
+
+  - term: Lead Time
+    definition: Number of days from order placement to supplier delivery
+    owner: supply-chain@company.com
+    related_fields:
+      - ProductSupplier.lead_time_days
+    tags: [SUPPLY_CHAIN]
+
+  - term: Reorder Point
+    abbreviation: ROP
+    definition: Inventory level at which a new purchase order should be placed to avoid stockout
+    owner: supply-chain@company.com
+    related_fields:
+      - Inventory.reorder_point
+    tags: [SUPPLY_CHAIN]
+
+rules:
+  - name: positive_order_total
+    target: Order.total_amount
+    expression: "value >= 0"
+    severity: error
+  - name: positive_payment_amount
+    target: Payment.amount
+    expression: "value > 0"
+    severity: error
+  - name: valid_unit_price
+    target: Product.unit_price
+    expression: "value >= 0"
+    severity: error
+  - name: inventory_non_negative
+    target: Inventory.quantity_on_hand
+    expression: "value >= 0"
+    severity: error
+  - name: valid_supplier_rating
+    target: Supplier.rating
+    expression: "value >= 0 AND value <= 5"
+    severity: warn

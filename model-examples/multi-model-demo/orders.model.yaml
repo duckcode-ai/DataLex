@@ -1,0 +1,185 @@
+model:
+  name: orders
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - order-team@company.com
+  state: approved
+  description: Order domain model - imports customers for cross-model relationships
+  imports:
+    - model: customers
+      alias: cust
+      entities: [Customer, Address]
+
+entities:
+  - name: Order
+    type: table
+    description: Customer orders
+    tags: [GOLD]
+    schema: analytics
+    subject_area: order_domain
+    owner: order-team@company.com
+    sla:
+      freshness: 1h
+      quality_score: 99.9
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_number
+        type: string
+        nullable: false
+        unique: true
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: References Customer from customers model
+      - name: order_date
+        type: timestamp
+        nullable: false
+      - name: status
+        type: string
+        nullable: false
+        default: "pending"
+        check: "status IN ('pending', 'confirmed', 'shipped', 'delivered', 'cancelled')"
+      - name: shipping_address_id
+        type: integer
+        nullable: true
+        foreign_key: true
+        description: References Address from customers model
+      - name: total_amount
+        type: decimal(12,2)
+        nullable: false
+        check: "total_amount >= 0"
+      - name: currency_code
+        type: string
+        nullable: false
+        default: "USD"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+  - name: OrderItem
+    type: table
+    description: Individual line items within an order
+    schema: analytics
+    subject_area: order_domain
+    fields:
+      - name: order_item_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: References Product from products model
+      - name: quantity
+        type: integer
+        nullable: false
+        check: "quantity > 0"
+      - name: unit_price
+        type: decimal(10,2)
+        nullable: false
+      - name: line_total
+        type: decimal(12,2)
+        nullable: false
+
+  - name: Payment
+    type: table
+    description: Payment transactions
+    tags: [PCI]
+    schema: analytics
+    subject_area: order_domain
+    fields:
+      - name: payment_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: amount
+        type: decimal(12,2)
+        nullable: false
+        check: "amount > 0"
+      - name: payment_method
+        type: string
+        nullable: false
+        sensitivity: internal
+      - name: card_last_four
+        type: string
+        nullable: true
+        sensitivity: restricted
+      - name: status
+        type: string
+        nullable: false
+        default: "pending"
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+relationships:
+  - name: customer_orders
+    from: Order.customer_id
+    to: Customer.customer_id
+    cardinality: many_to_one
+    on_delete: restrict
+    description: Order belongs to a customer (cross-model)
+
+  - name: order_shipping_address
+    from: Order.shipping_address_id
+    to: Address.address_id
+    cardinality: many_to_one
+    description: Order ships to an address (cross-model)
+
+  - name: order_items
+    from: Order.order_id
+    to: OrderItem.order_id
+    cardinality: one_to_many
+    on_delete: cascade
+
+  - name: order_payments
+    from: Order.order_id
+    to: Payment.order_id
+    cardinality: one_to_many
+
+indexes:
+  - name: idx_order_customer
+    entity: Order
+    fields: [customer_id]
+  - name: idx_order_date
+    entity: Order
+    fields: [order_date]
+  - name: idx_order_number
+    entity: Order
+    fields: [order_number]
+    unique: true
+  - name: idx_order_item_order
+    entity: OrderItem
+    fields: [order_id]
+  - name: idx_payment_order
+    entity: Payment
+    fields: [order_id]
+
+governance:
+  classification:
+    Payment.card_last_four: PCI
+
+rules:
+  - name: positive_order_total
+    target: Order.total_amount
+    expression: "value >= 0"
+    severity: error
+  - name: positive_payment
+    target: Payment.amount
+    expression: "value > 0"
+    severity: error

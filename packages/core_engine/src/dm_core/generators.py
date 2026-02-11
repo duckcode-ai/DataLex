@@ -1,5 +1,7 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+SUPPORTED_DIALECTS = {"postgres", "snowflake", "bigquery", "databricks"}
 
 
 def _to_snake(name: str) -> str:
@@ -25,6 +27,9 @@ def _sql_type(field_type: str, dialect: str) -> str:
         "timestamp": "TIMESTAMP",
         "float": "DOUBLE PRECISION",
         "json": "JSONB",
+        "uuid": "UUID",
+        "text": "TEXT",
+        "binary": "BYTEA",
     }
     mapping_snowflake = {
         "string": "VARCHAR",
@@ -35,35 +40,114 @@ def _sql_type(field_type: str, dialect: str) -> str:
         "timestamp": "TIMESTAMP_NTZ",
         "float": "FLOAT",
         "json": "VARIANT",
+        "uuid": "VARCHAR",
+        "text": "VARCHAR",
+        "binary": "BINARY",
+    }
+    mapping_bigquery = {
+        "string": "STRING",
+        "integer": "INT64",
+        "bigint": "INT64",
+        "boolean": "BOOL",
+        "date": "DATE",
+        "timestamp": "TIMESTAMP",
+        "float": "FLOAT64",
+        "json": "JSON",
+        "uuid": "STRING",
+        "text": "STRING",
+        "binary": "BYTES",
+    }
+    mapping_databricks = {
+        "string": "STRING",
+        "integer": "INT",
+        "bigint": "BIGINT",
+        "boolean": "BOOLEAN",
+        "date": "DATE",
+        "timestamp": "TIMESTAMP",
+        "float": "DOUBLE",
+        "json": "STRING",
+        "uuid": "STRING",
+        "text": "STRING",
+        "binary": "BINARY",
     }
 
-    mapping = mapping_postgres if dialect == "postgres" else mapping_snowflake
+    mappings = {
+        "postgres": mapping_postgres,
+        "snowflake": mapping_snowflake,
+        "bigquery": mapping_bigquery,
+        "databricks": mapping_databricks,
+    }
+    mapping = mappings.get(dialect, mapping_postgres)
     return mapping.get(value, field_type)
+
+
+def _qualified_name(entity: Dict[str, Any], dialect: str) -> str:
+    table_name = _to_snake(str(entity.get("name", "")))
+    schema_name = entity.get("schema")
+    database_name = entity.get("database")
+
+    if dialect == "bigquery":
+        parts = [p for p in [database_name, schema_name, table_name] if p]
+        return ".".join([f"`{p}`" for p in parts])
+
+    if database_name and schema_name:
+        return f'"{database_name}"."{schema_name}"."{table_name}"'
+    if schema_name:
+        return f'"{schema_name}"."{table_name}"'
+    return f'"{table_name}"'
+
+
+def _format_default(value: Any, dialect: str) -> Optional[str]:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, float)):
+        return str(value)
+    return f"'{value}'"
 
 
 def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
     dialect = dialect.lower()
-    if dialect not in {"postgres", "snowflake"}:
-        raise ValueError("Unsupported SQL dialect. Use 'postgres' or 'snowflake'.")
+    if dialect not in SUPPORTED_DIALECTS:
+        raise ValueError(f"Unsupported SQL dialect. Use one of: {', '.join(sorted(SUPPORTED_DIALECTS))}.")
 
     entities = model.get("entities", [])
     relationships = model.get("relationships", [])
+    indexes = model.get("indexes", [])
 
     create_blocks: List[str] = []
     alter_blocks: List[str] = []
+    index_blocks: List[str] = []
+
+    entity_map = {str(e.get("name", "")): e for e in entities}
 
     for entity in entities:
-        if entity.get("type") != "table":
+        entity_type = entity.get("type", "table")
+        entity_name = str(entity.get("name", ""))
+        qualified = _qualified_name(entity, dialect)
+        fields = entity.get("fields", [])
+
+        if entity_type in ("view", "materialized_view"):
+            keyword = "MATERIALIZED VIEW" if entity_type == "materialized_view" else "VIEW"
+            col_list = ", ".join([f'NULL AS "{f.get("name")}"' for f in fields])
+            create_blocks.append(f"CREATE {keyword} {qualified} AS\nSELECT {col_list};")
             continue
 
-        entity_name = str(entity.get("name", ""))
-        table_name = _to_snake(entity_name)
-        fields = entity.get("fields", [])
+        if entity_type == "external_table":
+            continue
+
+        if entity_type == "snapshot":
+            continue
 
         column_lines: List[str] = []
         pk_fields: List[str] = []
+        check_constraints: List[str] = []
 
         for field in fields:
+            if field.get("computed") is True:
+                continue
+
             field_name = str(field.get("name", ""))
             col_type = _sql_type(str(field.get("type", "string")), dialect)
             nullable = bool(field.get("nullable", True))
@@ -71,6 +155,13 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
             primary_key = bool(field.get("primary_key", False))
 
             parts = [f'"{field_name}"', col_type]
+
+            default_val = field.get("default")
+            if "default" in field:
+                formatted = _format_default(default_val, dialect)
+                if formatted is not None:
+                    parts.append(f"DEFAULT {formatted}")
+
             if not nullable:
                 parts.append("NOT NULL")
             if unique:
@@ -80,11 +171,20 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
 
             column_lines.append("  " + " ".join(parts))
 
+            check_expr = field.get("check")
+            if check_expr:
+                constraint_name = f"chk_{_to_snake(entity_name)}_{field_name}"
+                check_constraints.append(
+                    f'  CONSTRAINT "{constraint_name}" CHECK ({check_expr})'
+                )
+
         if pk_fields:
             pk_cols = ", ".join([f'"{col}"' for col in pk_fields])
             column_lines.append(f"  PRIMARY KEY ({pk_cols})")
 
-        create_sql = f'CREATE TABLE "{table_name}" (\n' + ",\n".join(column_lines) + "\n);"
+        column_lines.extend(check_constraints)
+
+        create_sql = f"CREATE TABLE {qualified} (\n" + ",\n".join(column_lines) + "\n);"
         create_blocks.append(create_sql)
 
     for rel in relationships:
@@ -112,16 +212,38 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
             continue
 
         constraint = f"fk_{_to_snake(rel_name)}"
-        child_table = _to_snake(child_entity)
-        parent_table = _to_snake(parent_entity)
+        child_qualified = _qualified_name(entity_map.get(child_entity, {"name": child_entity}), dialect)
+        parent_qualified = _qualified_name(entity_map.get(parent_entity, {"name": parent_entity}), dialect)
+
+        if dialect == "bigquery":
+            continue
+
         alter_sql = (
-            f'ALTER TABLE "{child_table}" '
+            f"ALTER TABLE {child_qualified} "
             f'ADD CONSTRAINT "{constraint}" FOREIGN KEY ("{child_field}") '
-            f'REFERENCES "{parent_table}" ("{parent_field}");'
+            f'REFERENCES {parent_qualified} ("{parent_field}");'
         )
         alter_blocks.append(alter_sql)
 
-    blocks = create_blocks + alter_blocks
+    for idx_def in indexes:
+        idx_name = idx_def.get("name", "")
+        idx_entity = idx_def.get("entity", "")
+        idx_fields = idx_def.get("fields", [])
+        idx_unique = idx_def.get("unique", False)
+
+        entity_obj = entity_map.get(idx_entity, {"name": idx_entity})
+        qualified = _qualified_name(entity_obj, dialect)
+        cols = ", ".join([f'"{f}"' for f in idx_fields])
+        unique_kw = "UNIQUE " if idx_unique else ""
+
+        if dialect == "bigquery":
+            continue
+
+        index_blocks.append(
+            f'CREATE {unique_kw}INDEX "{idx_name}" ON {qualified} ({cols});'
+        )
+
+    blocks = create_blocks + alter_blocks + index_blocks
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 
@@ -167,12 +289,32 @@ def dbt_scaffold_files(
         schema_lines.append(f"  - name: {model_name}")
         if entity.get("description"):
             schema_lines.append(f"    description: \"{entity.get('description')}\"")
+        entity_meta: List[str] = []
+        if entity.get("tags"):
+            entity_meta.append(f"      tags: {entity['tags']}")
+        if entity.get("owner"):
+            entity_meta.append(f"      owner: \"{entity['owner']}\"")
+        if entity.get("subject_area"):
+            entity_meta.append(f"      subject_area: \"{entity['subject_area']}\"")
+        if entity_meta:
+            schema_lines.append("    meta:")
+            schema_lines.extend(entity_meta)
         schema_lines.append("    columns:")
         for field in fields:
             field_name = str(field.get("name", ""))
             schema_lines.append(f"      - name: {field_name}")
             description = str(field.get("description", "")).strip() or f"Field {field_name}"
             schema_lines.append(f"        description: \"{description}\"")
+            field_meta: List[str] = []
+            if field.get("sensitivity"):
+                field_meta.append(f"          sensitivity: \"{field['sensitivity']}\"")
+            if field.get("tags"):
+                field_meta.append(f"          tags: {field['tags']}")
+            if field.get("deprecated"):
+                field_meta.append("          deprecated: true")
+            if field_meta:
+                schema_lines.append("        meta:")
+                schema_lines.extend(field_meta)
             tests: List[str] = []
             if field.get("primary_key"):
                 tests.extend(["not_null", "unique"])

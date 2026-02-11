@@ -8,6 +8,9 @@ import yaml
 
 from dm_core import (
     compile_model,
+    generate_changelog,
+    generate_html_docs,
+    generate_markdown_docs,
     generate_sql_ddl,
     import_dbml,
     import_sql_ddl,
@@ -16,9 +19,15 @@ from dm_core import (
     load_schema,
     load_yaml_model,
     policy_issues,
+    project_diff,
+    resolve_model,
+    resolve_project,
     schema_issues,
     semantic_diff,
+    write_changelog,
     write_dbt_scaffold,
+    write_html_docs,
+    write_markdown_docs,
 )
 from dm_core.issues import Issue, has_errors, to_lines
 
@@ -41,6 +50,89 @@ entities:
       - name: email
         type: string
         nullable: false
+"""
+
+MULTI_MODEL_SHARED = """model:
+  name: shared_dimensions
+  spec_version: 2
+  version: 1.0.0
+  domain: shared
+  owners:
+    - data-team@example.com
+  state: draft
+  description: Shared dimension entities used across domain models
+
+entities:
+  - name: Customer
+    type: table
+    description: Customer master record
+    schema: shared
+    subject_area: customer_domain
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: email
+        type: string
+        nullable: false
+        unique: true
+      - name: full_name
+        type: string
+        nullable: false
+      - name: created_at
+        type: timestamp
+        nullable: false
+
+indexes:
+  - name: idx_customer_email
+    entity: Customer
+    fields: [email]
+    unique: true
+"""
+
+MULTI_MODEL_ORDERS = """model:
+  name: orders
+  spec_version: 2
+  version: 1.0.0
+  domain: sales
+  owners:
+    - data-team@example.com
+  state: draft
+  description: Order domain model
+  imports:
+    - model: shared_dimensions
+      alias: shared
+      entities: [Customer]
+
+entities:
+  - name: Order
+    type: table
+    description: Customer orders
+    schema: sales
+    subject_area: order_domain
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+      - name: total_amount
+        type: decimal(12,2)
+        nullable: false
+      - name: order_date
+        type: timestamp
+        nullable: false
+
+relationships:
+  - name: order_customer
+    from: Order.customer_id
+    to: Customer.customer_id
+    cardinality: many_to_one
+    description: Order belongs to a customer (cross-model)
 """
 
 
@@ -102,18 +194,16 @@ def _write_yaml(path: str, payload: Dict[str, Any]) -> None:
     Path(path).write_text(output, encoding="utf-8")
 
 
-def cmd_init(args: argparse.Namespace) -> int:
-    root = Path(args.path).resolve()
+def _init_schemas_and_policies(root: Path) -> List[Path]:
+    """Copy schema and policy files into the workspace. Returns list of created paths."""
+    created = []
     (root / "schemas").mkdir(parents=True, exist_ok=True)
-    (root / "model-examples").mkdir(parents=True, exist_ok=True)
     (root / "policies").mkdir(parents=True, exist_ok=True)
 
     schema_dst = root / "schemas" / "model.schema.json"
     policy_schema_dst = root / "schemas" / "policy.schema.json"
-    sample_dst = root / "model-examples" / "starter.model.yaml"
     default_policy_dst = root / "policies" / "default.policy.yaml"
     strict_policy_dst = root / "policies" / "strict.policy.yaml"
-    config_dst = root / "dm.config.yaml"
 
     if not schema_dst.exists():
         repo_schema = Path.cwd() / "schemas" / "model.schema.json"
@@ -121,6 +211,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             schema_dst.write_text(repo_schema.read_text(encoding="utf-8"), encoding="utf-8")
         else:
             schema_dst.write_text("{}", encoding="utf-8")
+    created.append(schema_dst)
 
     if not policy_schema_dst.exists():
         repo_policy_schema = Path.cwd() / "schemas" / "policy.schema.json"
@@ -130,37 +221,85 @@ def cmd_init(args: argparse.Namespace) -> int:
             )
         else:
             policy_schema_dst.write_text("{}", encoding="utf-8")
-
-    if not sample_dst.exists():
-        sample_dst.write_text(STARTER_MODEL, encoding="utf-8")
+    created.append(policy_schema_dst)
 
     repo_policy_dir = Path.cwd() / "policies"
     if not default_policy_dst.exists():
         repo_default = repo_policy_dir / "default.policy.yaml"
         if repo_default.exists():
             default_policy_dst.write_text(repo_default.read_text(encoding="utf-8"), encoding="utf-8")
+    created.append(default_policy_dst)
 
     if not strict_policy_dst.exists():
         repo_strict = repo_policy_dir / "strict.policy.yaml"
         if repo_strict.exists():
             strict_policy_dst.write_text(repo_strict.read_text(encoding="utf-8"), encoding="utf-8")
+    created.append(strict_policy_dst)
 
-    if not config_dst.exists():
-        config_dst.write_text(
-            "schema: schemas/model.schema.json\n"
-            "policy_schema: schemas/policy.schema.json\n"
-            "policy_pack: policies/default.policy.yaml\n"
-            "model_glob: \"**/*.model.yaml\"\n",
-            encoding="utf-8",
-        )
+    return created
 
-    print(f"Initialized MVP workspace at {root}")
-    print(f"- {schema_dst}")
-    print(f"- {policy_schema_dst}")
-    print(f"- {sample_dst}")
-    print(f"- {default_policy_dst}")
-    print(f"- {strict_policy_dst}")
-    print(f"- {config_dst}")
+
+def cmd_init(args: argparse.Namespace) -> int:
+    root = Path(args.path).resolve()
+    created = _init_schemas_and_policies(root)
+
+    if args.multi_model:
+        # Multi-model project structure
+        models_dir = root / "models"
+        (models_dir / "shared").mkdir(parents=True, exist_ok=True)
+        (models_dir / "orders").mkdir(parents=True, exist_ok=True)
+
+        shared_dst = models_dir / "shared" / "shared_dimensions.model.yaml"
+        orders_dst = models_dir / "orders" / "orders.model.yaml"
+        config_dst = root / "dm.config.yaml"
+
+        if not shared_dst.exists():
+            shared_dst.write_text(MULTI_MODEL_SHARED, encoding="utf-8")
+        created.append(shared_dst)
+
+        if not orders_dst.exists():
+            orders_dst.write_text(MULTI_MODEL_ORDERS, encoding="utf-8")
+        created.append(orders_dst)
+
+        if not config_dst.exists():
+            config_dst.write_text(
+                "schema: schemas/model.schema.json\n"
+                "policy_schema: schemas/policy.schema.json\n"
+                "policy_pack: policies/default.policy.yaml\n"
+                "model_glob: \"models/**/*.model.yaml\"\n"
+                "multi_model: true\n"
+                "search_dirs:\n"
+                "  - models/shared\n"
+                "  - models/orders\n",
+                encoding="utf-8",
+            )
+        created.append(config_dst)
+
+        print(f"Initialized multi-model workspace at {root}")
+    else:
+        # Single-model project structure
+        (root / "model-examples").mkdir(parents=True, exist_ok=True)
+        sample_dst = root / "model-examples" / "starter.model.yaml"
+        config_dst = root / "dm.config.yaml"
+
+        if not sample_dst.exists():
+            sample_dst.write_text(STARTER_MODEL, encoding="utf-8")
+        created.append(sample_dst)
+
+        if not config_dst.exists():
+            config_dst.write_text(
+                "schema: schemas/model.schema.json\n"
+                "policy_schema: schemas/policy.schema.json\n"
+                "policy_pack: policies/default.policy.yaml\n"
+                "model_glob: \"**/*.model.yaml\"\n",
+                encoding="utf-8",
+            )
+        created.append(config_dst)
+
+        print(f"Initialized workspace at {root}")
+
+    for path in created:
+        print(f"- {path}")
     return 0
 
 
@@ -371,10 +510,14 @@ def cmd_generate_metadata(args: argparse.Namespace) -> int:
         "summary": {
             "entity_count": len(canonical.get("entities", [])),
             "relationship_count": len(canonical.get("relationships", [])),
+            "index_count": len(canonical.get("indexes", [])),
+            "glossary_term_count": len(canonical.get("glossary", [])),
             "rule_count": len(canonical.get("rules", [])),
         },
         "entities": canonical.get("entities", []),
         "relationships": canonical.get("relationships", []),
+        "indexes": canonical.get("indexes", []),
+        "glossary": canonical.get("glossary", []),
         "governance": canonical.get("governance", {}),
         "generated_by": "dm generate metadata",
     }
@@ -433,6 +576,241 @@ def cmd_import_dbml(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def cmd_generate_docs(args: argparse.Namespace) -> int:
+    model = load_yaml_model(args.model)
+    fmt = args.format
+
+    if fmt == "html":
+        if args.out:
+            write_html_docs(model, args.out, title=args.title)
+            print(f"Wrote HTML docs: {args.out}")
+        else:
+            print(generate_html_docs(model, title=args.title))
+    elif fmt == "markdown":
+        if args.out:
+            write_markdown_docs(model, args.out, title=args.title)
+            print(f"Wrote Markdown docs: {args.out}")
+        else:
+            print(generate_markdown_docs(model, title=args.title))
+
+    return 0
+
+
+def cmd_generate_changelog(args: argparse.Namespace) -> int:
+    old_model = load_yaml_model(args.old)
+    new_model = load_yaml_model(args.new)
+    diff = semantic_diff(old_model, new_model)
+
+    old_version = old_model.get("model", {}).get("version", "")
+    new_version = new_model.get("model", {}).get("version", "")
+
+    if args.out:
+        write_changelog(diff, args.out, old_version=old_version, new_version=new_version)
+        print(f"Wrote changelog: {args.out}")
+    else:
+        print(generate_changelog(diff, old_version=old_version, new_version=new_version))
+
+    return 0
+
+
+def cmd_fmt(args: argparse.Namespace) -> int:
+    model = load_yaml_model(args.model)
+    canonical = compile_model(model)
+    output = yaml.safe_dump(canonical, sort_keys=False, default_flow_style=False, allow_unicode=True)
+
+    if args.write:
+        Path(args.model).write_text(output, encoding="utf-8")
+        print(f"Formatted: {args.model}")
+    elif args.out:
+        Path(args.out).write_text(output, encoding="utf-8")
+        print(f"Wrote formatted model: {args.out}")
+    else:
+        print(output)
+
+    return 0
+
+
+def cmd_stats(args: argparse.Namespace) -> int:
+    model = load_yaml_model(args.model)
+    entities = model.get("entities", [])
+    relationships = model.get("relationships", [])
+    indexes = model.get("indexes", [])
+    glossary = model.get("glossary", [])
+    rules = model.get("rules", [])
+
+    total_fields = sum(len(e.get("fields", [])) for e in entities)
+    pk_count = sum(
+        1 for e in entities for f in e.get("fields", []) if f.get("primary_key")
+    )
+    fk_count = sum(
+        1 for e in entities for f in e.get("fields", []) if f.get("foreign_key")
+    )
+    nullable_count = sum(
+        1 for e in entities for f in e.get("fields", []) if f.get("nullable", True)
+    )
+    described_fields = sum(
+        1 for e in entities for f in e.get("fields", []) if f.get("description")
+    )
+    deprecated_count = sum(
+        1 for e in entities for f in e.get("fields", []) if f.get("deprecated")
+    )
+    entity_types = {}
+    for e in entities:
+        t = e.get("type", "table")
+        entity_types[t] = entity_types.get(t, 0) + 1
+    subject_areas = set(e.get("subject_area") for e in entities if e.get("subject_area"))
+    tags = set()
+    for e in entities:
+        for t in e.get("tags", []):
+            tags.add(t)
+
+    desc_coverage = f"{described_fields}/{total_fields}" if total_fields else "0/0"
+    desc_pct = f"{described_fields / total_fields * 100:.0f}%" if total_fields else "0%"
+
+    stats = {
+        "model_name": model.get("model", {}).get("name", "unknown"),
+        "version": model.get("model", {}).get("version", "unknown"),
+        "entity_count": len(entities),
+        "entity_types": entity_types,
+        "total_fields": total_fields,
+        "primary_keys": pk_count,
+        "foreign_keys": fk_count,
+        "nullable_fields": nullable_count,
+        "relationship_count": len(relationships),
+        "index_count": len(indexes),
+        "glossary_terms": len(glossary),
+        "rule_count": len(rules),
+        "description_coverage": f"{desc_coverage} ({desc_pct})",
+        "deprecated_fields": deprecated_count,
+        "subject_areas": sorted(subject_areas),
+        "tags": sorted(tags),
+    }
+
+    if args.output_json:
+        print(json.dumps(stats, indent=2))
+    else:
+        print(f"Model: {stats['model_name']} v{stats['version']}")
+        print(f"Entities: {stats['entity_count']}  ({', '.join(f'{v} {k}' for k, v in entity_types.items())})")
+        print(f"Fields: {stats['total_fields']}  (PK: {pk_count}, FK: {fk_count}, nullable: {nullable_count})")
+        print(f"Relationships: {stats['relationship_count']}")
+        print(f"Indexes: {stats['index_count']}")
+        print(f"Glossary terms: {stats['glossary_terms']}")
+        print(f"Rules: {stats['rule_count']}")
+        print(f"Description coverage: {desc_coverage} ({desc_pct})")
+        if deprecated_count:
+            print(f"Deprecated fields: {deprecated_count}")
+        if subject_areas:
+            print(f"Subject areas: {', '.join(sorted(subject_areas))}")
+        if tags:
+            print(f"Tags: {', '.join(sorted(tags))}")
+
+    return 0
+
+
+def cmd_resolve(args: argparse.Namespace) -> int:
+    search_dirs = args.search_dir if args.search_dir else []
+    resolved = resolve_model(args.model, search_dirs=search_dirs)
+
+    if resolved.issues:
+        for iss in resolved.issues:
+            sev = iss.severity.upper()
+            print(f"  [{sev}] {iss.code}: {iss.message}")
+
+    summary = resolved.to_graph_summary()
+
+    if args.output_json:
+        print(json.dumps(summary, indent=2))
+    else:
+        print(f"Root model: {summary['root_model']}")
+        print(f"Models resolved: {summary['model_count']}")
+        print(f"Total entities: {summary['total_entities']}")
+        for m in summary["models"]:
+            prefix = "*" if m["is_root"] else " "
+            alias = f" (alias: {m.get('alias', '')})" if m.get("alias") else ""
+            print(f"  {prefix} {m['name']}{alias}: {m['entity_count']} entities [{', '.join(m['entities'])}]")
+        cross = summary["cross_model_relationships"]
+        if cross:
+            print(f"Cross-model relationships: {len(cross)}")
+            for cr in cross:
+                print(f"  {cr['from_model']}.{cr['from']} -> {cr['to_model']}.{cr['to']} ({cr['cardinality']})")
+
+    has_errs = any(i.severity == "error" for i in resolved.issues)
+    return 1 if has_errs else 0
+
+
+def cmd_diff_all(args: argparse.Namespace) -> int:
+    diff = project_diff(args.old, args.new)
+
+    if args.output_json:
+        print(json.dumps(diff, indent=2))
+    else:
+        s = diff["summary"]
+        print(f"Project diff: {args.old} -> {args.new}")
+        print(f"  Models: +{s['added_models']} -{s['removed_models']} changed:{s['changed_models']} unchanged:{s['unchanged_models']}")
+        if diff["added_models"]:
+            print(f"  Added: {', '.join(diff['added_models'])}")
+        if diff["removed_models"]:
+            print(f"  Removed: {', '.join(diff['removed_models'])}")
+        if diff["changed_models"]:
+            print(f"  Changed: {', '.join(diff['changed_models'])}")
+            for name, mdiff in diff["model_diffs"].items():
+                ms = mdiff["summary"]
+                print(f"    [{name}] entities +{ms['added_entities']} -{ms['removed_entities']} changed:{ms['changed_entities']}")
+        print(f"  Breaking changes: {s['breaking_change_count']}")
+        if diff["breaking_changes"]:
+            for bc in diff["breaking_changes"]:
+                print(f"    - {bc}")
+
+    if diff["has_breaking_changes"] and not args.allow_breaking:
+        print("Project diff failed: breaking changes detected. Use --allow-breaking to bypass.")
+        return 2
+
+    return 0
+
+
+def cmd_resolve_project(args: argparse.Namespace) -> int:
+    search_dirs = args.search_dir if args.search_dir else []
+    results = resolve_project(args.directory, search_dirs=search_dirs)
+
+    total_issues = 0
+    all_models = []
+
+    for path, resolved in sorted(results.items()):
+        name = resolved.root_model.get("model", {}).get("name", "unknown")
+        imports = list(resolved.imported_models.keys())
+        entities = [e.get("name", "") for e in resolved.unified_entities()]
+        issue_count = len(resolved.issues)
+        total_issues += issue_count
+
+        all_models.append({
+            "name": name,
+            "file": path,
+            "imports": imports,
+            "entity_count": len(entities),
+            "entities": entities,
+            "issue_count": issue_count,
+            "issues": [
+                {"severity": i.severity, "code": i.code, "message": i.message}
+                for i in resolved.issues
+            ],
+        })
+
+    if args.output_json:
+        print(json.dumps({"models": all_models, "total_issues": total_issues}, indent=2))
+    else:
+        print(f"Project: {args.directory}")
+        print(f"Models found: {len(all_models)}")
+        for m in all_models:
+            imp_str = f" (imports: {', '.join(m['imports'])})" if m["imports"] else ""
+            status = "OK" if m["issue_count"] == 0 else f"{m['issue_count']} issues"
+            print(f"  {m['name']}: {m['entity_count']} entities{imp_str} [{status}]")
+            for iss in m["issues"]:
+                print(f"    [{iss['severity'].upper()}] {iss['code']}: {iss['message']}")
+        print(f"Total issues: {total_issues}")
+
+    return 1 if total_issues > 0 else 0
+
+
 def cmd_schema(args: argparse.Namespace) -> int:
     schema = load_schema(args.schema)
     print(json.dumps(schema, indent=2))
@@ -451,6 +829,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = sub.add_parser("init", help="Initialize a new workspace")
     init_parser.add_argument("--path", default=".", help="Workspace path")
+    init_parser.add_argument("--multi-model", action="store_true", help="Create a multi-model project structure with domain directories")
     init_parser.set_defaults(func=cmd_init)
 
     validate_parser = sub.add_parser("validate", help="Validate model with schema + semantic rules")
@@ -530,7 +909,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gen_sql_parser = generate_sub.add_parser("sql", help="Generate SQL DDL")
     gen_sql_parser.add_argument("model", help="Path to model YAML")
-    gen_sql_parser.add_argument("--dialect", default="postgres", choices=["postgres", "snowflake"])
+    gen_sql_parser.add_argument("--dialect", default="postgres", choices=["postgres", "snowflake", "bigquery", "databricks"])
     gen_sql_parser.add_argument("--out", help="Output SQL file path")
     gen_sql_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     gen_sql_parser.set_defaults(func=cmd_generate_sql)
@@ -548,6 +927,19 @@ def build_parser() -> argparse.ArgumentParser:
     gen_metadata_parser.add_argument("--out", help="Output metadata JSON path")
     gen_metadata_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     gen_metadata_parser.set_defaults(func=cmd_generate_metadata)
+
+    gen_docs_parser = generate_sub.add_parser("docs", help="Generate data dictionary documentation")
+    gen_docs_parser.add_argument("model", help="Path to model YAML")
+    gen_docs_parser.add_argument("--format", default="html", choices=["html", "markdown"], help="Output format")
+    gen_docs_parser.add_argument("--out", help="Output file path")
+    gen_docs_parser.add_argument("--title", help="Custom page title")
+    gen_docs_parser.set_defaults(func=cmd_generate_docs)
+
+    gen_changelog_parser = generate_sub.add_parser("changelog", help="Generate changelog from model diff")
+    gen_changelog_parser.add_argument("old", help="Old model YAML path")
+    gen_changelog_parser.add_argument("new", help="New model YAML path")
+    gen_changelog_parser.add_argument("--out", help="Output changelog file path")
+    gen_changelog_parser.set_defaults(func=cmd_generate_changelog)
 
     import_parser = sub.add_parser("import", help="Import SQL/DBML into model YAML")
     import_sub = import_parser.add_subparsers(dest="import_command", required=True)
@@ -579,6 +971,50 @@ def build_parser() -> argparse.ArgumentParser:
     )
     import_dbml_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_dbml_parser.set_defaults(func=cmd_import_dbml)
+
+    resolve_parser = sub.add_parser("resolve", help="Resolve cross-model imports and show unified graph")
+    resolve_parser.add_argument("model", help="Path to root model YAML")
+    resolve_parser.add_argument(
+        "--search-dir",
+        action="append",
+        default=[],
+        help="Additional directories to search for imported models (repeatable)",
+    )
+    resolve_parser.add_argument("--output-json", action="store_true", help="Print graph as JSON")
+    resolve_parser.set_defaults(func=cmd_resolve)
+
+    resolve_project_parser = sub.add_parser("resolve-project", help="Resolve all models in a project directory")
+    resolve_project_parser.add_argument("directory", help="Project directory path")
+    resolve_project_parser.add_argument(
+        "--search-dir",
+        action="append",
+        default=[],
+        help="Additional search directories (repeatable)",
+    )
+    resolve_project_parser.add_argument("--output-json", action="store_true", help="Print results as JSON")
+    resolve_project_parser.set_defaults(func=cmd_resolve_project)
+
+    diff_all_parser = sub.add_parser("diff-all", help="Semantic diff between two model directories")
+    diff_all_parser.add_argument("old", help="Old model directory")
+    diff_all_parser.add_argument("new", help="New model directory")
+    diff_all_parser.add_argument("--output-json", action="store_true", help="Print diff as JSON")
+    diff_all_parser.add_argument(
+        "--allow-breaking",
+        action="store_true",
+        help="Allow breaking changes (exit 0 even with breaking changes)",
+    )
+    diff_all_parser.set_defaults(func=cmd_diff_all)
+
+    fmt_parser = sub.add_parser("fmt", help="Auto-format YAML model to canonical style")
+    fmt_parser.add_argument("model", help="Path to model YAML")
+    fmt_parser.add_argument("--write", "-w", action="store_true", help="Overwrite the input file in-place")
+    fmt_parser.add_argument("--out", help="Output file path (alternative to --write)")
+    fmt_parser.set_defaults(func=cmd_fmt)
+
+    stats_parser = sub.add_parser("stats", help="Print model statistics")
+    stats_parser.add_argument("model", help="Path to model YAML")
+    stats_parser.add_argument("--output-json", action="store_true", help="Print stats as JSON")
+    stats_parser.set_defaults(func=cmd_stats)
 
     schema_parser = sub.add_parser("print-schema", help="Print active model schema JSON")
     schema_parser.add_argument("--schema", default=_default_schema_path(), help="Path to JSON schema")
