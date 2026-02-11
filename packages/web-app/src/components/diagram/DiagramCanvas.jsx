@@ -22,6 +22,9 @@ import useWorkspaceStore from "../../stores/workspaceStore";
 import { modelToFlow, CARDINALITY_COLOR } from "../../modelToFlow";
 import { runModelChecks } from "../../modelQuality";
 import { layoutWithElk, fallbackGridLayout } from "../../lib/elkLayout";
+import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
+
+const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
 const nodeTypes = { entityNode: EntityNode, group: SubjectAreaGroup, annotation: AnnotationNode, schemaOverview: SchemaOverviewNode };
 
@@ -397,7 +400,10 @@ function FlowCanvas() {
       <MiniMap
         zoomable
         pannable
-        nodeColor={() => "#3b82f6"}
+        nodeColor={(node) => {
+          const idx = node.data?.schemaColorIndex;
+          return idx != null ? SCHEMA_COLORS_HEX[idx % SCHEMA_COLORS_HEX.length] : "#3b82f6";
+        }}
         maskColor="rgba(248, 250, 252, 0.8)"
         style={{ borderRadius: 8, border: "1px solid #e2e8f0" }}
       />
@@ -432,10 +438,15 @@ export default function DiagramCanvas() {
         relCounts[e.source] = (relCounts[e.source] || 0) + 1;
         relCounts[e.target] = (relCounts[e.target] || 0) + 1;
       });
-      const nodesWithRelCount = (graph.nodes || []).map((n) => ({
-        ...n,
-        data: { ...n.data, relationshipCount: relCounts[n.id] || 0 },
-      }));
+      // Build schema→color map from entities
+      const schemaColorMap = buildSchemaColorMap(check.model.entities || []);
+      const nodesWithRelCount = (graph.nodes || []).map((n) => {
+        const schema = n.data?.subject_area || n.data?.schema || "(default)";
+        return {
+          ...n,
+          data: { ...n.data, relationshipCount: relCounts[n.id] || 0, schemaColorIndex: schemaColorMap[schema] ?? 0 },
+        };
+      });
       setGraph({
         nodes: nodesWithRelCount,
         edges: graph.edges || [],

@@ -120,274 +120,145 @@ export default function DiagramToolbar() {
 
   return (
     <div className="relative">
-      {/* Main toolbar */}
-      <div className="flex items-center gap-1 px-2 py-1.5 bg-white/90 backdrop-blur-sm border-b border-slate-200 overflow-x-auto">
+      {/* Row 1: Search + View Mode + Schema + Entity Count */}
+      <div className="flex items-center gap-1 px-2 py-1 bg-white/90 backdrop-blur-sm border-b border-slate-200">
 
         {/* Search */}
-        <ToolbarSection>
-          <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-md px-2 py-1 min-w-[150px] focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100 transition-all">
-            <Search size={12} className="text-slate-400 shrink-0" />
-            <input
-              value={entitySearch}
-              onChange={(e) => setEntitySearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleFocusSearch()}
-              placeholder="Search entities..."
-              className="bg-transparent text-[11px] text-slate-700 placeholder:text-slate-400 outline-none w-full"
-              list="entity-search-list"
-            />
-            <datalist id="entity-search-list">
-              {entityNames.map((name) => (
-                <option key={name} value={name} />
-              ))}
-            </datalist>
-            {entitySearch && (
-              <button
-                onClick={() => { setEntitySearch(""); clearSelection(); }}
-                className="p-0.5 rounded hover:bg-slate-200 text-slate-400"
-              >
-                <X size={10} />
-              </button>
-            )}
-          </div>
-        </ToolbarSection>
+        <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-md px-2 py-0.5 w-[160px] focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100 transition-all">
+          <Search size={11} className="text-slate-400 shrink-0" />
+          <input
+            value={entitySearch}
+            onChange={(e) => setEntitySearch(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleFocusSearch()}
+            placeholder="Search..."
+            className="bg-transparent text-[11px] text-slate-700 placeholder:text-slate-400 outline-none w-full"
+            list="entity-search-list"
+          />
+          <datalist id="entity-search-list">
+            {entityNames.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
+          {entitySearch && (
+            <button onClick={() => { setEntitySearch(""); clearSelection(); }} className="p-0.5 rounded hover:bg-slate-200 text-slate-400">
+              <X size={9} />
+            </button>
+          )}
+        </div>
 
         <ToolbarDivider />
 
-        {/* View Mode: Overview / All / Lineage */}
-        <ToolbarSection>
-          <ToolbarButton
-            active={viewMode === "overview"}
-            onClick={() => { setViewMode("overview"); setActiveSchemaFilter(null); }}
-            title="Schema overview — see schemas as cards"
-          >
-            <LayoutGrid size={12} />
-            Overview
-          </ToolbarButton>
-          <ToolbarButton
-            active={viewMode === "all"}
-            onClick={() => setViewMode("all")}
-            title="Show all entities"
-          >
-            <Layers size={12} />
-            All
-          </ToolbarButton>
-          <ToolbarButton
-            active={viewMode === "lineage"}
-            onClick={() => {
-              setViewMode("lineage");
-              if (!selectedEntityId && entityNames.length > 0) {
-                selectEntity(entityNames[0]);
-              }
-            }}
-            title="Lineage view from selected entity"
-          >
-            <GitBranch size={12} />
-            Lineage
-          </ToolbarButton>
-          {activeSchemaFilter && (
-            <button
-              onClick={() => setActiveSchemaFilter(null)}
-              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
-              title="Clear schema filter"
-            >
-              <X size={10} />
-              {activeSchemaFilter}
-            </button>
-          )}
-          {schemaOptions.length > 1 && viewMode !== "overview" && (
-            <select
-              value={activeSchemaFilter || ""}
-              onChange={(e) => setActiveSchemaFilter(e.target.value || null)}
-              className="bg-white border border-slate-200 rounded-md px-1.5 py-1 text-[11px] text-slate-600 outline-none hover:border-slate-300 cursor-pointer max-w-[120px]"
-              title="Filter by schema"
-            >
-              <option value="">All Schemas</option>
-              {schemaOptions.map((s) => (
-                <option key={s.name} value={s.name}>{s.name} ({s.entityCount})</option>
-              ))}
-            </select>
-          )}
-        </ToolbarSection>
+        {/* View Mode */}
+        <ToolbarButton active={viewMode === "overview"} onClick={() => { setViewMode("overview"); setActiveSchemaFilter(null); }} title="Schema overview">
+          <LayoutGrid size={11} /> Overview
+        </ToolbarButton>
+        <ToolbarButton active={viewMode === "all"} onClick={() => setViewMode("all")} title="Show all entities">
+          <Layers size={11} /> All
+        </ToolbarButton>
+        <ToolbarButton
+          active={viewMode === "lineage"}
+          onClick={() => { setViewMode("lineage"); if (!selectedEntityId && entityNames.length > 0) selectEntity(entityNames[0]); }}
+          title="Lineage view"
+        >
+          <GitBranch size={11} /> Lineage
+        </ToolbarButton>
 
-        <ToolbarDivider />
-
-        {/* Entity count +/- control */}
-        <ToolbarSection>
-          <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Show</span>
-          <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
-            <button
-              onClick={() => handleLimitChange(-5)}
-              className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors border-r border-slate-200"
-              title="Show fewer entities"
-            >
-              <Minus size={11} />
-            </button>
-            <span className="px-2 py-1 text-[11px] font-semibold text-slate-700 min-w-[40px] text-center tabular-nums">
-              {visibleLimit === 0 ? totalEntities : visibleLimit}
-            </span>
-            <button
-              onClick={() => handleLimitChange(5)}
-              className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors border-l border-slate-200"
-              title="Show more entities"
-            >
-              <Plus size={11} />
-            </button>
-          </div>
-          <button
-            onClick={() => handleLimitChange(0)}
-            className="text-[10px] text-blue-600 hover:text-blue-700 font-medium"
-            title="Show all entities"
-          >
-            All
+        {/* Schema filter */}
+        {activeSchemaFilter && (
+          <button onClick={() => setActiveSchemaFilter(null)}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors"
+            title="Clear schema filter">
+            <X size={9} /> {activeSchemaFilter}
           </button>
-        </ToolbarSection>
-
-        {/* Lineage depth (only in lineage mode) */}
-        {viewMode === "lineage" && (
-          <>
-            <ToolbarDivider />
-            <ToolbarSection>
-              <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wide">Depth</span>
-              <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
-                <button
-                  onClick={() => setLineageDepth(Math.max(1, lineageDepth - 1))}
-                  className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors border-r border-slate-200"
-                >
-                  <Minus size={11} />
-                </button>
-                <span className="px-2 py-1 text-[11px] font-semibold text-slate-700 min-w-[24px] text-center tabular-nums">
-                  {lineageDepth}
-                </span>
-                <button
-                  onClick={() => setLineageDepth(Math.min(10, lineageDepth + 1))}
-                  className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition-colors border-l border-slate-200"
-                >
-                  <Plus size={11} />
-                </button>
-              </div>
-              <span className="text-[10px] text-slate-400">hops</span>
-            </ToolbarSection>
-          </>
+        )}
+        {schemaOptions.length > 1 && viewMode !== "overview" && (
+          <select value={activeSchemaFilter || ""} onChange={(e) => setActiveSchemaFilter(e.target.value || null)}
+            className="bg-white border border-slate-200 rounded-md px-1 py-0.5 text-[10px] text-slate-600 outline-none hover:border-slate-300 cursor-pointer max-w-[110px]"
+            title="Filter by schema">
+            <option value="">All Schemas</option>
+            {schemaOptions.map((s) => (<option key={s.name} value={s.name}>{s.name} ({s.entityCount})</option>))}
+          </select>
         )}
 
         <ToolbarDivider />
 
-        {/* Filters */}
-        <ToolbarSection>
-          <Filter size={11} className="text-slate-400" />
-          <ToolbarSelect
-            value={vizSettings.entityTypeFilter}
-            onChange={(v) => updateVizSetting("entityTypeFilter", v)}
-            label="Entity type"
-            options={[
-              { value: "all", label: "All Types" },
-              { value: "table", label: "Tables" },
-              { value: "view", label: "Views" },
-            ]}
-          />
-          {tagOptions.length > 0 && (
-            <ToolbarSelect
-              value={vizSettings.tagFilter}
-              onChange={(v) => updateVizSetting("tagFilter", v)}
-              label="Tag filter"
-              options={[
-                { value: "all", label: "All Tags" },
-                ...tagOptions.map((t) => ({ value: t, label: t })),
-              ]}
-            />
-          )}
-        </ToolbarSection>
+        {/* Entity count control */}
+        <span className="text-[9px] text-slate-400 font-medium uppercase">Show</span>
+        <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
+          <button onClick={() => handleLimitChange(-5)} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-r border-slate-200" title="Fewer"><Minus size={10} /></button>
+          <span className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 min-w-[32px] text-center tabular-nums">
+            {visibleLimit === 0 ? totalEntities : visibleLimit}
+          </span>
+          <button onClick={() => handleLimitChange(5)} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-l border-slate-200" title="More"><Plus size={10} /></button>
+        </div>
+        <button onClick={() => handleLimitChange(0)} className="text-[9px] text-blue-600 hover:text-blue-700 font-medium" title="Show all">All</button>
 
-        <ToolbarDivider />
-
-        {/* Layout & Edge */}
-        <ToolbarSection>
-          <ToolbarSelect
-            value={vizSettings.layoutMode}
-            onChange={(v) => updateVizSetting("layoutMode", v)}
-            label="Layout algorithm"
-            options={[
-              { value: "elk", label: "Auto (ELK)" },
-              { value: "grid", label: "Grid" },
-            ]}
-          />
-          <ToolbarSelect
-            value={vizSettings.layoutDensity}
-            onChange={(v) => updateVizSetting("layoutDensity", v)}
-            label="Density"
-            options={[
-              { value: "compact", label: "Compact" },
-              { value: "normal", label: "Normal" },
-              { value: "wide", label: "Wide" },
-            ]}
-          />
-          <ToolbarSelect
-            value={vizSettings.fieldView}
-            onChange={(v) => updateVizSetting("fieldView", v)}
-            label="Field visibility"
-            options={[
-              { value: "all", label: "All Fields" },
-              { value: "keys", label: "Keys Only" },
-              { value: "minimal", label: "Top 8" },
-            ]}
-          />
-        </ToolbarSection>
-
-        <ToolbarDivider />
-
-        {/* Toggles */}
-        <ToolbarSection>
-          <ToolbarButton
-            active={vizSettings.showEdgeLabels}
-            onClick={() => updateVizSetting("showEdgeLabels", !vizSettings.showEdgeLabels)}
-            title="Toggle edge labels"
-          >
-            <Tag size={11} />
-          </ToolbarButton>
-          <ToolbarButton
-            active={vizSettings.dimUnrelated}
-            onClick={() => updateVizSetting("dimUnrelated", !vizSettings.dimUnrelated)}
-            title="Dim unrelated entities on select"
-          >
-            {vizSettings.dimUnrelated ? <EyeOff size={11} /> : <Eye size={11} />}
-          </ToolbarButton>
-          <ToolbarButton
-            active={vizSettings.groupBySubjectArea}
-            onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)}
-            title="Group entities by subject area"
-          >
-            <Boxes size={11} />
-            Groups
-          </ToolbarButton>
-          <ToolbarButton
-            active={showLegend}
-            onClick={() => setShowLegend(!showLegend)}
-            title="Relationship color legend"
-          >
-            <ArrowRightLeft size={11} />
-          </ToolbarButton>
-        </ToolbarSection>
+        {/* Lineage depth */}
+        {viewMode === "lineage" && (
+          <>
+            <ToolbarDivider />
+            <span className="text-[9px] text-slate-400 font-medium uppercase">Depth</span>
+            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
+              <button onClick={() => setLineageDepth(Math.max(1, lineageDepth - 1))} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-r border-slate-200"><Minus size={10} /></button>
+              <span className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 min-w-[20px] text-center tabular-nums">{lineageDepth}</span>
+              <button onClick={() => setLineageDepth(Math.min(10, lineageDepth + 1))} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-l border-slate-200"><Plus size={10} /></button>
+            </div>
+          </>
+        )}
 
         {/* Spacer */}
         <div className="flex-1" />
 
         {/* Entity count badge */}
-        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-[10px] text-slate-500 font-medium tabular-nums">
-          <Boxes size={10} />
-          {visibleLimit > 0 ? `${visibleLimit} / ${totalEntities}` : totalEntities} entities
+        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-slate-100 text-[9px] text-slate-500 font-medium tabular-nums shrink-0">
+          <Boxes size={9} />
+          {visibleLimit > 0 ? `${visibleLimit}/${totalEntities}` : totalEntities}
         </span>
+      </div>
 
-        {/* Annotations */}
-        <ToolbarButton
-          onClick={() => {
-            if (window.__dlAddAnnotation) {
-              window.__dlAddAnnotation({ x: Math.random() * 400 + 50, y: Math.random() * 200 + 50 });
-            }
-          }}
-          title="Add a note / annotation to the diagram"
-        >
-          <StickyNote size={11} />
-          Note
+      {/* Row 2: Filters + Layout + Toggles + Export */}
+      <div className="flex items-center gap-1 px-2 py-0.5 bg-white/80 border-b border-slate-100">
+        {/* Filters */}
+        <Filter size={10} className="text-slate-400 shrink-0" />
+        <ToolbarSelect value={vizSettings.entityTypeFilter} onChange={(v) => updateVizSetting("entityTypeFilter", v)} label="Entity type"
+          options={[{ value: "all", label: "All Types" }, { value: "table", label: "Tables" }, { value: "view", label: "Views" }]} />
+        {tagOptions.length > 0 && (
+          <ToolbarSelect value={vizSettings.tagFilter} onChange={(v) => updateVizSetting("tagFilter", v)} label="Tag filter"
+            options={[{ value: "all", label: "All Tags" }, ...tagOptions.map((t) => ({ value: t, label: t }))]} />
+        )}
+
+        <ToolbarDivider />
+
+        {/* Layout */}
+        <ToolbarSelect value={vizSettings.layoutMode} onChange={(v) => updateVizSetting("layoutMode", v)} label="Layout"
+          options={[{ value: "elk", label: "Auto (ELK)" }, { value: "grid", label: "Grid" }]} />
+        <ToolbarSelect value={vizSettings.layoutDensity} onChange={(v) => updateVizSetting("layoutDensity", v)} label="Density"
+          options={[{ value: "compact", label: "Compact" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Wide" }]} />
+        <ToolbarSelect value={vizSettings.fieldView} onChange={(v) => updateVizSetting("fieldView", v)} label="Fields"
+          options={[{ value: "all", label: "All Fields" }, { value: "keys", label: "Keys Only" }, { value: "minimal", label: "Top 8" }]} />
+
+        <ToolbarDivider />
+
+        {/* Toggles */}
+        <ToolbarButton active={vizSettings.showEdgeLabels} onClick={() => updateVizSetting("showEdgeLabels", !vizSettings.showEdgeLabels)} title="Edge labels">
+          <Tag size={10} />
+        </ToolbarButton>
+        <ToolbarButton active={vizSettings.dimUnrelated} onClick={() => updateVizSetting("dimUnrelated", !vizSettings.dimUnrelated)} title="Dim unrelated">
+          {vizSettings.dimUnrelated ? <EyeOff size={10} /> : <Eye size={10} />}
+        </ToolbarButton>
+        <ToolbarButton active={vizSettings.groupBySubjectArea} onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)} title="Group by area">
+          <Boxes size={10} />
+        </ToolbarButton>
+        <ToolbarButton active={showLegend} onClick={() => setShowLegend(!showLegend)} title="Legend">
+          <ArrowRightLeft size={10} />
+        </ToolbarButton>
+
+        {/* Spacer */}
+        <div className="flex-1" />
+
+        {/* Note */}
+        <ToolbarButton onClick={() => { if (window.__dlAddAnnotation) window.__dlAddAnnotation({ x: Math.random() * 400 + 50, y: Math.random() * 200 + 50 }); }} title="Add note">
+          <StickyNote size={10} />
         </ToolbarButton>
 
         {/* Export */}
@@ -397,17 +268,13 @@ export default function DiagramToolbar() {
             if (!el) return;
             import("html-to-image").then(({ toPng }) => {
               toPng(el, { backgroundColor: "#ffffff", pixelRatio: 2 }).then((dataUrl) => {
-                const a = document.createElement("a");
-                a.href = dataUrl;
-                a.download = "datalex-diagram.png";
-                a.click();
+                const a = document.createElement("a"); a.href = dataUrl; a.download = "datalex-diagram.png"; a.click();
               });
             });
           }}
-          title="Export diagram as PNG"
+          title="Export PNG"
         >
-          <Image size={11} />
-          PNG
+          <Image size={10} /> PNG
         </ToolbarButton>
         <ToolbarButton
           onClick={() => {
@@ -415,26 +282,20 @@ export default function DiagramToolbar() {
             if (!el) return;
             import("html-to-image").then(({ toSvg }) => {
               toSvg(el, { backgroundColor: "#ffffff" }).then((dataUrl) => {
-                const a = document.createElement("a");
-                a.href = dataUrl;
-                a.download = "datalex-diagram.svg";
-                a.click();
+                const a = document.createElement("a"); a.href = dataUrl; a.download = "datalex-diagram.svg"; a.click();
               });
             });
           }}
-          title="Export diagram as SVG"
+          title="Export SVG"
         >
-          <Download size={11} />
-          SVG
+          <Download size={10} /> SVG
         </ToolbarButton>
 
         {/* Fullscreen */}
-        <button
-          onClick={toggleDiagramFullscreen}
-          className="p-1.5 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
-          title={diagramFullscreen ? "Exit fullscreen" : "Fullscreen diagram"}
-        >
-          {diagramFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        <button onClick={toggleDiagramFullscreen}
+          className="p-1 rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+          title={diagramFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+          {diagramFullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
         </button>
       </div>
 

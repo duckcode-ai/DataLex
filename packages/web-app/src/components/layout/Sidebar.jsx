@@ -387,10 +387,38 @@ function SidePanel({ activity }) {
           </>
         )}
         {activity === "connect" && (
-          <div className="px-3 py-2">
-            <p className="text-[10px] text-text-muted leading-relaxed">
-              Use the connector wizard in the main area to connect to databases and pull schemas as separate model files.
-            </p>
+          <div className="px-2 py-1 space-y-3">
+            <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
+              Data Sources
+            </div>
+            <div className="space-y-0.5">
+              <button
+                onClick={() => useUiStore.getState().setActiveActivity("connect")}
+                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+              >
+                <Plug size={13} />
+                Database Connector
+              </button>
+              <button
+                onClick={() => {
+                  useUiStore.getState().setActiveActivity("model");
+                  useUiStore.getState().setBottomPanelTab("import");
+                }}
+                className="flex items-center gap-2 w-full px-2 py-1.5 rounded-md text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary transition-colors"
+              >
+                <Import size={13} />
+                Import YAML / File
+              </button>
+            </div>
+            <div className="mx-1 border-t border-border-primary" />
+            <div className="px-1">
+              <p className="text-[10px] text-text-muted leading-relaxed">
+                Use the <strong>Database Connector</strong> wizard in the main area to connect, browse schemas, and pull tables as model files.
+              </p>
+              <p className="text-[10px] text-text-muted leading-relaxed mt-1">
+                Or <strong>Import</strong> an existing YAML model file directly.
+              </p>
+            </div>
           </div>
         )}
         {activity === "validate" && <ValidateSection />}

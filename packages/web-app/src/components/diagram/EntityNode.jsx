@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import { Key, Fingerprint, Diamond, ChevronDown, ChevronUp, ArrowRightLeft, Tag, Shield, Database, AlertTriangle } from "lucide-react";
+import { SCHEMA_COLORS, getSchemaColor } from "../../lib/schemaColors";
 
 const TYPE_COLORS = {
   table: { bg: "from-blue-50 to-blue-100/60", border: "border-blue-200", badge: "bg-blue-100 text-blue-700" },
@@ -120,13 +121,17 @@ export default function EntityNode({ data }) {
     return set;
   }, [entityIndexes]);
 
+  const schemaColor = getSchemaColor(data.schemaColorIndex);
+  const schemaName = data.subject_area || data.schema || null;
+
   // Compact dot mode for large models
   if (data.compactMode) {
     const relCount = data.relationshipCount || 0;
     return (
-      <div className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden`}>
+      <div className={`w-[140px] rounded-lg border ${colors.border} bg-white shadow-sm overflow-hidden flex`}>
+        <div className={`w-1 shrink-0 ${schemaColor.bg}`} />
         <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
-        <div className={`bg-gradient-to-r ${colors.bg} px-2.5 py-1.5`}>
+        <div className={`bg-gradient-to-r ${colors.bg} px-2 py-1.5 flex-1 min-w-0`}>
           <h3 className="text-[11px] font-semibold text-text-primary truncate">{data.name}</h3>
           <div className="flex items-center gap-1.5 mt-0.5">
             <span className={`px-1 py-0 rounded text-[8px] font-bold uppercase ${colors.badge}`}>
@@ -164,7 +169,11 @@ export default function EntityNode({ data }) {
   const relCount = data.relationshipCount || 0;
 
   return (
-    <div className={`w-[280px] rounded-lg border ${colors.border} bg-white shadow-md shadow-slate-200/60 overflow-hidden`}>
+    <div className={`w-[280px] rounded-lg border ${colors.border} bg-white shadow-md shadow-slate-200/60 overflow-hidden flex`}>
+      {/* Schema color accent bar */}
+      <div className={`w-1.5 shrink-0 ${schemaColor.bg}`} />
+
+      <div className="flex-1 min-w-0">
       <Handle type="target" position={Position.Left} className="!bg-blue-500 !border-white !w-2 !h-2" />
 
       {/* Header */}
@@ -172,10 +181,15 @@ export default function EntityNode({ data }) {
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-text-primary truncate">{data.name}</h3>
-            <div className="flex items-center gap-1.5 mt-0.5">
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
               <span className={`px-1.5 py-0 rounded text-[10px] font-medium uppercase tracking-wider ${colors.badge}`}>
                 {entityType.replace("_", " ")}
               </span>
+              {schemaName && (
+                <span className={`px-1.5 py-0 rounded text-[9px] font-semibold ${schemaColor.bgLight} ${schemaColor.text} ${schemaColor.border} border`}>
+                  {schemaName}
+                </span>
+              )}
               {relCount > 0 && (
                 <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                   <ArrowRightLeft size={9} />
@@ -270,6 +284,7 @@ export default function EntityNode({ data }) {
       )}
 
       <Handle type="source" position={Position.Right} className="!bg-blue-500 !border-white !w-2 !h-2" />
+      </div>{/* end flex-1 wrapper */}
     </div>
   );
 }
