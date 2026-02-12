@@ -8,6 +8,7 @@ import {
   useReactFlow,
   useNodesState,
   useEdgesState,
+  MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -42,26 +43,6 @@ function adjacencyFromEdges(edges) {
   return map;
 }
 
-// BFS from a root entity up to `depth` hops — returns set of reachable entity IDs
-function bfsReachable(rootId, edges, depth) {
-  const adj = adjacencyFromEdges(edges);
-  const visited = new Set([rootId]);
-  let frontier = [rootId];
-  for (let d = 0; d < depth && frontier.length > 0; d++) {
-    const next = [];
-    for (const id of frontier) {
-      for (const neighbor of adj.get(id) || []) {
-        if (!visited.has(neighbor)) {
-          visited.add(neighbor);
-          next.push(neighbor);
-        }
-      }
-    }
-    frontier = next;
-  }
-  return visited;
-}
-
 // Apply type/tag filters
 function applyFilters(nodes, edges, vizSettings) {
   const filtered = nodes.filter((node) => {
@@ -76,16 +57,6 @@ function applyFilters(nodes, edges, vizSettings) {
   const ids = new Set(filtered.map((n) => n.id));
   const filteredEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
   return { nodes: filtered, edges: filteredEdges };
-}
-
-// Apply lineage mode: only show entities within `depth` hops of selected entity
-function applyLineage(nodes, edges, selectedEntityId, depth) {
-  if (!selectedEntityId) return { nodes, edges };
-  const reachable = bfsReachable(selectedEntityId, edges, depth);
-  const lineageNodes = nodes.filter((n) => reachable.has(n.id));
-  const ids = new Set(lineageNodes.map((n) => n.id));
-  const lineageEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
-  return { nodes: lineageNodes, edges: lineageEdges };
 }
 
 // Apply visible entity limit (slice top N by relationship count)
@@ -141,26 +112,58 @@ function applyVisualEffects(nodes, edges, vizSettings, selectedEntityId, entityS
 
   const styledEdges = edges.map((edge) => {
     const cardinality = edge.data?.cardinality || "one_to_many";
-    const edgeColor = CARDINALITY_COLOR[cardinality] || "#94a3b8";
+    const semanticLabel = edge.data?.cardinalityLabel || cardinality.replace(/_/g, ":");
+    const isSelf = Boolean(edge.data?.isSelf);
+    const isPkToFk = Boolean(edge.data?.pkToFk);
+    const isFkToPk = Boolean(edge.data?.fkToPk);
+    const isSharedTarget = Boolean(edge.data?.sharedTarget);
+    const sharedTargetCount = edge.data?.sharedTargetCount || 1;
+
+    let edgeColor =
+      isSelf ? "#f59e0b" :
+      isPkToFk ? "#0ea5e9" :
+      isFkToPk ? "#8b5cf6" :
+      CARDINALITY_COLOR[cardinality] || "#94a3b8";
+    if (isSharedTarget && !isSelf && !isPkToFk && !isFkToPk) edgeColor = "#0f766e";
+
     const isFocus = selectedEntityId && (edge.source === selectedEntityId || edge.target === selectedEntityId);
     let dim = false;
     if (vizSettings.dimUnrelated && selectedEntityId && connected.size > 0) {
       if (!(connected.has(edge.source) && connected.has(edge.target))) dim = true;
     }
 
+    const semanticHints = [];
+    if (isPkToFk) semanticHints.push("PK->FK");
+    if (isFkToPk) semanticHints.push("FK->PK");
+    if (isSelf) semanticHints.push("SELF");
+    if (isSharedTarget) semanticHints.push(`shared-target x${sharedTargetCount}`);
+
+    const edgeFieldLabel =
+      edge.data?.fromField && edge.data?.toField
+        ? `${edge.data.fromField} -> ${edge.data.toField}`
+        : `${edge.data?.fromRef || ""} -> ${edge.data?.toRef || ""}`;
+
     return {
       ...edge,
-      type: vizSettings.edgeType,
+      type: isSelf ? "smoothstep" : vizSettings.edgeType,
       animated: isFocus || edge.animated,
       label: vizSettings.showEdgeLabels
-        ? `${edge.data?.name || ""} (${cardinality.replace(/_/g, ":")})`
+        ? `${edgeFieldLabel} (${semanticLabel})${semanticHints.length ? ` • ${semanticHints.join(", ")}` : ""}`
         : undefined,
       style: {
         stroke: edgeColor,
-        strokeWidth: isFocus ? 3 : 1.5,
+        strokeWidth: isFocus ? 3.2 : (isSelf || isPkToFk || isFkToPk ? 2.2 : 1.6),
+        strokeDasharray: isSelf ? "6 4" : edge.style?.strokeDasharray,
         opacity: dim ? 0.08 : 0.85,
         transition: "opacity 200ms ease",
       },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: edgeColor,
+        width: isFocus ? 18 : 15,
+        height: isFocus ? 18 : 15,
+      },
+      pathOptions: isSelf ? { borderRadius: 20, offset: 40 } : edge.pathOptions,
       labelStyle: { fill: "#475569", fontSize: 9, fontWeight: 600 },
       labelBgStyle: { fill: "#ffffff", fillOpacity: 0.95 },
       labelBgPadding: [4, 2],
@@ -204,12 +207,12 @@ function FlowCanvas() {
     setViewMode,
     visibleLimit,
     setVisibleLimit,
-    lineageDepth,
     activeSchemaFilter,
     setActiveSchemaFilter,
     setLargeModelBanner,
     centerEntityId,
     setCenterEntityId,
+    layoutRefreshTick,
     getSchemaOptions,
     setVizSettings,
     _lastAutoTuneCount,
@@ -245,7 +248,7 @@ function FlowCanvas() {
     setViewMode("all");
   }, [setActiveSchemaFilter, setViewMode]);
 
-  // Pipeline: filter → schema filter → lineage → limit → layout → compact → visual effects
+  // Pipeline: filter → schema filter → limit → layout → compact → visual effects
   useEffect(() => {
     if (storeNodes.length === 0) {
       setRfNodes([]);
@@ -276,12 +279,7 @@ function FlowCanvas() {
       filteredEdges = filteredEdges.filter((e) => ids.has(e.source) && ids.has(e.target));
     }
 
-    // Step 2: lineage mode
-    if (viewMode === "lineage" && selectedEntityId) {
-      ({ nodes: filtered, edges: filteredEdges } = applyLineage(filtered, filteredEdges, selectedEntityId, lineageDepth));
-    }
-
-    // Step 3: visible limit
+    // Step 2: visible limit
     ({ nodes: filtered, edges: filteredEdges } = applyLimit(filtered, filteredEdges, visibleLimit));
 
     const doLayout = async () => {
@@ -290,9 +288,13 @@ function FlowCanvas() {
         layoutResult = await layoutWithElk(filtered, filteredEdges, {
           density: vizSettings.layoutDensity,
           groupBySubjectArea: vizSettings.groupBySubjectArea,
+          fieldView: vizSettings.fieldView,
         });
       } else {
-        layoutResult = fallbackGridLayout(filtered, filteredEdges, vizSettings.layoutDensity);
+        layoutResult = fallbackGridLayout(filtered, filteredEdges, {
+          density: vizSettings.layoutDensity,
+          fieldView: vizSettings.fieldView,
+        });
       }
 
       // Inject compact mode for large visible sets
@@ -318,7 +320,7 @@ function FlowCanvas() {
     };
 
     doLayout();
-  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, lineageDepth, activeSchemaFilter, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
+  }, [storeNodes, storeEdges, vizSettings, selectedEntityId, entitySearch, viewMode, visibleLimit, activeSchemaFilter, layoutRefreshTick, setRfNodes, setRfEdges, getSchemaOptions, handleSchemaOverviewDrillIn]);
 
   // Fit view after layout
   useEffect(() => {
@@ -392,6 +394,7 @@ function FlowCanvas() {
       minZoom={0.05}
       maxZoom={3}
       defaultEdgeOptions={{ type: vizSettings.edgeType }}
+      style={{ width: "100%", height: "100%" }}
     >
       <Background gap={24} color="#e2e8f0" size={1} />
       <MiniMap
@@ -424,7 +427,9 @@ export default function DiagramCanvas() {
       return;
     }
     const check = runModelChecks(activeFileContent);
-    if (check.hasErrors || !check.model) {
+    // Keep rendering whenever YAML parses to a model shape; validation issues
+    // are surfaced in Validation/Status panels instead of hiding the diagram.
+    if (!check.model) {
       setGraph({ nodes: [], edges: [], warnings: [], model: null });
       return;
     }
@@ -503,7 +508,7 @@ export default function DiagramCanvas() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0">
+      <div className="flex-1 min-h-0 min-w-0 w-full h-full">
         <ReactFlowProvider>
           <FlowCanvas />
         </ReactFlowProvider>

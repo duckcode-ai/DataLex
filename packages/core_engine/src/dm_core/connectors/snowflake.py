@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import warnings
 warnings.filterwarnings("ignore", message=".*incompatible version of 'pyarrow'.*")
 
@@ -9,6 +10,56 @@ from datetime import date
 from typing import Any, Dict, List, Tuple
 
 from dm_core.connectors.base import BaseConnector, ConnectorConfig, ConnectorResult, infer_primary_keys, infer_relationships
+
+
+def _load_private_key(path: str, passphrase: str | None = None) -> bytes:
+    """Load an RSA private key from a PEM file and return DER bytes for Snowflake.
+
+    Handles header/content mismatches (e.g. 'ENCRYPTED PRIVATE KEY' header
+    with an unencrypted key body) by trying multiple parsing strategies.
+    """
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+
+    with open(os.path.expanduser(path), "rb") as f:
+        pem_data = f.read()
+
+    pw = passphrase.encode() if passphrase else None
+
+    # Strategy 1: try as-is with provided passphrase
+    # Strategy 2: try without passphrase (header may say ENCRYPTED but body isn't)
+    # Strategy 3: fix header to match actual content and retry
+    attempts = [
+        (pem_data, pw),
+        (pem_data, None),
+    ]
+
+    # If header says ENCRYPTED but no passphrase, also try fixing the header
+    text = pem_data.decode("utf-8", errors="replace")
+    if "ENCRYPTED PRIVATE KEY" in text:
+        fixed = text.replace(
+            "BEGIN ENCRYPTED PRIVATE KEY", "BEGIN PRIVATE KEY"
+        ).replace(
+            "END ENCRYPTED PRIVATE KEY", "END PRIVATE KEY"
+        ).encode("utf-8")
+        attempts.append((fixed, None))
+
+    last_err = None
+    for data, password in attempts:
+        try:
+            private_key = serialization.load_pem_private_key(
+                data, password=password, backend=default_backend(),
+            )
+            return private_key.private_bytes(
+                encoding=serialization.Encoding.DER,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        except Exception as e:
+            last_err = e
+            continue
+
+    raise last_err  # type: ignore[misc]
 
 
 _SF_TYPE_MAP = {
@@ -55,34 +106,46 @@ class SnowflakeConnector(BaseConnector):
     display_name = "Snowflake"
     required_package = "snowflake.connector"
 
+    def _build_connect_params(self, config: ConnectorConfig) -> Dict[str, Any]:
+        """Build connection kwargs, using RSA key-pair auth when private_key_path is set."""
+        params: Dict[str, Any] = {
+            "account": config.host,
+            "user": config.user,
+            "warehouse": config.warehouse,
+            "database": config.database,
+            "schema": config.schema or "PUBLIC",
+        }
+        if config.private_key_path:
+            # Use password as the optional passphrase for the key file
+            passphrase = config.password if config.password else None
+            params["private_key"] = _load_private_key(config.private_key_path, passphrase)
+        else:
+            params["password"] = config.password
+        return params
+
     def test_connection(self, config: ConnectorConfig) -> Tuple[bool, str]:
         try:
             import snowflake.connector
-            conn = snowflake.connector.connect(
-                account=config.host,
-                user=config.user,
-                password=config.password,
-                warehouse=config.warehouse,
-                database=config.database,
-                schema=config.schema or "PUBLIC",
-            )
+            conn = snowflake.connector.connect(**self._build_connect_params(config))
             conn.close()
             return True, "Connection successful"
         except ImportError:
             return False, "snowflake-connector-python not installed. Run: pip install snowflake-connector-python"
+        except FileNotFoundError:
+            return False, f"Private key file not found: {config.private_key_path}"
         except Exception as e:
             return False, f"Connection failed: {e}"
 
     def _connect(self, config: ConnectorConfig):
         import snowflake.connector
-        return snowflake.connector.connect(
-            account=config.host,
-            user=config.user,
-            password=config.password,
-            warehouse=config.warehouse,
-            database=config.database,
-            schema=config.schema or "PUBLIC",
-        )
+        conn = snowflake.connector.connect(**self._build_connect_params(config))
+        # Auto-resume the warehouse if it is suspended
+        if config.warehouse:
+            try:
+                conn.cursor().execute(f"ALTER WAREHOUSE IF EXISTS {config.warehouse} RESUME IF SUSPENDED")
+            except Exception:
+                pass  # permission denied or warehouse doesn't exist — let the main query surface the error
+        return conn
 
     def list_schemas(self, config: ConnectorConfig) -> List[Dict[str, Any]]:
         conn = self._connect(config)

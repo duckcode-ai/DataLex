@@ -7,7 +7,6 @@ import {
   Minimize2,
   Minus,
   Plus,
-  GitBranch,
   Layers,
   LayoutGrid,
   ChevronDown,
@@ -16,6 +15,7 @@ import {
   EyeOff,
   ArrowRightLeft,
   Boxes,
+  RefreshCw,
   Download,
   Image,
   StickyNote,
@@ -29,6 +29,13 @@ const CARDINALITY_LEGEND = [
   { key: "one_to_many", label: "1:N", color: "#2563eb" },
   { key: "many_to_one", label: "N:1", color: "#9333ea" },
   { key: "many_to_many", label: "N:N", color: "#ea580c" },
+];
+
+const REL_SEMANTIC_LEGEND = [
+  { label: "PK->FK", color: "#0ea5e9", dash: false },
+  { label: "FK->PK", color: "#8b5cf6", dash: false },
+  { label: "Self relationship", color: "#f59e0b", dash: true },
+  { label: "Shared PK target", color: "#0f766e", dash: false },
 ];
 
 function ToolbarSection({ children, className = "" }) {
@@ -86,12 +93,9 @@ export default function DiagramToolbar() {
     setViewMode,
     visibleLimit,
     setVisibleLimit,
-    lineageDepth,
-    setLineageDepth,
-    selectedEntityId,
     activeSchemaFilter,
     setActiveSchemaFilter,
-    largeModelBanner,
+    requestLayoutRefresh,
   } = useDiagramStore();
 
   const { diagramFullscreen, toggleDiagramFullscreen } = useUiStore();
@@ -102,6 +106,7 @@ export default function DiagramToolbar() {
   const entityNames = getEntityNames();
   const schemaOptions = getSchemaOptions();
   const totalEntities = entityNames.length;
+  const currentVisible = totalEntities === 0 ? 0 : (visibleLimit === 0 ? totalEntities : visibleLimit);
 
   const handleFocusSearch = () => {
     const query = entitySearch.trim().toLowerCase();
@@ -111,6 +116,7 @@ export default function DiagramToolbar() {
   };
 
   const handleLimitChange = (delta) => {
+    if (totalEntities <= 0) return;
     if (delta === 0) {
       setVisibleLimit(0);
       return;
@@ -118,6 +124,17 @@ export default function DiagramToolbar() {
     const current = visibleLimit || totalEntities;
     const next = Math.max(1, Math.min(totalEntities, current + delta));
     setVisibleLimit(next === totalEntities ? 0 : next);
+  };
+
+  const handleLimitInputChange = (rawValue) => {
+    if (totalEntities <= 0) {
+      setVisibleLimit(0);
+      return;
+    }
+    const parsed = Number(rawValue);
+    if (!Number.isFinite(parsed)) return;
+    const clamped = Math.max(1, Math.min(totalEntities, Math.floor(parsed)));
+    setVisibleLimit(clamped >= totalEntities ? 0 : clamped);
   };
 
   return (
@@ -157,13 +174,6 @@ export default function DiagramToolbar() {
         <ToolbarButton active={viewMode === "all"} onClick={() => setViewMode("all")} title="Show all entities">
           <Layers size={11} /> All
         </ToolbarButton>
-        <ToolbarButton
-          active={viewMode === "lineage"}
-          onClick={() => { setViewMode("lineage"); if (!selectedEntityId && entityNames.length > 0) selectEntity(entityNames[0]); }}
-          title="Lineage view"
-        >
-          <GitBranch size={11} /> Lineage
-        </ToolbarButton>
 
         {/* Schema filter */}
         {activeSchemaFilter && (
@@ -188,25 +198,19 @@ export default function DiagramToolbar() {
         <span className="text-[9px] text-slate-400 font-medium uppercase">Show</span>
         <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
           <button onClick={() => handleLimitChange(-5)} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-r border-slate-200" title="Fewer"><Minus size={10} /></button>
-          <span className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 min-w-[32px] text-center tabular-nums">
-            {visibleLimit === 0 ? totalEntities : visibleLimit}
-          </span>
+          <input
+            type="number"
+            min={totalEntities > 0 ? 1 : 0}
+            max={totalEntities}
+            value={currentVisible}
+            onChange={(e) => handleLimitInputChange(e.target.value)}
+            className="w-[44px] px-1 py-0.5 text-[10px] font-semibold text-slate-700 text-center tabular-nums bg-white outline-none"
+            title="Enter how many entities to display"
+            disabled={totalEntities <= 0}
+          />
           <button onClick={() => handleLimitChange(5)} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-l border-slate-200" title="More"><Plus size={10} /></button>
         </div>
         <button onClick={() => handleLimitChange(0)} className="text-[9px] text-blue-600 hover:text-blue-700 font-medium" title="Show all">All</button>
-
-        {/* Lineage depth */}
-        {viewMode === "lineage" && (
-          <>
-            <ToolbarDivider />
-            <span className="text-[9px] text-slate-400 font-medium uppercase">Depth</span>
-            <div className="flex items-center bg-slate-50 border border-slate-200 rounded-md overflow-hidden">
-              <button onClick={() => setLineageDepth(Math.max(1, lineageDepth - 1))} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-r border-slate-200"><Minus size={10} /></button>
-              <span className="px-1.5 py-0.5 text-[10px] font-semibold text-slate-700 min-w-[20px] text-center tabular-nums">{lineageDepth}</span>
-              <button onClick={() => setLineageDepth(Math.min(10, lineageDepth + 1))} className="px-1 py-0.5 text-slate-500 hover:bg-slate-100 border-l border-slate-200"><Plus size={10} /></button>
-            </div>
-          </>
-        )}
 
         {/* Spacer */}
         <div className="flex-1" />
@@ -223,7 +227,7 @@ export default function DiagramToolbar() {
         {/* Filters */}
         <Filter size={10} className="text-slate-400 shrink-0" />
         <ToolbarSelect value={vizSettings.entityTypeFilter} onChange={(v) => updateVizSetting("entityTypeFilter", v)} label="Entity type"
-          options={[{ value: "all", label: "All Types" }, { value: "table", label: "Tables" }, { value: "view", label: "Views" }]} />
+          options={[{ value: "all", label: "All Models" }, { value: "table", label: "Relational" }, { value: "view", label: "Views" }]} />
         {tagOptions.length > 0 && (
           <ToolbarSelect value={vizSettings.tagFilter} onChange={(v) => updateVizSetting("tagFilter", v)} label="Tag filter"
             options={[{ value: "all", label: "All Tags" }, ...tagOptions.map((t) => ({ value: t, label: t }))]} />
@@ -238,6 +242,9 @@ export default function DiagramToolbar() {
           options={[{ value: "compact", label: "Compact" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Wide" }]} />
         <ToolbarSelect value={vizSettings.fieldView} onChange={(v) => updateVizSetting("fieldView", v)} label="Fields"
           options={[{ value: "all", label: "All Fields" }, { value: "keys", label: "Keys Only" }, { value: "minimal", label: "Top 8" }]} />
+        <ToolbarButton onClick={() => requestLayoutRefresh()} title="Auto arrange and fit">
+          <RefreshCw size={10} /> Auto Layout
+        </ToolbarButton>
 
         <ToolbarDivider />
 
@@ -338,7 +345,7 @@ export default function DiagramToolbar() {
 
       {/* Relationship legend dropdown */}
       {showLegend && (
-        <div className="absolute top-full right-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[180px]">
+        <div className="absolute top-full right-2 mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg p-3 min-w-[220px]">
           <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-2">
             Relationship Colors
           </div>
@@ -351,14 +358,35 @@ export default function DiagramToolbar() {
               </div>
             ))}
           </div>
+          <div className="mt-2 pt-2 border-t border-slate-100">
+            <div className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold mb-1.5">
+              Semantic Edges
+            </div>
+            <div className="space-y-1">
+              {REL_SEMANTIC_LEGEND.map((item) => (
+                <div key={item.label} className="flex items-center gap-2">
+                  <div
+                    className="w-5 h-0.5 rounded-full"
+                    style={{
+                      backgroundColor: item.color,
+                      borderTop: item.dash ? `1px dashed ${item.color}` : undefined,
+                    }}
+                  />
+                  <span className="text-[10px] text-slate-600">{item.label}</span>
+                </div>
+              ))}
+            </div>
+          </div>
           <div className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-400">
             <div className="flex items-center gap-1.5 mb-1">
               <div className="w-5 h-0.5 bg-blue-500 rounded-full" />
-              <span>Animated = many:many</span>
+              <span>Animated = many:many / focused edge</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-5 h-1 bg-blue-500 rounded-full" />
-              <span>Thick = selected entity</span>
+              <div className="w-5 h-0.5 bg-blue-500 rounded-full relative">
+                <div className="absolute right-0 -top-[3px] w-0 h-0 border-l-[5px] border-l-blue-500 border-y-[3px] border-y-transparent" />
+              </div>
+              <span>Arrows indicate edge direction</span>
             </div>
           </div>
         </div>

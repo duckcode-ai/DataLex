@@ -1,0 +1,536 @@
+model:
+  name: retail_ops_showcase
+  version: 1.0.0
+  domain: retail_operations
+  owners:
+    - data-platform@duckcode.ai
+    - analytics@duckcode.ai
+  state: draft
+  description: Real-world retail operations showcase model demonstrating DataLex features end-to-end.
+
+entities:
+  - name: CustomerProfile
+    type: table
+    description: Golden customer profile used for personalization and lifecycle analytics.
+    tags: [GOLD, PII]
+    schema: crm
+    database: retail_analytics
+    subject_area: Customer
+    owner: customer-data@duckcode.ai
+    sla:
+      freshness: 2h
+      quality_score: 99
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Surrogate key for customer records.
+      - name: email
+        type: string
+        nullable: false
+        unique: true
+        sensitivity: confidential
+        description: Primary contact email address.
+      - name: phone_number
+        type: string
+        sensitivity: confidential
+        description: Mobile number used for order alerts.
+      - name: referrer_customer_id
+        type: integer
+        foreign_key: true
+        description: Self-reference to the referring customer.
+      - name: loyalty_tier
+        type: string
+        nullable: false
+        default: bronze
+        check: "loyalty_tier in ('bronze','silver','gold','platinum')"
+        description: Loyalty membership tier.
+      - name: is_active
+        type: boolean
+        nullable: false
+        default: true
+        description: Indicates whether profile is active.
+      - name: created_at
+        type: timestamp
+        nullable: false
+        description: Profile creation timestamp.
+      - name: legacy_segment_code
+        type: string
+        deprecated: true
+        deprecated_message: Use loyalty_tier and analytics segments instead.
+        description: Legacy segmentation attribute retained for migration.
+
+  - name: ProductCatalog
+    type: table
+    description: Master product data across online and store channels.
+    tags: [GOLD]
+    schema: master
+    database: retail_analytics
+    subject_area: Product
+    owner: product-data@duckcode.ai
+    sla:
+      freshness: 4h
+      quality_score: 98
+    fields:
+      - name: product_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Surrogate product key.
+      - name: product_name
+        type: string
+        nullable: false
+        description: Canonical product display name.
+      - name: category
+        type: string
+        nullable: false
+        description: Merchandising category.
+      - name: source_sku
+        type: string
+        unique: true
+        description: SKU supplied by external partner systems.
+      - name: list_price
+        type: decimal(12,2)
+        nullable: false
+        check: "list_price >= 0"
+        description: Default list price in USD.
+      - name: is_discontinued
+        type: boolean
+        nullable: false
+        default: false
+        description: Product lifecycle status.
+      - name: launched_on
+        type: date
+        description: Product launch date.
+
+  - name: SalesOrder
+    type: table
+    description: Order header containing lifecycle, payment, and channel context.
+    tags: [GOLD]
+    schema: sales
+    database: retail_analytics
+    subject_area: Commerce
+    owner: order-platform@duckcode.ai
+    sla:
+      freshness: 30m
+      quality_score: 99
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Order header identifier.
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Owning customer identifier.
+      - name: order_ts
+        type: timestamp
+        nullable: false
+        description: Order placement timestamp.
+      - name: order_status
+        type: string
+        nullable: false
+        default: pending
+        check: "order_status in ('pending','paid','shipped','delivered','cancelled')"
+        description: Current order lifecycle stage.
+      - name: channel
+        type: string
+        nullable: false
+        default: web
+        description: Sales channel (web, app, store, partner).
+      - name: gross_amount
+        type: decimal(12,2)
+        nullable: false
+        check: "gross_amount >= 0"
+        description: Pre-discount order amount.
+      - name: discount_amount
+        type: decimal(12,2)
+        nullable: false
+        default: 0
+        check: "discount_amount >= 0"
+        description: Total discount amount applied to the order.
+      - name: net_amount
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: gross_amount - discount_amount
+        description: Net order amount after discounts.
+
+  - name: SalesOrderLine
+    type: table
+    description: Order line grain for product, quantity, and pricing analytics.
+    tags: [GOLD]
+    schema: sales
+    database: retail_analytics
+    subject_area: Commerce
+    owner: order-platform@duckcode.ai
+    fields:
+      - name: line_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Surrogate line identifier.
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Parent order identifier.
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Purchased product identifier.
+      - name: quantity
+        type: integer
+        nullable: false
+        check: "quantity > 0"
+        description: Units purchased.
+      - name: unit_price
+        type: decimal(12,2)
+        nullable: false
+        check: "unit_price >= 0"
+        description: Item unit price at order time.
+      - name: line_amount
+        type: decimal(12,2)
+        nullable: false
+        computed: true
+        computed_expression: quantity * unit_price
+        description: Extended line amount for revenue attribution.
+
+  - name: PaymentEvent
+    type: table
+    description: Payment authorization, capture, and settlement events by order.
+    tags: [PCI, INTERNAL]
+    schema: finance
+    database: retail_analytics
+    subject_area: Finance
+    owner: finance-data@duckcode.ai
+    fields:
+      - name: payment_event_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Payment event identifier.
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Associated order identifier.
+      - name: payment_method
+        type: string
+        nullable: false
+        sensitivity: restricted
+        description: Payment method used by the customer.
+      - name: payment_status
+        type: string
+        nullable: false
+        default: pending
+        check: "payment_status in ('pending','authorized','captured','failed','refunded')"
+        description: Payment processing status.
+      - name: amount
+        type: decimal(12,2)
+        nullable: false
+        check: "amount >= 0"
+        description: Payment amount in USD.
+      - name: processed_at
+        type: timestamp
+        description: Processing completion timestamp.
+
+  - name: SupplierFeed
+    type: external_table
+    description: External supplier feed containing sourcing and lead-time metadata.
+    tags: [INTERNAL]
+    schema: ingestion
+    database: retail_analytics
+    subject_area: Supply
+    owner: supply-chain@duckcode.ai
+    fields:
+      - name: supplier_sku
+        type: string
+        primary_key: true
+        nullable: false
+        description: Supplier SKU identifier.
+      - name: supplier_name
+        type: string
+        nullable: false
+        description: Supplier display name.
+      - name: unit_cost
+        type: decimal(12,2)
+        check: "unit_cost >= 0"
+        description: Latest supplier unit cost.
+      - name: feed_updated_at
+        type: timestamp
+        nullable: false
+        description: Supplier feed ingestion timestamp.
+
+  - name: ProductSupplierBridge
+    type: table
+    description: Bridge table mapping products to supplier SKUs and lead-time context.
+    tags: [INTERNAL]
+    schema: supply
+    database: retail_analytics
+    subject_area: Supply
+    owner: supply-chain@duckcode.ai
+    fields:
+      - name: bridge_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Surrogate bridge key.
+      - name: product_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Product key.
+      - name: supplier_sku
+        type: string
+        nullable: false
+        foreign_key: true
+        description: Supplier SKU key.
+      - name: lead_time_days
+        type: integer
+        nullable: false
+        check: "lead_time_days >= 0"
+        description: Expected supplier lead time in days.
+
+  - name: OrderFulfillmentMv
+    type: materialized_view
+    description: Materialized snapshot of fulfillment status by order.
+    tags: [GOLD]
+    schema: analytics
+    database: retail_analytics
+    subject_area: Operations
+    owner: analytics@duckcode.ai
+    fields:
+      - name: order_id
+        type: integer
+        foreign_key: true
+        description: Order identifier.
+      - name: fulfillment_stage
+        type: string
+        description: Latest fulfillment stage.
+      - name: warehouse
+        type: string
+        description: Warehouse handling the order.
+      - name: last_event_ts
+        type: timestamp
+        description: Timestamp of latest fulfillment event.
+
+  - name: DailyRevenueSnapshot
+    type: snapshot
+    description: Daily revenue snapshot for finance reporting and dashboarding.
+    tags: [GOLD]
+    schema: analytics
+    database: retail_analytics
+    subject_area: Finance
+    owner: analytics@duckcode.ai
+    fields:
+      - name: snapshot_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Snapshot record identifier.
+      - name: snapshot_date
+        type: date
+        nullable: false
+        description: Business date of the snapshot.
+      - name: order_id
+        type: integer
+        nullable: false
+        foreign_key: true
+        description: Related order identifier.
+      - name: net_revenue
+        type: decimal(12,2)
+        nullable: false
+        check: "net_revenue >= 0"
+        description: Net revenue recognized for the order.
+      - name: order_count
+        type: integer
+        nullable: false
+        default: 1
+        check: "order_count >= 0"
+        description: Number of orders represented in this row.
+
+  - name: HighValueCustomerView
+    type: view
+    description: Customer view focused on lifetime value and recent purchasing behavior.
+    tags: [GOLD]
+    schema: analytics
+    database: retail_analytics
+    subject_area: Customer
+    owner: analytics@duckcode.ai
+    fields:
+      - name: customer_id
+        type: integer
+        foreign_key: true
+        description: Customer identifier.
+      - name: lifetime_value
+        type: decimal(12,2)
+        description: Total net revenue for the customer.
+      - name: last_order_ts
+        type: timestamp
+        description: Most recent order timestamp.
+
+relationships:
+  - name: customer_orders
+    from: CustomerProfile.customer_id
+    to: SalesOrder.customer_id
+    cardinality: one_to_many
+    on_delete: restrict
+    on_update: cascade
+    description: A customer can place many orders.
+  - name: customer_referrals
+    from: CustomerProfile.referrer_customer_id
+    to: CustomerProfile.customer_id
+    cardinality: many_to_one
+    description: Optional self-relationship for referral attribution.
+  - name: order_lines
+    from: SalesOrder.order_id
+    to: SalesOrderLine.order_id
+    cardinality: one_to_many
+    description: Each order has one or more order lines.
+  - name: line_products
+    from: ProductCatalog.product_id
+    to: SalesOrderLine.product_id
+    cardinality: one_to_many
+    description: Product can appear in many order lines.
+  - name: order_payments
+    from: SalesOrder.order_id
+    to: PaymentEvent.order_id
+    cardinality: one_to_many
+    description: Orders can produce multiple payment lifecycle events.
+  - name: bridge_products
+    from: ProductCatalog.product_id
+    to: ProductSupplierBridge.product_id
+    cardinality: one_to_many
+    description: Product-to-supplier bridge by product key.
+  - name: bridge_suppliers
+    from: SupplierFeed.supplier_sku
+    to: ProductSupplierBridge.supplier_sku
+    cardinality: one_to_many
+    description: Product-to-supplier bridge by supplier key.
+  - name: product_supplier_network
+    from: ProductCatalog.product_id
+    to: SupplierFeed.supplier_sku
+    cardinality: many_to_many
+    description: Conceptual many-to-many mapping between products and suppliers.
+  - name: fulfillment_order
+    from: SalesOrder.order_id
+    to: OrderFulfillmentMv.order_id
+    cardinality: one_to_one
+    description: One fulfillment rollup row per order.
+  - name: snapshot_order
+    from: SalesOrder.order_id
+    to: DailyRevenueSnapshot.order_id
+    cardinality: one_to_many
+    description: Daily snapshots can include multiple records per order over time.
+  - name: high_value_customer
+    from: CustomerProfile.customer_id
+    to: HighValueCustomerView.customer_id
+    cardinality: one_to_one
+    description: Customer profile to customer analytics view.
+
+indexes:
+  - name: ix_sales_order_customer_ts
+    entity: SalesOrder
+    fields: [customer_id, order_ts]
+    type: btree
+    description: Customer timeline lookup for service and analytics.
+  - name: ix_sales_order_status
+    entity: SalesOrder
+    fields: [order_status]
+    type: btree
+    description: Accelerates order status reporting.
+  - name: ix_sales_order_line_order_product
+    entity: SalesOrderLine
+    fields: [order_id, product_id]
+    type: btree
+    description: Supports line-level order drill-down.
+  - name: ux_product_catalog_source_sku
+    entity: ProductCatalog
+    fields: [source_sku]
+    unique: true
+    type: btree
+    description: Enforces unique partner SKU mapping.
+  - name: ux_product_supplier_bridge
+    entity: ProductSupplierBridge
+    fields: [product_id, supplier_sku]
+    unique: true
+    type: btree
+    description: Prevents duplicate bridge rows.
+  - name: ix_payment_event_status
+    entity: PaymentEvent
+    fields: [payment_status, processed_at]
+    type: btree
+    description: Operational payment reconciliation queries.
+  - name: ix_daily_revenue_snapshot_date
+    entity: DailyRevenueSnapshot
+    fields: [snapshot_date]
+    type: btree
+    description: Time-series access pattern for finance dashboards.
+
+governance:
+  classification:
+    CustomerProfile.email: PII
+    CustomerProfile.phone_number: PII
+    SalesOrder.customer_id: INTERNAL
+    PaymentEvent.payment_method: PCI
+    PaymentEvent.amount: CONFIDENTIAL
+  stewards:
+    customer: customer-governance@duckcode.ai
+    commerce: commerce-governance@duckcode.ai
+    finance: finance-governance@duckcode.ai
+  retention:
+    period: P365D
+    policy: Keep one-year detail for operational and regulatory analytics.
+
+glossary:
+  - term: Gross Merchandise Value
+    abbreviation: GMV
+    definition: Total dollar value of products sold before discounts and returns.
+    owner: finance-data@duckcode.ai
+    related_fields:
+      - SalesOrder.gross_amount
+    tags: [finance, kpi]
+  - term: Net Revenue
+    abbreviation: NR
+    definition: Revenue recognized after discounts and adjustments.
+    owner: finance-data@duckcode.ai
+    related_fields:
+      - SalesOrder.net_amount
+      - DailyRevenueSnapshot.net_revenue
+    tags: [finance, reporting]
+  - term: Fulfillment SLA
+    definition: Maximum acceptable time from order placement to shipment.
+    owner: ops-analytics@duckcode.ai
+    related_fields:
+      - SalesOrder.order_ts
+      - OrderFulfillmentMv.last_event_ts
+    tags: [operations, sla]
+  - term: High Value Customer
+    abbreviation: HVC
+    definition: Customer whose lifetime value exceeds the premium segment threshold.
+    owner: customer-data@duckcode.ai
+    related_fields:
+      - HighValueCustomerView.lifetime_value
+      - CustomerProfile.loyalty_tier
+    tags: [customer, segmentation]
+  - term: Supplier Lead Time
+    definition: Number of days from purchase request to supplier delivery.
+    owner: supply-chain@duckcode.ai
+    related_fields:
+      - ProductSupplierBridge.lead_time_days
+    tags: [supply, planning]
+
+rules:
+  - name: sales_order_net_amount_non_negative
+    target: SalesOrder.net_amount
+    expression: "value >= 0"
+    severity: error
+  - name: payment_amount_non_negative
+    target: PaymentEvent.amount
+    expression: "value >= 0"
+    severity: error

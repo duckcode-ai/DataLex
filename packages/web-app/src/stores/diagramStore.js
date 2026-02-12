@@ -15,12 +15,12 @@ const useDiagramStore = create((set, get) => ({
   entitySearch: "",
 
   // Exploration mode
-  viewMode: "all", // "all" | "lineage" | "overview"
+  viewMode: "all", // "all" | "overview"
   visibleLimit: 0, // 0 = show all, >0 = limit visible entities
-  lineageDepth: 1, // how many hops from selected entity in lineage mode
   activeSchemaFilter: null, // filter to a specific schema/subject_area
   largeModelBanner: null, // { total, showing } or null
   centerEntityId: null, // entity to center on in diagram
+  layoutRefreshTick: 0, // increments when user asks to re-run auto layout
   _lastAutoTuneCount: 0, // track last auto-tune to avoid re-applying
 
   // Layout & viz settings
@@ -31,7 +31,7 @@ const useDiagramStore = create((set, get) => ({
     dimUnrelated: true,
     dimSearch: false,
     showBackground: true,
-    entityTypeFilter: "all",
+    entityTypeFilter: "table",
     tagFilter: "all",
     layoutMode: "elk",
     layoutDensity: "normal",
@@ -66,10 +66,10 @@ const useDiagramStore = create((set, get) => ({
 
   setViewMode: (mode) => set({ viewMode: mode }),
   setVisibleLimit: (limit) => set({ visibleLimit: limit }),
-  setLineageDepth: (depth) => set({ lineageDepth: depth }),
   setActiveSchemaFilter: (schema) => set({ activeSchemaFilter: schema }),
   setLargeModelBanner: (banner) => set({ largeModelBanner: banner }),
   setCenterEntityId: (id) => set({ centerEntityId: id }),
+  requestLayoutRefresh: () => set((s) => ({ layoutRefreshTick: s.layoutRefreshTick + 1 })),
 
   updateVizSetting: (key, value) => {
     set((s) => ({

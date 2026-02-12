@@ -17,10 +17,10 @@ export async function fetchProjects() {
   return data.projects || [];
 }
 
-export async function addProject(name, path) {
+export async function addProject(name, path, createIfMissing = false) {
   const data = await request("/projects", {
     method: "POST",
-    body: JSON.stringify({ name, path }),
+    body: JSON.stringify({ name, path, create_if_missing: createIfMissing }),
   });
   return data.project;
 }
@@ -53,6 +53,50 @@ export async function createProjectFile(projectId, name, content = "") {
   });
 }
 
+export async function moveProjectFile(targetProjectId, sourcePath, mode = "move") {
+  return request(`/projects/${targetProjectId}/move-file`, {
+    method: "POST",
+    body: JSON.stringify({ sourcePath, mode }),
+  });
+}
+
 export async function fetchModelGraph(projectId) {
   return request(`/projects/${projectId}/model-graph`);
+}
+
+export async function fetchGitStatus(projectId) {
+  return request(`/git/status?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function fetchGitDiff(projectId, { path = "", staged = false } = {}) {
+  const params = new URLSearchParams();
+  params.set("projectId", projectId);
+  if (path) params.set("path", path);
+  if (staged) params.set("staged", "1");
+  return request(`/git/diff?${params.toString()}`);
+}
+
+export async function commitGit(projectId, { message, paths = [] }) {
+  return request("/git/commit", {
+    method: "POST",
+    body: JSON.stringify({ projectId, message, paths }),
+  });
+}
+
+export async function stageGitFiles(projectId, paths) {
+  return request("/git/stage", {
+    method: "POST",
+    body: JSON.stringify({ projectId, paths }),
+  });
+}
+
+export async function unstageGitFiles(projectId, paths) {
+  return request("/git/unstage", {
+    method: "POST",
+    body: JSON.stringify({ projectId, paths }),
+  });
+}
+
+export async function fetchGitLog(projectId, limit = 20) {
+  return request(`/git/log?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}`);
 }

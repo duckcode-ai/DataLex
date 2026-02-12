@@ -4,7 +4,6 @@ import {
   Plus,
   Trash2,
   Key,
-  Fingerprint,
   Tag,
   FileText,
   ArrowRightLeft,
@@ -13,7 +12,6 @@ import {
   User,
   Clock,
   ListOrdered,
-  AlertTriangle,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -38,13 +36,23 @@ export default function EntityPanel() {
   }
 
   const classifications = model?.governance?.classification || {};
-  const imports = model?.model?.imports || [];
+  const rawModelOwners = model?.model?.owners;
+  const modelOwners = Array.isArray(rawModelOwners)
+    ? rawModelOwners
+    : (typeof rawModelOwners === "string" && rawModelOwners.trim() ? [rawModelOwners] : []);
+  const fallbackOwner = modelOwners.map((o) => String(o || "").trim()).filter(Boolean).join(", ");
   const localEntityNames = new Set((model?.entities || []).map((e) => e.name));
   const relationships = (model?.relationships || []).filter((r) => {
     const fromEntity = r.from?.split(".")[0];
     const toEntity = r.to?.split(".")[0];
     return fromEntity === selectedEntityId || toEntity === selectedEntityId;
   });
+  const entityFieldMap = new Map(
+    (model?.entities || []).map((entity) => [
+      entity.name,
+      new Map((entity.fields || []).map((f) => [f.name, f])),
+    ])
+  );
 
   const applyMutation = (mutatorFn, ...args) => {
     const result = mutatorFn(activeFileContent, ...args);
@@ -71,19 +79,53 @@ export default function EntityPanel() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">
-        {/* Description */}
+        {/* Table Summary */}
         <div>
           <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
             <FileText size={10} />
-            Description
+            Table Summary
           </label>
           <textarea
             value={selectedEntity.description || ""}
             onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "description", e.target.value)}
             className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
             rows={2}
-            placeholder="Entity description..."
+            placeholder="Business summary of this table..."
           />
+        </div>
+
+        {/* Business Context */}
+        <div>
+          <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
+            <Database size={10} />
+            Business Context
+          </label>
+          <textarea
+            value={selectedEntity.subject_area || ""}
+            onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "subject_area", e.target.value)}
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue resize-none"
+            rows={2}
+            placeholder="What business domain/use-case this table serves..."
+          />
+        </div>
+
+        {/* Owner */}
+        <div>
+          <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
+            <User size={10} />
+            Owner
+          </label>
+          <input
+            value={selectedEntity.owner || ""}
+            onChange={(e) => applyMutation(updateEntityMeta, selectedEntityId, "owner", e.target.value)}
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue"
+            placeholder={fallbackOwner || "team@company.com"}
+          />
+          {fallbackOwner && !selectedEntity.owner && (
+            <div className="text-[10px] text-text-muted mt-1">
+              Using model owner fallback: <strong>{fallbackOwner}</strong>
+            </div>
+          )}
         </div>
 
         {/* Tags */}
@@ -101,7 +143,7 @@ export default function EntityPanel() {
         </div>
 
         {/* v2 Entity Properties */}
-        {(selectedEntity.schema || selectedEntity.database || selectedEntity.subject_area || selectedEntity.owner || selectedEntity.sla) && (
+        {(selectedEntity.schema || selectedEntity.database || selectedEntity.sla) && (
           <div>
             <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1 mb-1">
               <Database size={10} />
@@ -118,19 +160,6 @@ export default function EntityPanel() {
                 <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
                   <span className="text-text-muted">Database</span>
                   <span className="ml-auto text-text-primary font-mono">{selectedEntity.database}</span>
-                </div>
-              )}
-              {selectedEntity.subject_area && (
-                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
-                  <span className="text-text-muted">Subject Area</span>
-                  <span className="ml-auto text-text-primary">{selectedEntity.subject_area}</span>
-                </div>
-              )}
-              {selectedEntity.owner && (
-                <div className="flex items-center gap-2 px-2 py-1 bg-bg-primary border border-border-primary rounded-md">
-                  <User size={10} className="text-text-muted shrink-0" />
-                  <span className="text-text-muted">Owner</span>
-                  <span className="ml-auto text-text-primary">{selectedEntity.owner}</span>
                 </div>
               )}
               {selectedEntity.sla && (
@@ -170,6 +199,7 @@ export default function EntityPanel() {
                 <tr className="bg-bg-secondary/50">
                   <th className="text-left px-2 py-1 text-text-muted font-medium">Name</th>
                   <th className="text-left px-2 py-1 text-text-muted font-medium">Type</th>
+                  <th className="text-left px-2 py-1 text-text-muted font-medium">Logic / Description</th>
                   <th className="text-center px-1 py-1 text-text-muted font-medium">PK</th>
                   <th className="text-center px-1 py-1 text-text-muted font-medium">UQ</th>
                   <th className="text-center px-1 py-1 text-text-muted font-medium">NN</th>
@@ -187,6 +217,14 @@ export default function EntityPanel() {
                         value={field.type || ""}
                         onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "type", e.target.value)}
                         className="w-full bg-transparent border-b border-transparent hover:border-border-primary focus:border-accent-blue text-text-secondary font-mono outline-none text-[11px] py-0.5"
+                      />
+                    </td>
+                    <td className="px-2 py-1">
+                      <input
+                        value={field.description || ""}
+                        onChange={(e) => applyMutation(updateFieldProperty, selectedEntityId, field.name, "description", e.target.value)}
+                        className="w-full bg-transparent border-b border-transparent hover:border-border-primary focus:border-accent-blue text-text-secondary outline-none text-[11px] py-0.5"
+                        placeholder="Column business logic..."
                       />
                     </td>
                     <td className="text-center px-1 py-1">
@@ -238,10 +276,23 @@ export default function EntityPanel() {
             <div className="space-y-1">
               {relationships.map((rel) => {
                 const fromEntity = rel.from?.split(".")[0] || "";
+                const fromField = rel.from?.split(".")[1] || "";
                 const toEntity = rel.to?.split(".")[0] || "";
+                const toField = rel.to?.split(".")[1] || "";
                 const isCrossModel =
                   (fromEntity && !localEntityNames.has(fromEntity)) ||
                   (toEntity && !localEntityNames.has(toEntity));
+                const isSelf = fromEntity && toEntity && fromEntity === toEntity;
+                const fromFieldMeta = entityFieldMap.get(fromEntity)?.get(fromField) || {};
+                const toFieldMeta = entityFieldMap.get(toEntity)?.get(toField) || {};
+                const pkToFk = Boolean(fromFieldMeta.primary_key && toFieldMeta.foreign_key);
+                const fkToPk = Boolean(fromFieldMeta.foreign_key && toFieldMeta.primary_key);
+                const cardinalityLabel =
+                  rel.cardinality === "one_to_one" ? "1:1" :
+                  rel.cardinality === "one_to_many" ? "1:N" :
+                  rel.cardinality === "many_to_one" ? "N:1" :
+                  rel.cardinality === "many_to_many" ? "N:N" :
+                  (rel.cardinality || "");
                 return (
                   <div
                     key={rel.name}
@@ -260,13 +311,28 @@ export default function EntityPanel() {
                         CROSS-MODEL
                       </span>
                     )}
+                    {pkToFk && (
+                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-cyan-100 text-cyan-700">
+                        PK→FK
+                      </span>
+                    )}
+                    {fkToPk && (
+                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-purple-100 text-purple-700">
+                        FK→PK
+                      </span>
+                    )}
+                    {isSelf && (
+                      <span className="px-1 py-0 rounded text-[8px] font-semibold bg-amber-100 text-amber-700">
+                        SELF
+                      </span>
+                    )}
                     <span className={`ml-auto px-1.5 py-0 rounded text-[9px] font-semibold ${
                       rel.cardinality === "one_to_one" ? "bg-green-50 text-green-700" :
                       rel.cardinality === "one_to_many" ? "bg-blue-50 text-blue-700" :
                       rel.cardinality === "many_to_one" ? "bg-purple-50 text-purple-700" :
                       "bg-orange-50 text-orange-700"
                     }`}>
-                      {rel.cardinality?.replace(/_/g, ":")}
+                      {cardinalityLabel}
                     </span>
                   </div>
                 );

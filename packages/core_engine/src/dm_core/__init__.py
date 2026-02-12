@@ -13,6 +13,7 @@ from dm_core.doctor import diagnostics_as_json, format_diagnostics, run_diagnost
 from dm_core.generators import dbt_scaffold_files, generate_sql_ddl, write_dbt_scaffold
 from dm_core.migrate import generate_migration, write_migration
 from dm_core.importers import (
+    import_dbt_schema_yml,
     import_dbml,
     import_spark_schema,
     import_sql_ddl,
@@ -45,6 +46,7 @@ __all__ = [
     "generate_sql_ddl",
     "generate_zsh_completion",
     "import_dbml",
+    "import_dbt_schema_yml",
     "import_spark_schema",
     "import_sql_ddl",
     "lint_issues",

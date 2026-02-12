@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+from urllib.parse import urlparse
 
 import yaml
 
@@ -23,6 +24,7 @@ from dm_core import (
     generate_zsh_completion,
     ConnectorConfig,
     get_connector,
+    import_dbt_schema_yml,
     import_dbml,
     import_spark_schema,
     import_sql_ddl,
@@ -177,6 +179,75 @@ def _combined_issues(model: Dict[str, Any], schema: Dict[str, Any]) -> List[Issu
     issues = schema_issues(model, schema)
     issues.extend(lint_issues(model))
     return issues
+
+
+def _normalize_host_and_port(host: str, port: int) -> Tuple[str, int]:
+    """Accept URL-ish host input and normalize it to hostname + port."""
+    clean_host = (host or "").strip()
+    clean_port = port or 0
+    if not clean_host:
+        return "", clean_port
+
+    target = clean_host if "://" in clean_host else f"//{clean_host}"
+    parsed = urlparse(target)
+    normalized_host = parsed.hostname or clean_host.split("/", 1)[0].strip()
+
+    parsed_port = 0
+    try:
+        parsed_port = parsed.port or 0
+    except ValueError:
+        parsed_port = 0
+
+    if not clean_port and parsed_port:
+        clean_port = parsed_port
+
+    return normalized_host, clean_port
+
+
+def _sanitize_model_file_stem(model_name: str) -> str:
+    stem = (model_name or "imported_model").strip() or "imported_model"
+    for ch in ("/", "\\", " ", ":", ";"):
+        stem = stem.replace(ch, "_")
+    return stem
+
+
+def _should_create_directory(path: Path) -> bool:
+    if sys.stdin.isatty():
+        answer = input(f'Project folder "{path}" does not exist. Create it? [y/N]: ').strip().lower()
+        return answer in {"y", "yes"}
+    return False
+
+
+def _resolve_pull_output_path(args: argparse.Namespace, model_name: str) -> Tuple[bool, str]:
+    project_dir_raw = getattr(args, "project_dir", "") or ""
+    out_raw = getattr(args, "out", "") or ""
+    create_project_dir = bool(getattr(args, "create_project_dir", False))
+
+    if not project_dir_raw:
+        return True, out_raw
+
+    project_dir = Path(project_dir_raw).expanduser()
+    if project_dir.exists() and not project_dir.is_dir():
+        return False, f"Project folder is not a directory: {project_dir}"
+    if not project_dir.exists():
+        if create_project_dir or _should_create_directory(project_dir):
+            project_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            if not sys.stdin.isatty():
+                return False, (
+                    f"Project folder does not exist: {project_dir}. "
+                    f"Re-run with --create-project-dir to create it."
+                )
+            return False, f"Aborted: project folder not created: {project_dir}"
+
+    if out_raw:
+        out_path = Path(out_raw)
+        if out_path.is_absolute():
+            return False, "--out must be a relative filename/path when used with --project-dir"
+        return True, str(project_dir / out_path)
+
+    file_name = f"{_sanitize_model_file_stem(model_name)}.model.yaml"
+    return True, str(project_dir / file_name)
 
 
 def _validate_model_file(model_path: str, schema: Dict[str, Any]) -> Tuple[Dict[str, Any], List[Issue]]:
@@ -619,6 +690,28 @@ def cmd_import_spark_schema(args: argparse.Namespace) -> int:
     return 1 if has_errors(issues) else 0
 
 
+def cmd_import_dbt(args: argparse.Namespace) -> int:
+    schema_text = Path(args.input).read_text(encoding="utf-8")
+    model = import_dbt_schema_yml(
+        schema_yml_text=schema_text,
+        model_name=args.model_name,
+        domain=args.domain,
+        owners=args.owner if args.owner else ["data-team@example.com"],
+    )
+
+    schema = load_schema(args.schema)
+    issues = _combined_issues(model, schema)
+    _print_issue_block("Imported model checks", issues)
+
+    if args.out:
+        _write_yaml(args.out, model)
+        print(f"Wrote imported YAML model: {args.out}")
+    else:
+        print(yaml.safe_dump(model, sort_keys=False))
+
+    return 1 if has_errors(issues) else 0
+
+
 def cmd_pull(args: argparse.Namespace) -> int:
     connector_type = args.connector
     connector = get_connector(connector_type)
@@ -632,10 +725,15 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"Driver check failed: {msg}", file=sys.stderr)
         return 1
 
+    host, port = _normalize_host_and_port(
+        getattr(args, "host", "") or "",
+        getattr(args, "port", 0) or 0,
+    )
+
     config = ConnectorConfig(
         connector_type=connector_type,
-        host=getattr(args, "host", "") or "",
-        port=getattr(args, "port", 0) or 0,
+        host=host,
+        port=port,
         database=getattr(args, "database", "") or "",
         schema=getattr(args, "db_schema", "") or "",
         user=getattr(args, "user", "") or "",
@@ -645,6 +743,7 @@ def cmd_pull(args: argparse.Namespace) -> int:
         dataset=getattr(args, "dataset", "") or "",
         catalog=getattr(args, "catalog", "") or "",
         token=getattr(args, "token", "") or "",
+        private_key_path=getattr(args, "private_key_path", "") or "",
         model_name=getattr(args, "model_name", "imported_model") or "imported_model",
         domain=getattr(args, "domain", "imported") or "imported",
         owners=[getattr(args, "owner", None)] if getattr(args, "owner", None) else None,
@@ -657,6 +756,11 @@ def cmd_pull(args: argparse.Namespace) -> int:
         print(f"{'OK' if ok else 'FAIL'}: {msg}")
         return 0 if ok else 1
 
+    ok_out, output_path_or_error = _resolve_pull_output_path(args, config.model_name)
+    if not ok_out:
+        print(output_path_or_error, file=sys.stderr)
+        return 1
+
     print(f"Pulling schema from {connector.display_name}...")
     result = connector.pull_schema(config)
 
@@ -666,9 +770,9 @@ def cmd_pull(args: argparse.Namespace) -> int:
         for w in result.warnings:
             print(f"  [WARN] {w}")
 
-    if args.out:
-        _write_yaml(args.out, result.model)
-        print(f"\nWrote model: {args.out}")
+    if output_path_or_error:
+        _write_yaml(output_path_or_error, result.model)
+        print(f"\nWrote model: {output_path_or_error}")
     else:
         print("\n" + yaml.safe_dump(result.model, sort_keys=False))
 
@@ -684,15 +788,22 @@ def cmd_connectors(args: argparse.Namespace) -> int:
         for c in connectors:
             status = "installed" if c["installed"] else "NOT INSTALLED"
             print(f"  {c['type']:12s}  {c['name']:30s}  driver: {c['driver']:25s}  [{status}]")
-        print(f"\nUsage: dm pull <connector> --host <host> --database <db> --user <user> --password <pass> --out model.yaml")
+        print(
+            "\nUsage: dm pull <connector> --host <host> --database <db> --user <user> "
+            "--password <pass> [--out model.yaml | --project-dir ./models]"
+        )
     return 0
 
 
 def _build_connector_config(args: argparse.Namespace) -> "ConnectorConfig":
+    host, port = _normalize_host_and_port(
+        getattr(args, "host", "") or "",
+        getattr(args, "port", 0) or 0,
+    )
     return ConnectorConfig(
         connector_type=args.connector,
-        host=getattr(args, "host", "") or "",
-        port=getattr(args, "port", 0) or 0,
+        host=host,
+        port=port,
         database=getattr(args, "database", "") or "",
         schema=getattr(args, "db_schema", "") or "",
         user=getattr(args, "user", "") or "",
@@ -702,6 +813,7 @@ def _build_connector_config(args: argparse.Namespace) -> "ConnectorConfig":
         dataset=getattr(args, "dataset", "") or "",
         catalog=getattr(args, "catalog", "") or "",
         token=getattr(args, "token", "") or "",
+        private_key_path=getattr(args, "private_key_path", "") or "",
     )
 
 
@@ -1222,7 +1334,7 @@ def build_parser() -> argparse.ArgumentParser:
     gen_changelog_parser.add_argument("--out", help="Output changelog file path")
     gen_changelog_parser.set_defaults(func=cmd_generate_changelog)
 
-    import_parser = sub.add_parser("import", help="Import SQL/DBML into model YAML")
+    import_parser = sub.add_parser("import", help="Import SQL/DBML/Spark/dbt schema into model YAML")
     import_sub = import_parser.add_subparsers(dest="import_command", required=True)
 
     import_sql_parser = import_sub.add_parser("sql", help="Import SQL DDL file")
@@ -1263,6 +1375,15 @@ def build_parser() -> argparse.ArgumentParser:
     import_spark_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
     import_spark_parser.set_defaults(func=cmd_import_spark_schema)
 
+    import_dbt_parser = import_sub.add_parser("dbt", help="Import dbt schema.yml file")
+    import_dbt_parser.add_argument("input", help="Path to dbt schema.yml file")
+    import_dbt_parser.add_argument("--out", help="Write output YAML model file")
+    import_dbt_parser.add_argument("--model-name", default="imported_dbt_model", help="Model name")
+    import_dbt_parser.add_argument("--domain", default="imported", help="Domain value")
+    import_dbt_parser.add_argument("--owner", action="append", default=[], help="Owner email (repeatable)")
+    import_dbt_parser.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
+    import_dbt_parser.set_defaults(func=cmd_import_dbt)
+
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks)")
     pull_parser.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
@@ -1276,12 +1397,19 @@ def build_parser() -> argparse.ArgumentParser:
     pull_parser.add_argument("--dataset", help="BigQuery dataset")
     pull_parser.add_argument("--catalog", help="Databricks Unity Catalog name")
     pull_parser.add_argument("--token", help="Access token (Databricks)")
+    pull_parser.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
     pull_parser.add_argument("--tables", nargs="*", help="Only include these tables")
     pull_parser.add_argument("--exclude-tables", nargs="*", help="Exclude these tables")
     pull_parser.add_argument("--model-name", default="imported_model", help="Model name")
     pull_parser.add_argument("--domain", default="imported", help="Domain value")
     pull_parser.add_argument("--owner", help="Owner email")
     pull_parser.add_argument("--out", help="Output YAML model file path")
+    pull_parser.add_argument("--project-dir", help="Project folder to write extracted model YAML")
+    pull_parser.add_argument(
+        "--create-project-dir",
+        action="store_true",
+        help="Create --project-dir if missing (otherwise prompt in interactive mode)",
+    )
     pull_parser.add_argument("--test", action="store_true", help="Test connection only, do not pull schema")
     pull_parser.set_defaults(func=cmd_pull)
 
@@ -1303,6 +1431,7 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--dataset", help="BigQuery dataset")
         p.add_argument("--catalog", help="Databricks catalog")
         p.add_argument("--token", help="Access token")
+        p.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
         p.add_argument("--output-json", action="store_true", help="Print as JSON")
 
     schemas_parser = sub.add_parser("schemas", help="List schemas/datasets in a database")

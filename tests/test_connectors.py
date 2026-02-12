@@ -15,6 +15,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Dict
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
@@ -493,6 +494,76 @@ class TestCLIParser(unittest.TestCase):
         parser = build_parser()
         args = parser.parse_args(["pull", "mysql", "--out", "model.yaml"])
         self.assertEqual(args.out, "model.yaml")
+
+    def test_pull_parser_project_dir(self):
+        from dm_cli.main import build_parser
+        parser = build_parser()
+        args = parser.parse_args(
+            ["pull", "postgres", "--project-dir", "model-examples/new_project", "--create-project-dir"]
+        )
+        self.assertEqual(args.project_dir, "model-examples/new_project")
+        self.assertTrue(args.create_project_dir)
+
+    def test_normalize_host_and_port_url_input(self):
+        from dm_cli.main import _normalize_host_and_port
+        host, port = _normalize_host_and_port("http://127.0.0.1:5432", 0)
+        self.assertEqual(host, "127.0.0.1")
+        self.assertEqual(port, 5432)
+
+    def test_resolve_pull_output_path_project_dir_default_name(self):
+        from dm_cli.main import _resolve_pull_output_path
+        with tempfile.TemporaryDirectory() as tmp:
+            class Args:
+                project_dir = tmp
+                out = ""
+                create_project_dir = False
+            ok, value = _resolve_pull_output_path(Args(), "orders")
+            self.assertTrue(ok)
+            self.assertEqual(value, str(Path(tmp) / "orders.model.yaml"))
+
+    def test_resolve_pull_output_path_creates_missing_project_dir_when_flagged(self):
+        from dm_cli.main import _resolve_pull_output_path
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "new_project_dir"
+
+            class Args:
+                project_dir = str(target)
+                out = ""
+                create_project_dir = True
+
+            ok, value = _resolve_pull_output_path(Args(), "orders")
+            self.assertTrue(ok)
+            self.assertTrue(target.exists())
+            self.assertEqual(value, str(target / "orders.model.yaml"))
+
+    def test_resolve_pull_output_path_prompts_to_create_missing_dir(self):
+        from dm_cli.main import _resolve_pull_output_path
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "prompt_project_dir"
+
+            class Args:
+                project_dir = str(target)
+                out = ""
+                create_project_dir = False
+
+            with patch("dm_cli.main.sys.stdin.isatty", return_value=True), patch(
+                "builtins.input", return_value="y"
+            ):
+                ok, value = _resolve_pull_output_path(Args(), "orders")
+
+            self.assertTrue(ok)
+            self.assertTrue(target.exists())
+            self.assertEqual(value, str(target / "orders.model.yaml"))
+
+    def test_build_connector_config_normalizes_url_host(self):
+        from dm_cli.main import _build_connector_config, build_parser
+        parser = build_parser()
+        args = parser.parse_args(
+            ["schemas", "postgres", "--host", "http://127.0.0.1:5432/", "--database", "postgres"]
+        )
+        config = _build_connector_config(args)
+        self.assertEqual(config.host, "127.0.0.1")
+        self.assertEqual(config.port, 5432)
 
     def test_connectors_parser(self):
         from dm_cli.main import build_parser

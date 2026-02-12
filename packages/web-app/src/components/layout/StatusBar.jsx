@@ -9,18 +9,22 @@ import {
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
+import useUiStore from "../../stores/uiStore";
 import { runModelChecks } from "../../modelQuality";
 
 export default function StatusBar() {
   const { activeFile, activeFileContent, offlineMode } = useWorkspaceStore();
   const { model, nodes, edges } = useDiagramStore();
+  const { activeActivity, bottomPanelOpen, toggleBottomPanel } = useUiStore();
 
   const check = activeFileContent ? runModelChecks(activeFileContent) : null;
   const errorCount = check?.errors?.length || 0;
   const warnCount = check?.warnings?.length || 0;
+  const supportsBottomPanel =
+    activeActivity === "model" || activeActivity === "explore" || activeActivity === "settings";
 
   return (
-    <div className="h-6 bg-bg-secondary border-t border-border-primary flex items-center px-3 gap-4 text-[11px] text-text-muted shrink-0">
+    <div className="h-7 bg-white/85 backdrop-blur-sm border-t border-border-primary/80 flex items-center px-3 gap-4 text-[11px] text-text-muted shrink-0">
       {/* Mode */}
       <span className={`flex items-center gap-1 ${offlineMode ? "text-accent-yellow" : "text-accent-green"}`}>
         <span className={`w-1.5 h-1.5 rounded-full ${offlineMode ? "bg-accent-yellow" : "bg-accent-green"}`} />
@@ -51,6 +55,15 @@ export default function StatusBar() {
 
       {/* Validation status */}
       <div className="ml-auto flex items-center gap-3">
+        {supportsBottomPanel && (
+          <button
+            onClick={toggleBottomPanel}
+            className="px-2 py-0.5 rounded border border-border-primary text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors"
+            title={`${bottomPanelOpen ? "Hide" : "Show"} bottom panel (⌘J)`}
+          >
+            {bottomPanelOpen ? "Hide Panels" : "Show Panels"}
+          </button>
+        )}
         {errorCount > 0 ? (
           <span className="flex items-center gap-1 text-status-error">
             <AlertCircle size={11} />

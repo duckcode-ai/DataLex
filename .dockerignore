@@ -1,0 +1,15 @@
+.git
+.gitignore
+node_modules
+**/node_modules
+**/dist
+.venv
+.tmp
+.claude
+.vscode
+.idea
+__pycache__
+*.pyc
+*.pyo
+.DS_Store
+*.log

@@ -37,7 +37,7 @@ entities:
         nullable: false
         sensitivity: confidential
       - name: last_name
-        type: string
+        type: int
         nullable: false
         sensitivity: confidential
       - name: email

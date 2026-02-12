@@ -1,8 +1,4 @@
-"""Tests for Phase 4: Advanced Import & Reverse Engineering (SQL DDL only).
-
-Note: JSON Schema, dbt manifest, and Avro importers were removed in the
-database connector rework. Those tests now live in test_connectors.py.
-"""
+"""Tests for importers used by local/open-source DataLex workflows."""
 
 import json
 import subprocess
@@ -13,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages" / "core_engine" / "src"))
 
-from dm_core.importers import import_sql_ddl
+from dm_core.importers import import_dbt_schema_yml, import_sql_ddl
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 DM_CLI = str(Path(__file__).resolve().parent.parent / "dm")
@@ -189,3 +185,102 @@ class TestSQLDDLEnhanced:
         # Should not crash, entity should have 2 fields
         assert len(model["entities"][0]["fields"]) == 2
 
+
+class TestDbtSchemaImporter:
+    def test_import_models_and_sources(self):
+        dbt_schema = """
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: customers
+        columns:
+          - name: customer_id
+            tests: [not_null, unique]
+          - name: email
+            tests: [not_null]
+models:
+  - name: stg_orders
+    description: Orders staging model
+    tags: [staging]
+    columns:
+      - name: order_id
+        tests: [not_null, unique]
+      - name: customer_id
+        tests:
+          - not_null
+          - relationships:
+              to: source('raw', 'customers')
+              field: customer_id
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_import")
+        entities = {e["name"]: e for e in model["entities"]}
+        assert "Customers" in entities
+        assert "StgOrders" in entities
+        assert entities["Customers"]["type"] == "external_table"
+        assert entities["StgOrders"]["type"] == "view"
+
+        orders_fields = {f["name"]: f for f in entities["StgOrders"]["fields"]}
+        assert orders_fields["order_id"].get("primary_key") is True
+        assert orders_fields["customer_id"].get("foreign_key") is True
+        assert orders_fields["customer_id"]["nullable"] is False
+
+        rels = model.get("relationships", [])
+        assert len(rels) == 1
+        assert rels[0]["from"] == "Customers.customer_id"
+        assert rels[0]["to"] == "StgOrders.customer_id"
+        assert rels[0]["cardinality"] == "one_to_many"
+
+    def test_import_relationships_skips_unresolved_targets(self):
+        dbt_schema = """
+version: 2
+models:
+  - name: stg_orders
+    columns:
+      - name: customer_id
+        tests:
+          - relationships:
+              to: ref('missing_dim')
+              field: id
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_import")
+        assert len(model["entities"]) == 1
+        assert model["entities"][0]["name"] == "StgOrders"
+        assert model.get("relationships", []) == []
+
+    def test_import_data_tests_and_constraints(self):
+        dbt_schema = """
+version: 2
+models:
+  - name: dim_customers
+    columns:
+      - name: customer_id
+        data_tests: [not_null, unique]
+  - name: fct_orders
+    constraints:
+      - type: foreign_key
+        columns: [customer_id]
+        expression: "references dim_customers(customer_id)"
+    columns:
+      - name: order_id
+        constraints:
+          - type: primary_key
+      - name: customer_id
+        data_tests: [not_null]
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_constraints")
+        entities = {e["name"]: e for e in model["entities"]}
+        assert "DimCustomers" in entities
+        assert "FctOrders" in entities
+
+        dim_fields = {f["name"]: f for f in entities["DimCustomers"]["fields"]}
+        assert dim_fields["customer_id"].get("primary_key") is True
+        assert dim_fields["customer_id"].get("nullable") is False
+
+        fct_fields = {f["name"]: f for f in entities["FctOrders"]["fields"]}
+        assert fct_fields["order_id"].get("primary_key") is True
+        assert fct_fields["customer_id"].get("foreign_key") is True
+
+        rels = model.get("relationships", [])
+        assert any(r["from"] == "DimCustomers.customer_id" and r["to"] == "FctOrders.customer_id" for r in rels)

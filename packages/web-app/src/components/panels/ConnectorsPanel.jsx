@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Database,
   CheckCircle2,
   AlertCircle,
   Loader2,
@@ -16,9 +15,16 @@ import {
   Check,
   Square,
   CheckSquare,
+  KeyRound,
+  Lock,
+  History,
+  FolderTree,
+  Sparkles,
+  ShieldCheck,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
+import ConnectorLogo from "../icons/ConnectorLogo";
 
 const API = "http://localhost:3001";
 
@@ -37,10 +43,18 @@ const CONNECTOR_FIELDS = {
     { key: "user", label: "User", placeholder: "root", required: true },
     { key: "password", label: "Password", placeholder: "••••••••", secret: true },
   ],
-  snowflake: [
-    { key: "host", label: "Account", placeholder: "acct.snowflakecomputing.com", required: true },
+  snowflake_password: [
+    { key: "host", label: "Account", placeholder: "ORGID-ACCTNAME (without .snowflakecomputing.com)", required: true },
     { key: "user", label: "User", placeholder: "MY_USER", required: true },
     { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+    { key: "database", label: "Database", placeholder: "MY_DB", required: true },
+    { key: "warehouse", label: "Warehouse", placeholder: "COMPUTE_WH" },
+  ],
+  snowflake_keypair: [
+    { key: "host", label: "Account", placeholder: "ORGID-ACCTNAME (without .snowflakecomputing.com)", required: true },
+    { key: "user", label: "User", placeholder: "MY_USER", required: true },
+    { key: "private_key_content", label: "Private Key (PEM)", placeholder: "-----BEGIN ENCRYPTED PRIVATE KEY-----\n...\n-----END ENCRYPTED PRIVATE KEY-----", required: true, multiline: true },
+    { key: "password", label: "Key Passphrase", placeholder: "optional — leave blank if unencrypted", secret: true },
     { key: "database", label: "Database", placeholder: "MY_DB", required: true },
     { key: "warehouse", label: "Warehouse", placeholder: "COMPUTE_WH" },
   ],
@@ -56,11 +70,46 @@ const CONNECTOR_FIELDS = {
 };
 
 const CONNECTOR_META = {
-  postgres: { name: "PostgreSQL", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200", accent: "bg-blue-500" },
-  mysql: { name: "MySQL", color: "text-orange-600", bg: "bg-orange-50", border: "border-orange-200", accent: "bg-orange-500" },
-  snowflake: { name: "Snowflake", color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-200", accent: "bg-cyan-500" },
-  bigquery: { name: "BigQuery", color: "text-green-600", bg: "bg-green-50", border: "border-green-200", accent: "bg-green-500" },
-  databricks: { name: "Databricks", color: "text-red-600", bg: "bg-red-50", border: "border-red-200", accent: "bg-red-500" },
+  postgres: {
+    name: "PostgreSQL",
+    tag: "OLTP",
+    color: "text-[#235b93]",
+    bg: "bg-[#eef5fd]",
+    border: "border-[#cde0f4]",
+    accent: "bg-[#2767a7]",
+  },
+  mysql: {
+    name: "MySQL",
+    tag: "OLTP",
+    color: "text-[#9a5a12]",
+    bg: "bg-[#fff4e7]",
+    border: "border-[#f8d9b2]",
+    accent: "bg-[#c7781c]",
+  },
+  snowflake: {
+    name: "Snowflake",
+    tag: "Cloud DW",
+    color: "text-[#0f89bd]",
+    bg: "bg-[#e8f7ff]",
+    border: "border-[#bfe8ff]",
+    accent: "bg-[#10a7e6]",
+  },
+  bigquery: {
+    name: "BigQuery",
+    tag: "Analytics",
+    color: "text-[#285bb7]",
+    bg: "bg-[#eef4ff]",
+    border: "border-[#d4e1ff]",
+    accent: "bg-[#3e78ea]",
+  },
+  databricks: {
+    name: "Databricks",
+    tag: "Lakehouse",
+    color: "text-[#b7342d]",
+    bg: "bg-[#fff0ef]",
+    border: "border-[#ffd3cf]",
+    accent: "bg-[#ea4335]",
+  },
 };
 
 const STEPS = [
@@ -81,9 +130,19 @@ async function apiPost(path, body) {
   return data;
 }
 
+async function apiGet(path) {
+  const resp = await fetch(`${API}${path}`);
+  const data = await resp.json();
+  if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+  return data;
+}
+
 export default function ConnectorsPanel() {
   const [connectors, setConnectors] = useState(null);
+  const [savedConnections, setSavedConnections] = useState([]);
   const [selectedConnector, setSelectedConnector] = useState(null);
+  const [activeConnectionId, setActiveConnectionId] = useState(null);
+  const [snowflakeAuth, setSnowflakeAuth] = useState("password"); // "password" | "keypair"
   const [step, setStep] = useState(0);
   const [formValues, setFormValues] = useState({});
   const [showSecrets, setShowSecrets] = useState({});
@@ -105,9 +164,25 @@ export default function ConnectorsPanel() {
   // Step 4: pull result
   const [pullResult, setPullResult] = useState(null);
   const [pullProgress, setPullProgress] = useState(null);
+  const [targetProjectId, setTargetProjectId] = useState("");
 
-  const { loadImportedYaml, loadMultipleImportedYaml } = useWorkspaceStore();
+  const {
+    loadImportedYaml,
+    loadMultipleImportedYaml,
+    activeProjectId,
+    projects,
+    selectProject,
+  } = useWorkspaceStore();
   const { addToast, setBottomPanelTab } = useUiStore();
+
+  const refreshSavedConnections = useCallback(async () => {
+    try {
+      const data = await apiGet("/api/connections");
+      setSavedConnections(data.connections || []);
+    } catch (_err) {
+      setSavedConnections([]);
+    }
+  }, []);
 
   // Fetch connector list
   useEffect(() => {
@@ -119,12 +194,14 @@ export default function ConnectorsPanel() {
       } catch (_) {
         setConnectors(Object.keys(CONNECTOR_META).map((t) => ({ type: t, name: CONNECTOR_META[t].name, installed: false, status: "API server not running" })));
       }
+      await refreshSavedConnections();
     })();
-  }, []);
+  }, [refreshSavedConnections]);
 
   const resetWizard = () => {
     setStep(0);
     setConnected(false);
+    setTargetProjectId("");
     setSchemas([]);
     setSelectedSchemas(new Set());
     setPreviewSchema(null);
@@ -137,7 +214,40 @@ export default function ConnectorsPanel() {
 
   const selectConnector = (type) => {
     setSelectedConnector(type);
+    setActiveConnectionId(null);
+    setTargetProjectId("");
     setFormValues({});
+    setShowSecrets({});
+    setSnowflakeAuth("password");
+    resetWizard();
+  };
+
+  const backToConnectionChooser = () => {
+    setSelectedConnector(null);
+    setActiveConnectionId(null);
+    setFormValues({});
+    setShowSecrets({});
+    setSnowflakeAuth("password");
+    resetWizard();
+  };
+
+  const loadSavedConnection = (connection) => {
+    const details = connection?.details || {};
+    const secrets = connection?.secrets || {};
+    const restored = {};
+    [details, secrets].forEach((chunk) => {
+      Object.entries(chunk).forEach(([k, v]) => {
+        if (k === "auth") return;
+        if (v === "__redacted__") return;
+        restored[k] = String(v);
+      });
+    });
+
+    setSelectedConnector(connection.connector);
+    setActiveConnectionId(connection.id);
+    setTargetProjectId("");
+    setSnowflakeAuth(details.auth === "keypair" ? "keypair" : "password");
+    setFormValues(restored);
     setShowSecrets({});
     resetWizard();
   };
@@ -153,8 +263,14 @@ export default function ConnectorsPanel() {
     setError(null);
     setLoading(true);
     try {
-      const data = await apiPost("/api/connectors/test", { connector: selectedConnector, ...formValues });
+      const data = await apiPost("/api/connectors/test", {
+        connector: selectedConnector,
+        connection_id: activeConnectionId,
+        ...formValues,
+      });
       if (data.ok) {
+        if (data.connectionId) setActiveConnectionId(data.connectionId);
+        await refreshSavedConnections();
         setConnected(true);
         // Auto-advance: fetch schemas
         setStep(1);
@@ -248,6 +364,12 @@ export default function ConnectorsPanel() {
   const handlePull = async () => {
     const schemasToProcess = [...selectedSchemas];
     if (schemasToProcess.length === 0) return;
+    const targetProject = (projects || []).find((p) => p.id === targetProjectId);
+    const targetPath = targetProject?.path || "";
+    if (!targetProjectId || !targetPath) {
+      setError("Select a target project folder before pulling metadata.");
+      return;
+    }
 
     setLoading(true);
     setError(null);
@@ -255,12 +377,18 @@ export default function ConnectorsPanel() {
     setPullProgress({ current: 0, total: schemasToProcess.length, currentSchema: schemasToProcess[0] });
 
     try {
+      if (targetProjectId !== activeProjectId) {
+        await selectProject(targetProjectId);
+      }
       if (schemasToProcess.length === 1) {
         // Single schema — use original endpoint for backward compat
         const schemaName = schemasToProcess[0];
         const tableSet = schemaTableSelections[schemaName];
         const params = {
           connector: selectedConnector,
+          connection_id: activeConnectionId,
+          project_id: targetProjectId,
+          project_path: targetPath,
           ...formValues,
           db_schema: schemaName,
           model_name: schemaName,
@@ -268,8 +396,9 @@ export default function ConnectorsPanel() {
         };
         if (selectedConnector === "bigquery") params.dataset = schemaName;
         const data = await apiPost("/api/connectors/pull", params);
+        if (data.connectionId) setActiveConnectionId(data.connectionId);
         if (data.success && data.yaml) {
-          loadImportedYaml(schemaName, data.yaml);
+          await loadImportedYaml(schemaName, data.yaml);
           setPullResult({
             schemasProcessed: 1,
             schemasFailed: 0,
@@ -291,9 +420,13 @@ export default function ConnectorsPanel() {
         });
         const data = await apiPost("/api/connectors/pull-multi", {
           connector: selectedConnector,
+          connection_id: activeConnectionId,
+          project_id: targetProjectId,
+          project_path: targetPath,
           ...formValues,
           schemas: schemaEntries,
         });
+        if (data.connectionId) setActiveConnectionId(data.connectionId);
 
         // Load each successful schema as a separate model file
         const files = (data.results || []).filter((r) => r.success && r.yaml).map((r) => ({
@@ -301,7 +434,7 @@ export default function ConnectorsPanel() {
           yaml: r.yaml,
         }));
         if (files.length > 0) {
-          loadMultipleImportedYaml(files);
+          await loadMultipleImportedYaml(files);
           addToast?.({ message: `Pulled ${files.length} schemas (${data.totalEntities} tables) as separate model files`, type: "success" });
         }
         setPullResult(data);
@@ -309,6 +442,7 @@ export default function ConnectorsPanel() {
           setError(`All ${data.errors.length} schema pulls failed`);
         }
       }
+      await refreshSavedConnections();
       setStep(3);
     } catch (err) {
       setError(err.message);
@@ -318,28 +452,36 @@ export default function ConnectorsPanel() {
     }
   };
 
-  const fields = selectedConnector ? (CONNECTOR_FIELDS[selectedConnector] || []) : [];
+  const fieldKey = selectedConnector === "snowflake"
+    ? (snowflakeAuth === "keypair" ? "snowflake_keypair" : "snowflake_password")
+    : selectedConnector;
+  const fields = fieldKey ? (CONNECTOR_FIELDS[fieldKey] || []) : [];
   const meta = selectedConnector ? CONNECTOR_META[selectedConnector] : null;
+  const selectedTargetProject = (projects || []).find((p) => p.id === targetProjectId) || null;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Step indicator bar */}
       {selectedConnector && meta && (
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border-primary bg-bg-secondary/30 shrink-0">
-          <span className={`text-[11px] font-semibold ${meta.color}`}>{meta.name}</span>
-          <div className="flex items-center gap-0.5 ml-2">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border-primary/80 bg-gradient-to-r from-white to-slate-50/80 shrink-0">
+          <ConnectorLogo type={selectedConnector} size={22} />
+          <div className="min-w-0">
+            <div className={`text-[11px] font-semibold ${meta.color}`}>{meta.name}</div>
+            <div className="text-[9px] text-text-muted uppercase tracking-wider">{meta.tag}</div>
+          </div>
+          <div className="flex items-center gap-0.5 ml-3">
             {STEPS.map((s, i) => {
               const StepIcon = s.icon;
               const isActive = i === step;
               const isDone = i < step;
               return (
                 <div key={s.id} className="flex items-center gap-0.5">
-                  {i > 0 && <div className={`w-4 h-px ${isDone ? "bg-green-400" : "bg-border-primary"}`} />}
+                  {i > 0 && <div className={`w-5 h-px ${isDone ? "bg-green-400" : "bg-border-primary"}`} />}
                   <div
-                    className={`flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-medium ${
-                      isActive ? `${meta.bg} ${meta.color} ${meta.border} border` :
+                    className={`flex items-center gap-0.5 px-2.5 py-1 rounded-full text-[10px] font-semibold ${
+                      isActive ? `${meta.bg} ${meta.color} ${meta.border} border shadow-sm` :
                       isDone ? "bg-green-50 text-green-600 border border-green-200" :
-                      "text-text-muted"
+                      "text-text-muted bg-white border border-border-primary/70"
                     }`}
                   >
                     {isDone ? <Check size={9} /> : <StepIcon size={9} />}
@@ -349,28 +491,131 @@ export default function ConnectorsPanel() {
               );
             })}
           </div>
+          <button
+            onClick={backToConnectionChooser}
+            className="ml-auto px-2 py-1 rounded-md border border-border-primary bg-bg-primary text-[10px] font-medium text-text-secondary hover:bg-bg-hover"
+          >
+            Change Database
+          </button>
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4">
-        <div className="max-w-3xl mx-auto space-y-4">
+      <div className="flex-1 overflow-y-auto p-5 bg-[radial-gradient(circle_at_top_right,#dbeafe_0%,transparent_42%),radial-gradient(circle_at_top_left,#cffafe_0%,transparent_36%),linear-gradient(180deg,#f8fafc_0%,#ffffff_45%)]">
+        <div className="max-w-5xl mx-auto space-y-4">
+        <div className="rounded-2xl border border-white/70 bg-white/80 backdrop-blur-sm shadow-[0_10px_30px_rgba(15,23,42,0.08)] p-4">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-slate-900 text-white shadow-sm">
+              <Sparkles size={14} />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-900">Enterprise Connector Workspace</h2>
+              <p className="text-[11px] text-slate-600 mt-1">
+                Connect warehouse metadata, review schemas, and generate production-ready DataLex models with one guided flow.
+              </p>
+              <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-500">
+                <span className="inline-flex items-center gap-1">
+                  <ShieldCheck size={11} />
+                  Profile-aware credentials
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <FolderTree size={11} />
+                  Schema-to-model file mapping
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+        {/* Saved connector profiles */}
+        {savedConnections.length > 0 && (
+          <div className="rounded-xl border border-border-primary/80 bg-white/90 backdrop-blur-sm shadow-[0_8px_20px_rgba(15,23,42,0.06)] p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold flex items-center gap-1.5">
+                <History size={11} />
+                Saved Connections
+              </div>
+              <button
+                onClick={refreshSavedConnections}
+                className="text-[10px] text-text-muted hover:text-text-primary inline-flex items-center gap-1 px-2 py-1 rounded-md border border-border-primary bg-bg-primary hover:bg-bg-hover"
+              >
+                <RefreshCw size={10} /> Refresh
+              </button>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto pr-0.5">
+              {savedConnections.slice(0, 12).map((conn) => {
+                const imports = Array.isArray(conn.imports) ? conn.imports : [];
+                return (
+                  <div
+                    key={conn.id}
+                    className={`rounded-lg border p-2.5 ${
+                      activeConnectionId === conn.id
+                        ? "border-blue-200 bg-blue-50/60 shadow-sm"
+                        : "border-border-primary bg-bg-secondary/40"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <ConnectorLogo type={conn.connector} size={20} />
+                      <span className="text-[11px] font-semibold text-text-primary truncate flex-1">{conn.name}</span>
+                      <span className="text-[9px] uppercase tracking-wider text-text-muted">{conn.connector}</span>
+                      <button
+                        onClick={() => loadSavedConnection(conn)}
+                        className="px-2.5 py-1 rounded-md border border-border-primary bg-bg-primary text-[10px] font-medium text-text-secondary hover:bg-bg-hover"
+                      >
+                        Load
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-text-muted mt-0.5 flex items-center gap-2">
+                      {conn.details?.host && <span>{conn.details.host}</span>}
+                      {conn.details?.database && <span>DB: {conn.details.database}</span>}
+                      {conn.details?.project && <span>Project: {conn.details.project}</span>}
+                    </div>
+                    {imports.length > 0 && (
+                      <div className="mt-1.5 pl-2 border-l border-border-primary/70 space-y-0.5">
+                        {imports.slice(0, 3).map((imp) => (
+                          <div key={imp.id} className="text-[10px] text-text-secondary flex items-center gap-1.5">
+                            <FolderTree size={10} className="text-text-muted shrink-0" />
+                            <span className="truncate flex-1">
+                              {(imp.files || []).slice(0, 2).join(", ")}
+                              {(imp.files || []).length > 2 ? ` +${imp.files.length - 2}` : ""}
+                            </span>
+                            <span className="text-[9px] text-text-muted shrink-0">
+                              {(imp.schemas || []).length} schema
+                              {(imp.schemas || []).length === 1 ? "" : "s"}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Connector selector */}
-        <div>
-          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2">Select Database</div>
-          <div className="grid grid-cols-5 gap-2">
+        <div className="rounded-xl border border-border-primary/80 bg-white/90 backdrop-blur-sm shadow-[0_8px_20px_rgba(15,23,42,0.06)] p-3.5">
+          <div className="text-[10px] text-text-muted uppercase tracking-wider font-semibold mb-2.5">Select Database</div>
+          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2.5">
             {Object.entries(CONNECTOR_META).map(([type, cm]) => {
               const isSelected = selectedConnector === type;
               const connInfo = connectors?.find((c) => c.type === type);
               const isInstalled = connInfo?.installed;
               return (
                 <button key={type} onClick={() => selectConnector(type)}
-                  className={`flex flex-col items-center gap-1 px-2 py-2 rounded-md border text-center transition-colors text-[10px] ${
-                    isSelected ? `${cm.border} ${cm.bg} ${cm.color}` : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover"
+                  className={`flex flex-col items-start gap-1.5 px-3 py-2.5 rounded-lg border text-left transition-all text-[10px] ${
+                    isSelected
+                      ? `${cm.border} ${cm.bg} ${cm.color} shadow-sm`
+                      : "border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover hover:shadow-sm"
                   }`}>
-                  <Database size={14} className="shrink-0" />
-                  <div className="font-semibold leading-tight">{cm.name}</div>
+                  <div className="flex items-center w-full gap-2">
+                    <ConnectorLogo type={type} size={22} />
+                    <div className="min-w-0">
+                      <div className="font-semibold leading-tight text-[11px]">{cm.name}</div>
+                      <div className="text-[9px] uppercase tracking-wider opacity-75">{cm.tag}</div>
+                    </div>
+                  </div>
                   {connInfo && (
-                    <div className={`text-[8px] ${isInstalled ? "text-green-600" : "text-amber-500"}`}>
+                    <div className={`text-[9px] font-medium ${isInstalled ? "text-green-600" : "text-amber-600"}`}>
                       {isInstalled ? "ready" : "no driver"}
                     </div>
                   )}
@@ -382,13 +627,38 @@ export default function ConnectorsPanel() {
 
         {/* Step 0: Connection form */}
         {selectedConnector && step === 0 && (
-          <div className={`rounded-lg border ${meta.border} ${meta.bg} p-3 space-y-2`}>
+          <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
-              <Plug size={12} />
-              {meta.name} Connection
+              <ConnectorLogo type={selectedConnector} size={20} />
+              <span>{meta.name} Connection</span>
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              {fields.map((f) => (
+            {selectedConnector === "snowflake" && (
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] text-text-muted font-medium mr-1">Auth:</span>
+                <button
+                  onClick={() => { setSnowflakeAuth("password"); setFormValues((p) => { const v = { ...p }; delete v.private_key_content; return v; }); setError(null); setConnected(false); setStep(0); }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium border transition-colors ${
+                    snowflakeAuth === "password"
+                      ? "border-cyan-300 bg-white text-cyan-700"
+                      : "border-border-primary bg-bg-primary text-text-muted hover:bg-bg-hover"
+                  }`}
+                >
+                  <Lock size={10} /> Password
+                </button>
+                <button
+                  onClick={() => { setSnowflakeAuth("keypair"); setFormValues((p) => { const v = { ...p }; delete v.password; return v; }); setError(null); setConnected(false); setStep(0); }}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-medium border transition-colors ${
+                    snowflakeAuth === "keypair"
+                      ? "border-cyan-300 bg-white text-cyan-700"
+                      : "border-border-primary bg-bg-primary text-text-muted hover:bg-bg-hover"
+                  }`}
+                >
+                  <KeyRound size={10} /> Key Pair (RSA)
+                </button>
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+              {fields.filter((f) => !f.multiline).map((f) => (
                 <div key={f.key}>
                   <label className="text-[10px] text-text-muted font-medium block mb-0.5">
                     {f.label} {f.required && <span className="text-red-400">*</span>}
@@ -411,6 +681,21 @@ export default function ConnectorsPanel() {
                 </div>
               ))}
             </div>
+            {fields.filter((f) => f.multiline).map((f) => (
+              <div key={f.key}>
+                <label className="text-[10px] text-text-muted font-medium block mb-0.5">
+                  {f.label} {f.required && <span className="text-red-400">*</span>}
+                </label>
+                <textarea
+                  value={formValues[f.key] || ""}
+                  onChange={(e) => handleFieldChange(f.key, e.target.value)}
+                  placeholder={f.placeholder}
+                  rows={4}
+                  spellCheck={false}
+                  className="w-full px-2 py-1.5 text-[11px] font-mono rounded border border-border-primary bg-bg-primary text-text-primary placeholder:text-text-muted/50 focus:outline-none focus:border-accent-blue resize-y"
+                />
+              </div>
+            ))}
             <div className="flex items-center gap-2 pt-1">
               <button onClick={handleTestConnection} disabled={loading}
                 className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}>
@@ -424,9 +709,10 @@ export default function ConnectorsPanel() {
 
         {/* Step 1: Schema browser — multi-select */}
         {selectedConnector && step === 1 && (
-          <div className={`rounded-lg border ${meta.border} ${meta.bg} p-3 space-y-2`}>
+          <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
+                <ConnectorLogo type={selectedConnector} size={18} />
                 <Layers size={12} />
                 Select Schemas
                 <span className="text-[10px] font-normal text-text-muted">
@@ -460,7 +746,7 @@ export default function ConnectorsPanel() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 gap-1.5 max-h-44 overflow-y-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 max-h-52 overflow-y-auto">
                   {schemas.map((s) => {
                     const checked = selectedSchemas.has(s.name);
                     return (
@@ -490,6 +776,24 @@ export default function ConnectorsPanel() {
 
                 {/* Pull button */}
                 <div className="flex items-center gap-2 pt-1">
+                  <div className="min-w-[250px] rounded-md border border-border-primary/80 bg-white/70 px-2 py-1.5">
+                    <label className="text-[9px] uppercase tracking-wider text-text-muted font-semibold block mb-1">
+                      Target Project Folder
+                    </label>
+                    <select
+                      value={targetProjectId}
+                      onChange={(e) => setTargetProjectId(e.target.value)}
+                      className="w-full text-[11px] rounded border border-border-primary bg-bg-primary text-text-primary px-2 py-1 focus:outline-none focus:border-accent-blue"
+                    >
+                      <option value="">Select a project</option>
+                      {(projects || []).map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                    <div className="text-[9px] text-text-muted mt-1 truncate">
+                      {selectedTargetProject?.path || "Choose where pulled .model.yaml files should be saved"}
+                    </div>
+                  </div>
                   <button onClick={handlePull} disabled={loading || selectedSchemas.size === 0}
                     className={`flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-semibold rounded-md text-white ${meta.accent} hover:opacity-90 transition-colors disabled:opacity-50`}>
                     {loading ? <Loader2 size={11} className="animate-spin" /> : <Download size={11} />}
@@ -507,9 +811,10 @@ export default function ConnectorsPanel() {
 
         {/* Step 2: Table preview for a specific schema */}
         {selectedConnector && step === 2 && previewSchema && (
-          <div className={`rounded-lg border ${meta.border} ${meta.bg} p-3 space-y-2`}>
+          <div className={`rounded-xl border ${meta.border} ${meta.bg} p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(15,23,42,0.05)]`}>
             <div className="flex items-center justify-between">
               <div className={`text-xs font-semibold ${meta.color} flex items-center gap-1.5`}>
+                <ConnectorLogo type={selectedConnector} size={18} />
                 <Table2 size={12} />
                 {previewSchema}
                 <span className="text-[10px] font-normal text-text-muted">
@@ -574,7 +879,7 @@ export default function ConnectorsPanel() {
 
         {/* Step 3: Pull result — per-schema breakdown */}
         {selectedConnector && step === 3 && pullResult && (
-          <div className="rounded-lg border border-green-200 bg-green-50 p-3 space-y-2">
+          <div className="rounded-xl border border-green-200 bg-green-50 p-3.5 space-y-2.5 shadow-[0_8px_20px_rgba(22,163,74,0.12)]">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-green-700">
               <CheckCircle2 size={12} />
               {pullResult.schemasProcessed === 1 ? "Schema Pulled Successfully" : `${pullResult.schemasProcessed} Schemas Pulled as Separate Model Files`}
@@ -637,6 +942,12 @@ export default function ConnectorsPanel() {
                 <RefreshCw size={11} /> Pull Another Database
               </button>
             </div>
+            {selectedTargetProject && (
+              <div className="text-[10px] text-green-700">
+                Saved to project: <strong>{selectedTargetProject.name}</strong>
+                <span className="text-green-600"> ({selectedTargetProject.path})</span>
+              </div>
+            )}
 
             {/* YAML preview for single-schema pulls */}
             {pullResult.results?.length === 1 && pullResult.results[0]?.yaml && (
@@ -663,7 +974,7 @@ export default function ConnectorsPanel() {
 
         {/* Help text */}
         {!selectedConnector && (
-          <div className="text-[11px] text-text-muted p-3 text-center space-y-1">
+          <div className="text-[11px] text-text-muted p-4 text-center space-y-1 rounded-xl border border-border-primary/80 bg-white/85 backdrop-blur-sm">
             <p>Select a database above to browse schemas and pull tables into a DataLex model.</p>
             <p className="text-[10px]">
               Workflow: <strong>Connect</strong> → <strong>Browse Schemas</strong> → <strong>Select Tables</strong> → <strong>Pull Model</strong>

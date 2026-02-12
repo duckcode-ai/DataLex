@@ -54,6 +54,7 @@ function AddProjectModal() {
   const { addProjectFolder } = useWorkspaceStore();
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
+  const [createIfMissing, setCreateIfMissing] = useState(true);
   const [error, setError] = useState("");
 
   const handleSubmit = async (e) => {
@@ -63,7 +64,7 @@ function AddProjectModal() {
       return;
     }
     try {
-      await addProjectFolder(name.trim(), path.trim());
+      await addProjectFolder(name.trim(), path.trim(), createIfMissing);
       closeModal();
     } catch (err) {
       setError(err.message);
@@ -102,6 +103,14 @@ function AddProjectModal() {
               className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-accent-blue font-mono text-xs"
             />
           </div>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={createIfMissing}
+              onChange={(e) => setCreateIfMissing(e.target.checked)}
+            />
+            Create folder if it does not exist
+          </label>
           {error && (
             <div className="flex items-center gap-2 text-xs text-status-error">
               <AlertCircle size={12} />
@@ -222,10 +231,14 @@ function ToastContainer() {
 function ConnectView() {
   return (
     <div className="h-full flex flex-col bg-bg-surface">
-      <div className="flex items-center px-4 py-2.5 border-b border-border-primary bg-bg-secondary/50 shrink-0">
-        <Database size={14} className="text-accent-blue mr-2" />
-        <span className="text-xs font-semibold text-text-primary">Database Connectors</span>
-        <span className="text-[10px] text-text-muted ml-2">Connect to databases and pull schemas as separate model files</span>
+      <div className="flex items-center px-5 py-3 border-b border-border-primary bg-white/70 backdrop-blur-md shrink-0">
+        <span className="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-slate-900 text-white shadow-sm mr-2">
+          <Database size={14} />
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-text-primary">Database Connectors</div>
+          <div className="text-[11px] text-text-muted">Connect, preview, and pull physical schemas into versioned DataLex models</div>
+        </div>
       </div>
       <div className="flex-1 overflow-hidden">
         <ConnectorsPanel />
@@ -259,10 +272,10 @@ function SearchView() {
 // ── Primary content area for "model" activity (editor + diagram) ──
 function ModelView({ bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel }) {
   return (
-    <Allotment vertical>
+    <Allotment vertical style={{ height: "100%" }}>
       {/* Top: Editor + Diagram split */}
       <Allotment.Pane>
-        <Allotment>
+        <Allotment style={{ height: "100%" }}>
           {/* YAML Editor */}
           <Allotment.Pane minSize={250} preferredSize={500}>
             <div className="h-full flex flex-col bg-bg-surface">
@@ -417,7 +430,7 @@ export default function App() {
   const showSearchView = activeActivity === "search";
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden">
+    <div className="h-screen flex flex-col overflow-hidden bg-[linear-gradient(180deg,#f8fbff_0%,#ffffff_45%)]">
       <div className="flex flex-1 min-h-0">
         {/* Sidebar: Activity Bar + Side Panel */}
         <Sidebar />

@@ -6,5 +6,20 @@ __pycache__/
 node_modules/
 packages/web-app/dist/
 
+# Virtual environment
+.venv/
+
+# DataLex local runtime files
+.dm-connections.json
+.dm-projects.json
+
+# Agent/editor local config
+.claude/
+.vscode/
+.idea/
+
+# Temp files (connector key material)
+.tmp/
+
 # OS
 .DS_Store

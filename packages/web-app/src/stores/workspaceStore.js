@@ -7,8 +7,10 @@ import {
   fetchFileContent,
   saveFileContent,
   createProjectFile,
+  moveProjectFile,
 } from "../lib/api";
 import { SAMPLE_MODEL } from "../sampleModel";
+import { normalizeImportedModelFileName } from "../lib/importModelName";
 
 const useWorkspaceStore = create((set, get) => ({
   // Projects
@@ -78,13 +80,43 @@ const useWorkspaceStore = create((set, get) => ({
     });
   },
 
-  loadImportedYaml: (name, yamlContent) => {
+  loadImportedYaml: async (name, yamlContent) => {
+    const fileName = name.endsWith(".model.yaml") ? name : `${name}.model.yaml`;
+    const { offlineMode, localDocuments, projectPath, activeProjectId } = get();
+
+    // Online mode with an active project: save to disk and open from project
+    if (!offlineMode && projectPath && activeProjectId) {
+      try {
+        const fullPath = `${projectPath}/${fileName}`;
+        await saveFileContent(fullPath, yamlContent);
+        // Refresh project file list
+        const data = await fetchProjectFiles(activeProjectId);
+        set({ projectFiles: data.files || [] });
+        // Find the saved file and open it
+        const savedFile = (data.files || []).find((f) => f.name === fileName);
+        if (savedFile) {
+          const file = { ...savedFile, content: yamlContent };
+          set((s) => ({
+            activeFile: file,
+            activeFileContent: yamlContent,
+            originalContent: yamlContent,
+            isDirty: false,
+            openTabs: [...s.openTabs.filter((t) => t.fullPath !== fullPath), file],
+          }));
+        }
+        return;
+      } catch (err) {
+        console.warn("[workspace] Failed to save imported model to disk:", err.message);
+        // Fall through to in-memory tab
+      }
+    }
+
+    // Offline or fallback: in-memory tab only
     const doc = {
       id: `imported-${Date.now()}`,
-      name: name.endsWith(".model.yaml") ? name : `${name}.model.yaml`,
+      name: fileName,
       content: yamlContent,
     };
-    const { offlineMode, localDocuments } = get();
     if (offlineMode) {
       const updated = [...localDocuments, doc];
       set({
@@ -107,14 +139,61 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  loadMultipleImportedYaml: (files) => {
+  loadMultipleImportedYaml: async (files) => {
     if (!files || files.length === 0) return;
+    const { offlineMode, localDocuments, openTabs, projectPath, activeProjectId } = get();
+
+    // Online mode with an active project: save all files to disk
+    if (!offlineMode && projectPath && activeProjectId) {
+      try {
+        for (const f of files) {
+          const fileName = f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`;
+          const fullPath = `${projectPath}/${fileName}`;
+          await saveFileContent(fullPath, f.yaml);
+        }
+        // Refresh project file list
+        const data = await fetchProjectFiles(activeProjectId);
+        set({ projectFiles: data.files || [] });
+        // Open saved files as tabs
+        const savedFiles = (data.files || []).filter((df) =>
+          files.some((f) => {
+            const fn = f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`;
+            return df.name === fn;
+          })
+        );
+        if (savedFiles.length > 0) {
+          const fileTabs = savedFiles.map((sf) => {
+            const match = files.find((f) => {
+              const fn = f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`;
+              return sf.name === fn;
+            });
+            return { ...sf, content: match?.yaml || "" };
+          });
+          const savedPaths = new Set(fileTabs.map((ft) => ft.fullPath));
+          const filteredTabs = openTabs.filter((t) => !savedPaths.has(t.fullPath));
+          const newTabs = [...filteredTabs, ...fileTabs];
+          const activeFile = fileTabs[0];
+          set({
+            activeFile,
+            activeFileContent: activeFile.content,
+            originalContent: activeFile.content,
+            isDirty: false,
+            openTabs: newTabs,
+          });
+        }
+        return;
+      } catch (err) {
+        console.warn("[workspace] Failed to save imported files to disk:", err.message);
+        // Fall through to in-memory mode
+      }
+    }
+
+    // Offline or fallback: in-memory tabs only
     const docs = files.map((f, i) => ({
       id: `imported-${Date.now()}-${i}`,
       name: f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`,
       content: f.yaml,
     }));
-    const { offlineMode, localDocuments, openTabs } = get();
     const existingIds = new Set(docs.map((d) => d.name));
     const filteredTabs = openTabs.filter((t) => !existingIds.has(t.name));
     const newTabs = [...filteredTabs, ...docs];
@@ -147,10 +226,10 @@ const useWorkspaceStore = create((set, get) => ({
     localStorage.setItem("dm_offline_docs", JSON.stringify(localDocuments));
   },
 
-  addProjectFolder: async (name, path) => {
+  addProjectFolder: async (name, path, createIfMissing = false) => {
     set({ loading: true, error: null });
     try {
-      const project = await addProject(name, path);
+      const project = await addProject(name, path, createIfMissing);
       set((s) => ({ projects: [...s.projects, project], loading: false }));
       await get().selectProject(project.id);
     } catch (err) {
@@ -330,6 +409,82 @@ const useWorkspaceStore = create((set, get) => ({
       set({ loading: false });
     } catch (err) {
       set({ error: err.message, loading: false });
+    }
+  },
+
+  importModelFilesToProject: async (projectId, files) => {
+    const { offlineMode } = get();
+    if (offlineMode) {
+      throw new Error("Drag-and-drop project import requires API mode.");
+    }
+    if (!projectId) {
+      throw new Error("Select a target project first.");
+    }
+
+    const dropped = Array.from(files || []);
+    const yamlFiles = dropped.filter((f) => /\.ya?ml$/i.test(f.name || ""));
+    if (yamlFiles.length === 0) {
+      throw new Error("Only .yaml/.yml files are supported for project drop import.");
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const current = await fetchProjectFiles(projectId);
+      const existingNames = new Set((current.files || []).map((f) => f.name));
+      const created = [];
+
+      for (const file of yamlFiles) {
+        const normalized = normalizeImportedModelFileName(file.name);
+        const ext = normalized.endsWith(".model.yml") ? ".model.yml" : ".model.yaml";
+        const rootName = normalized.slice(0, -ext.length);
+        let candidate = normalized;
+        let suffix = 1;
+        while (existingNames.has(candidate)) {
+          candidate = `${rootName}_${suffix}${ext}`;
+          suffix += 1;
+        }
+        const text = await file.text();
+        const createdFile = await createProjectFile(projectId, candidate, text);
+        existingNames.add(candidate);
+        created.push(createdFile);
+      }
+
+      await get().selectProject(projectId);
+      if (created.length > 0) {
+        await get().openFile(created[0]);
+      }
+      set({ loading: false });
+      return created;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  moveProjectFileToProject: async (targetProjectId, sourcePath, mode = "move") => {
+    const { offlineMode } = get();
+    if (offlineMode) {
+      throw new Error("File move requires API mode.");
+    }
+    if (!targetProjectId) {
+      throw new Error("Select a target project first.");
+    }
+    if (!sourcePath) {
+      throw new Error("Missing source file path.");
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const result = await moveProjectFile(targetProjectId, sourcePath, mode);
+      await get().selectProject(targetProjectId);
+      if (result?.targetFile?.fullPath) {
+        await get().openFile(result.targetFile);
+      }
+      set({ loading: false });
+      return result;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
     }
   },
 

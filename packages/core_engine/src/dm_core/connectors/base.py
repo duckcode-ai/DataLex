@@ -25,6 +25,7 @@ class ConnectorConfig:
     dataset: str = ""
     catalog: str = ""
     token: str = ""
+    private_key_path: str = ""
     connection_string: str = ""
     tables: Optional[List[str]] = None
     exclude_tables: Optional[List[str]] = None

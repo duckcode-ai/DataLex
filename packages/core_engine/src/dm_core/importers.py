@@ -3,6 +3,8 @@ import re
 from datetime import date
 from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
+
 
 CREATE_TABLE_RE = re.compile(
     r"create\s+table\s+(?:if\s+not\s+exists\s+)?([\w\"\.\.]+)\s*\((.*?)\)\s*;",
@@ -22,6 +24,15 @@ CREATE_INDEX_RE = re.compile(
 )
 TABLE_RE = re.compile(r"^\s*table\s+([\w\"]+)\s*\{\s*$", flags=re.IGNORECASE)
 REF_RE = re.compile(r"^\s*ref\s*:\s*([\w]+)\.([\w]+)\s*([<>-]+)\s*([\w]+)\.([\w]+)", flags=re.IGNORECASE)
+DBT_REF_RE = re.compile(r"ref\(\s*['\"]([^'\"]+)['\"]\s*\)", flags=re.IGNORECASE)
+DBT_SOURCE_RE = re.compile(
+    r"source\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]\s*\)",
+    flags=re.IGNORECASE,
+)
+DBT_SQL_REF_RE = re.compile(
+    r"references\s+([A-Za-z0-9_\"\.]+)\s*\(\s*([A-Za-z0-9_\"]+)\s*\)",
+    flags=re.IGNORECASE,
+)
 
 
 def _to_pascal(name: str) -> str:
@@ -514,4 +525,335 @@ def import_spark_schema(
         }
         model["entities"].append(entity)
 
+    return model
+
+
+# ---------------------------------------------------------------------------
+# dbt schema.yml importer
+# ---------------------------------------------------------------------------
+
+def _dbt_parse_to_entity(to_expr: Any) -> Optional[str]:
+    if not isinstance(to_expr, str):
+        return None
+    text = to_expr.strip()
+    if not text:
+        return None
+
+    ref_match = DBT_REF_RE.search(text)
+    if ref_match:
+        return _to_pascal(ref_match.group(1))
+
+    source_match = DBT_SOURCE_RE.search(text)
+    if source_match:
+        return _to_pascal(source_match.group(2))
+
+    token = text.split(".")[-1].strip().strip("'\"")
+    return _to_pascal(token) if token else None
+
+
+def _as_test_list(tests: Any) -> List[Any]:
+    if tests is None:
+        return []
+    if isinstance(tests, list):
+        return tests
+    return [tests]
+
+
+def _as_constraint_list(constraints: Any) -> List[Any]:
+    if constraints is None:
+        return []
+    if isinstance(constraints, list):
+        return constraints
+    return [constraints]
+
+
+def _dbt_constraint_target(constraint: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+    to_expr = constraint.get("to") or constraint.get("references")
+    target_entity = _dbt_parse_to_entity(to_expr)
+    target_field = str(constraint.get("field") or "").strip()
+    if target_entity and target_field:
+        return target_entity, target_field
+
+    expr = str(constraint.get("expression") or constraint.get("references") or "").strip()
+    if not expr:
+        return None, None
+    m = DBT_SQL_REF_RE.search(expr)
+    if not m:
+        return None, None
+    entity_token = m.group(1).replace('"', "").split(".")[-1]
+    field_token = m.group(2).replace('"', "").strip()
+    return (_to_pascal(entity_token) if entity_token else None), (field_token or None)
+
+
+def _ensure_field(entity: Dict[str, Any], field_name: str) -> None:
+    fields = entity.setdefault("fields", [])
+    if any(str(f.get("name", "")) == field_name for f in fields):
+        return
+    fields.append(
+        {
+            "name": field_name,
+            "type": "string",
+            "nullable": True,
+            "description": "Inferred from dbt relationships test",
+        }
+    )
+
+
+def import_dbt_schema_yml(
+    schema_yml_text: str,
+    model_name: str = "imported_dbt_model",
+    domain: str = "imported",
+    owners: List[str] = None,
+) -> Dict[str, Any]:
+    owners = owners or ["data-team@example.com"]
+    model = _default_model(model_name=model_name, domain=domain, owners=owners)
+
+    loaded = yaml.safe_load(schema_yml_text) or {}
+    if not isinstance(loaded, dict):
+        return model
+
+    entities_by_name: Dict[str, Dict[str, Any]] = {}
+    relationship_candidates: List[Dict[str, str]] = []
+
+    def get_or_create_entity(
+        raw_name: str,
+        entity_type: str,
+        description: str = "",
+        tags: Optional[List[str]] = None,
+        schema_name: str = "",
+        subject_area: str = "",
+    ) -> Dict[str, Any]:
+        entity_name = _to_pascal(raw_name)
+        if entity_name in entities_by_name:
+            existing = entities_by_name[entity_name]
+            if description and not existing.get("description"):
+                existing["description"] = description
+            if schema_name and not existing.get("schema"):
+                existing["schema"] = schema_name
+            if subject_area and not existing.get("subject_area"):
+                existing["subject_area"] = subject_area
+            if tags:
+                merged = set(existing.get("tags", []))
+                merged.update(str(t) for t in tags if t)
+                existing["tags"] = sorted(merged)
+            return existing
+
+        entity: Dict[str, Any] = {
+            "name": entity_name,
+            "type": entity_type,
+            "description": description or f"Imported from dbt schema.yml on {date.today().isoformat()}",
+            "fields": [],
+        }
+        if schema_name:
+            entity["schema"] = schema_name
+        if subject_area:
+            entity["subject_area"] = subject_area
+        if tags:
+            entity["tags"] = sorted({str(t) for t in tags if t})
+        entities_by_name[entity_name] = entity
+        return entity
+
+    def process_columns(columns: Any, entity: Dict[str, Any]) -> None:
+        if not isinstance(columns, list):
+            return
+        for col in columns:
+            if not isinstance(col, dict):
+                continue
+            col_name = str(col.get("name", "")).strip()
+            if not col_name:
+                continue
+
+            field: Dict[str, Any] = {
+                "name": col_name,
+                "type": str(col.get("data_type") or col.get("type") or "string"),
+                "nullable": True,
+            }
+            if col.get("description"):
+                field["description"] = str(col["description"])
+
+            tests = _as_test_list(col.get("tests")) + _as_test_list(col.get("data_tests"))
+            has_not_null = False
+            has_unique = False
+            has_fk = False
+
+            for test_def in tests:
+                if isinstance(test_def, str):
+                    tname = test_def.split(".")[-1].lower()
+                    if tname == "not_null":
+                        has_not_null = True
+                    elif tname == "unique":
+                        has_unique = True
+                    continue
+
+                if not isinstance(test_def, dict):
+                    continue
+
+                for test_name, test_cfg in test_def.items():
+                    tname = str(test_name).split(".")[-1].lower()
+                    if tname == "not_null":
+                        has_not_null = True
+                    elif tname == "unique":
+                        has_unique = True
+                    elif tname == "relationships":
+                        cfg = test_cfg if isinstance(test_cfg, dict) else {}
+                        target_entity = _dbt_parse_to_entity(cfg.get("to"))
+                        target_field = str(cfg.get("field") or "").strip()
+                        if target_entity and target_field:
+                            relationship_candidates.append(
+                                {
+                                    "parent_entity": target_entity,
+                                    "parent_field": target_field,
+                                    "child_entity": str(entity.get("name", "")),
+                                    "child_field": col_name,
+                                }
+                            )
+                            has_fk = True
+
+            for constraint_def in _as_constraint_list(col.get("constraints")):
+                if isinstance(constraint_def, str):
+                    cname = constraint_def.lower().strip().replace(" ", "_")
+                    if cname == "not_null":
+                        has_not_null = True
+                    elif cname == "unique":
+                        has_unique = True
+                    elif cname == "primary_key":
+                        has_not_null = True
+                        has_unique = True
+                    continue
+
+                if not isinstance(constraint_def, dict):
+                    continue
+
+                ctype = str(constraint_def.get("type") or constraint_def.get("constraint_type") or "").lower().strip().replace(" ", "_")
+                if ctype == "not_null":
+                    has_not_null = True
+                elif ctype == "unique":
+                    has_unique = True
+                elif ctype == "primary_key":
+                    has_not_null = True
+                    has_unique = True
+                elif ctype == "foreign_key":
+                    has_fk = True
+                    target_entity, target_field = _dbt_constraint_target(constraint_def)
+                    if target_entity and target_field:
+                        relationship_candidates.append(
+                            {
+                                "parent_entity": target_entity,
+                                "parent_field": target_field,
+                                "child_entity": str(entity.get("name", "")),
+                                "child_field": col_name,
+                            }
+                        )
+
+            if has_not_null:
+                field["nullable"] = False
+            if has_unique:
+                field["unique"] = True
+            if has_unique and has_not_null:
+                field["primary_key"] = True
+            if has_fk:
+                field["foreign_key"] = True
+
+            entity["fields"].append(field)
+
+    # dbt sources -> external tables
+    for source in loaded.get("sources", []) if isinstance(loaded.get("sources"), list) else []:
+        if not isinstance(source, dict):
+            continue
+        source_name = str(source.get("name", "")).strip()
+        source_schema = str(source.get("schema", "")).strip()
+        source_tags = source.get("tags") if isinstance(source.get("tags"), list) else []
+        for table in source.get("tables", []) if isinstance(source.get("tables"), list) else []:
+            if not isinstance(table, dict):
+                continue
+            table_name = str(table.get("name", "")).strip()
+            if not table_name:
+                continue
+            table_tags = table.get("tags") if isinstance(table.get("tags"), list) else []
+            entity = get_or_create_entity(
+                raw_name=table_name,
+                entity_type="external_table",
+                description=str(table.get("description", "")).strip(),
+                tags=[*source_tags, *table_tags],
+                schema_name=source_schema,
+                subject_area=source_name,
+            )
+            process_columns(table.get("columns"), entity)
+
+    # dbt models -> views (safe default)
+    for dbt_model in loaded.get("models", []) if isinstance(loaded.get("models"), list) else []:
+        if not isinstance(dbt_model, dict):
+            continue
+        model_raw_name = str(dbt_model.get("name", "")).strip()
+        if not model_raw_name:
+            continue
+        dbt_tags = dbt_model.get("tags") if isinstance(dbt_model.get("tags"), list) else []
+        dbt_meta = dbt_model.get("meta") if isinstance(dbt_model.get("meta"), dict) else {}
+        entity = get_or_create_entity(
+            raw_name=model_raw_name,
+            entity_type="view",
+            description=str(dbt_model.get("description", "")).strip(),
+            tags=dbt_tags,
+            schema_name=str(dbt_model.get("schema", "")).strip(),
+            subject_area=str(dbt_meta.get("subject_area", "")).strip(),
+        )
+        process_columns(dbt_model.get("columns"), entity)
+
+        for constraint_def in _as_constraint_list(dbt_model.get("constraints")):
+            if not isinstance(constraint_def, dict):
+                continue
+            ctype = str(constraint_def.get("type") or constraint_def.get("constraint_type") or "").lower().strip().replace(" ", "_")
+            cols = constraint_def.get("columns")
+            if not isinstance(cols, list):
+                continue
+            col_names = [str(c).strip() for c in cols if str(c).strip()]
+            if not col_names:
+                continue
+
+            if ctype == "primary_key":
+                for cname in col_names:
+                    _ensure_field(entity, cname)
+                    for fld in entity.get("fields", []):
+                        if str(fld.get("name", "")) == cname:
+                            fld["primary_key"] = True
+                            fld["nullable"] = False
+                            fld["unique"] = True
+            elif ctype == "foreign_key":
+                target_entity, target_field = _dbt_constraint_target(constraint_def)
+                for cname in col_names:
+                    _ensure_field(entity, cname)
+                    for fld in entity.get("fields", []):
+                        if str(fld.get("name", "")) == cname:
+                            fld["foreign_key"] = True
+                    if target_entity and target_field:
+                        relationship_candidates.append(
+                            {
+                                "parent_entity": target_entity,
+                                "parent_field": target_field,
+                                "child_entity": str(entity.get("name", "")),
+                                "child_field": cname,
+                            }
+                        )
+
+    # Materialize relationship tests into DataLex relationships where resolvable.
+    deduped: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
+    for cand in relationship_candidates:
+        parent = entities_by_name.get(cand["parent_entity"])
+        child = entities_by_name.get(cand["child_entity"])
+        if not parent or not child:
+            continue
+        _ensure_field(parent, cand["parent_field"])
+        _ensure_field(child, cand["child_field"])
+
+        rel = {
+            "name": f"{cand['parent_entity'].lower()}_{cand['child_entity'].lower()}_{cand['child_field']}_fk",
+            "from": f"{cand['parent_entity']}.{cand['parent_field']}",
+            "to": f"{cand['child_entity']}.{cand['child_field']}",
+            "cardinality": "one_to_many",
+        }
+        key = (rel["name"], rel["from"], rel["to"], rel["cardinality"])
+        deduped[key] = rel
+
+    model["entities"] = sorted(entities_by_name.values(), key=lambda e: str(e.get("name", "")))
+    model["relationships"] = sorted(deduped.values(), key=lambda r: str(r.get("name", "")))
     return model

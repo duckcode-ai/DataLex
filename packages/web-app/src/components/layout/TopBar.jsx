@@ -47,11 +47,11 @@ export default function TopBar() {
   const ActivityIcon = activityInfo.icon;
 
   return (
-    <div className="h-auto bg-bg-secondary border-b border-border-primary flex flex-col">
+    <div className="h-auto bg-white/75 backdrop-blur-md border-b border-border-primary/80 flex flex-col shadow-[0_4px_14px_rgba(15,23,42,0.04)]">
       {/* Breadcrumb + tabs row */}
-      <div className="flex items-center gap-0 px-1 pt-0.5 overflow-x-auto">
+      <div className="flex items-center gap-1 px-2 py-1 overflow-x-auto">
         {/* Activity breadcrumb */}
-        <div className={`flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold shrink-0 ${activityInfo.color}`}>
+        <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold shrink-0 border border-border-primary bg-white ${activityInfo.color}`}>
           <ActivityIcon size={12} />
           {activityInfo.label}
         </div>
@@ -71,9 +71,9 @@ export default function TopBar() {
           return (
             <div
               key={key}
-              className={`group flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] cursor-pointer border-b-2 transition-colors shrink-0 ${
+              className={`group flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] cursor-pointer rounded-lg border transition-all shrink-0 ${
                 isActive
-                  ? "border-accent-blue text-text-primary bg-bg-primary"
+                  ? "border-blue-200 text-text-primary bg-blue-50 shadow-sm"
                   : "border-transparent text-text-muted hover:text-text-secondary hover:bg-bg-hover"
               }`}
               onClick={() => switchTab(tab)}
@@ -92,7 +92,7 @@ export default function TopBar() {
         })}
 
         {/* Right-side actions */}
-        <div className="flex items-center gap-1 ml-auto shrink-0 pr-2">
+        <div className="flex items-center gap-1.5 ml-auto shrink-0 pr-2">
           {/* Model meta chips */}
           {modelMeta.name && activeActivity === "model" && (
             <div className="flex items-center gap-1.5">
@@ -134,7 +134,7 @@ export default function TopBar() {
           )}
           <button
             onClick={toggleTheme}
-            className="p-1 rounded-md text-text-muted hover:bg-bg-hover hover:text-text-primary transition-colors"
+            className="p-1.5 rounded-md text-text-muted border border-border-primary bg-white hover:bg-bg-hover hover:text-text-primary transition-colors"
             title={`Switch to ${theme === "light" ? "dark" : "light"} mode (⌘D)`}
           >
             {theme === "light" ? <Moon size={13} /> : <Sun size={13} />}

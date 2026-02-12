@@ -19,7 +19,6 @@ import {
   AlertCircle,
   CheckCircle2,
   List,
-  Search,
   Plug,
   BookOpen,
   Compass,
@@ -35,9 +34,22 @@ const ACTIVITIES = [
   { id: "model",    label: "Model",    icon: LayoutDashboard, group: "top" },
   { id: "connect",  label: "Connect",  icon: Plug,            group: "top" },
   { id: "explore",  label: "Explore",  icon: Compass,         group: "top" },
-  { id: "search",   label: "Search",   icon: Search,          group: "top" },
   { id: "settings", label: "Settings", icon: Settings,        group: "bottom" },
 ];
+
+const PROJECT_FILE_DRAG_TYPE = "application/x-datalex-project-file";
+
+function parseInternalProjectFileDrop(dataTransfer) {
+  const raw = dataTransfer?.getData(PROJECT_FILE_DRAG_TYPE);
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed?.fullPath) return null;
+    return parsed;
+  } catch (_err) {
+    return null;
+  }
+}
 
 function ProjectSection() {
   const {
@@ -45,14 +57,17 @@ function ProjectSection() {
     activeProjectId,
     selectProject,
     removeProjectFolder,
+    importModelFilesToProject,
+    moveProjectFileToProject,
     offlineMode,
   } = useWorkspaceStore();
-  const { openModal } = useUiStore();
+  const { openModal, addToast } = useUiStore();
   const [expanded, setExpanded] = useState(true);
+  const [dropProjectId, setDropProjectId] = useState(null);
 
   if (offlineMode) {
     return (
-      <div className="px-3 py-2">
+      <div className="mx-2 my-2 px-3 py-2 rounded-lg border border-border-primary bg-white/80">
         <div className="flex items-center gap-2 text-xs text-text-muted mb-2">
           <Database size={12} />
           <span className="uppercase tracking-wider font-semibold">Offline Mode</span>
@@ -64,8 +79,43 @@ function ProjectSection() {
     );
   }
 
+  const handleProjectDrop = async (projectId, e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropProjectId(null);
+    const internalFile = parseInternalProjectFileDrop(e.dataTransfer);
+    if (internalFile?.fullPath) {
+      if (internalFile.projectId === projectId) {
+        addToast?.({ type: "error", message: "Source and target project are the same." });
+        return;
+      }
+      try {
+        await moveProjectFileToProject(projectId, internalFile.fullPath, "move");
+        addToast?.({
+          type: "success",
+          message: `Moved ${internalFile.name || "file"} to selected project`,
+        });
+      } catch (err) {
+        addToast?.({ type: "error", message: err.message || "Failed to move file" });
+      }
+      return;
+    }
+
+    const files = Array.from(e.dataTransfer?.files || []);
+    if (files.length === 0) return;
+    try {
+      const created = await importModelFilesToProject(projectId, files);
+      addToast?.({
+        type: "success",
+        message: `Imported ${created.length} file${created.length === 1 ? "" : "s"} into project`,
+      });
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Failed to import dropped files" });
+    }
+  };
+
   return (
-    <div className="px-2 py-1">
+    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-white/80">
       <div className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold">
         <button
           onClick={() => setExpanded(!expanded)}
@@ -85,19 +135,29 @@ function ProjectSection() {
       </div>
 
       {expanded && (
-        <div className="ml-1 space-y-0.5">
+        <div className="ml-1 space-y-0.5 max-h-[220px] overflow-y-auto">
           {projects.map((project) => (
             <div
               key={project.id}
               className={`group flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
-                activeProjectId === project.id
-                  ? "bg-bg-active text-text-accent"
+                dropProjectId === project.id
+                  ? "bg-blue-50 text-blue-700 ring-1 ring-blue-200"
+                  : activeProjectId === project.id
+                  ? "bg-blue-50 text-blue-700 border border-blue-200"
                   : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
               }`}
               onClick={() => selectProject(project.id)}
+              onDragOver={(e) => { e.preventDefault(); setDropProjectId(project.id); }}
+              onDragLeave={() => setDropProjectId((curr) => (curr === project.id ? null : curr))}
+              onDrop={(e) => handleProjectDrop(project.id, e)}
             >
               <Database size={13} className="shrink-0" />
               <span className="truncate flex-1">{project.name}</span>
+              {dropProjectId === project.id && (
+                <span className="text-[9px] px-1 py-0 rounded bg-blue-100 text-blue-700 shrink-0">
+                  Drop YAML
+                </span>
+              )}
               <button
                 onClick={(e) => { e.stopPropagation(); removeProjectFolder(project.id); }}
                 className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-status-error transition-all"
@@ -120,25 +180,57 @@ function FileSection() {
   const {
     projectFiles,
     activeFile,
+    activeProjectId,
     openFile,
     offlineMode,
     localDocuments,
     switchTab,
     createNewFile,
+    importModelFilesToProject,
   } = useWorkspaceStore();
+  const { addToast } = useUiStore();
   const [expanded, setExpanded] = useState(true);
+  const [dropActive, setDropActive] = useState(false);
 
   const files = offlineMode ? localDocuments : projectFiles;
 
+  const handleDropToActiveProject = async (e) => {
+    e.preventDefault();
+    setDropActive(false);
+    if (offlineMode || !activeProjectId) return;
+    const dropped = Array.from(e.dataTransfer?.files || []);
+    if (dropped.length === 0) return;
+    try {
+      const created = await importModelFilesToProject(activeProjectId, dropped);
+      addToast?.({
+        type: "success",
+        message: `Imported ${created.length} file${created.length === 1 ? "" : "s"} into active project`,
+      });
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Failed to import dropped files" });
+    }
+  };
+
   return (
-    <div className="px-2 py-1">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
-      >
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-        <FileText size={12} />
-        Files
+    <div
+      className={`mx-2 my-1 px-2 py-1 rounded-lg border bg-white/80 ${dropActive ? "bg-blue-50/40 ring-1 ring-blue-200 border-blue-200" : "border-border-primary/80"}`}
+      onDragOver={(e) => {
+        if (offlineMode || !activeProjectId) return;
+        e.preventDefault();
+        setDropActive(true);
+      }}
+      onDragLeave={() => setDropActive(false)}
+      onDrop={handleDropToActiveProject}
+    >
+      <div className="flex items-center gap-1.5 w-full px-1 py-1.5 text-xs text-text-muted uppercase tracking-wider font-semibold">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1.5 flex-1 min-w-0 hover:text-text-secondary transition-colors"
+        >
+          {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <FileText size={12} />
+          Files
+        </button>
         <button
           onClick={(e) => { e.stopPropagation(); createNewFile("new.model.yaml"); }}
           className="ml-auto p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-accent transition-colors"
@@ -146,7 +238,7 @@ function FileSection() {
         >
           <Plus size={12} />
         </button>
-      </button>
+      </div>
 
       {expanded && (
         <div className="ml-1 space-y-0.5 max-h-[300px] overflow-y-auto">
@@ -161,10 +253,23 @@ function FileSection() {
                 key={key}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-xs cursor-pointer transition-colors ${
                   isActive
-                    ? "bg-bg-active text-text-accent"
+                    ? "bg-blue-50 text-blue-700 border border-blue-200"
                     : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
                 }`}
                 onClick={() => offlineMode ? switchTab(file) : openFile(file)}
+                draggable={!offlineMode && Boolean(file.fullPath)}
+                onDragStart={(e) => {
+                  if (offlineMode || !file.fullPath || !activeProjectId) return;
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData(
+                    PROJECT_FILE_DRAG_TYPE,
+                    JSON.stringify({
+                      fullPath: file.fullPath,
+                      name: file.name,
+                      projectId: activeProjectId,
+                    })
+                  );
+                }}
               >
                 <FileCode2 size={13} className="shrink-0 text-accent-blue" />
                 <span className="truncate flex-1">{file.name || file.path}</span>
@@ -173,6 +278,11 @@ function FileSection() {
           })}
           {files.length === 0 && (
             <p className="text-xs text-text-muted px-2 py-1">No model files found.</p>
+          )}
+          {dropActive && !offlineMode && activeProjectId && (
+            <p className="text-[10px] text-blue-600 px-2 py-1 font-medium">
+              Drop `.yaml` / `.yml` files to import into this project
+            </p>
           )}
         </div>
       )}
@@ -197,18 +307,18 @@ function ExploreSection() {
   ];
 
   return (
-    <div className="px-2 py-1 space-y-3">
+    <div className="mx-2 my-1 px-2 py-2 space-y-3 rounded-lg border border-border-primary/80 bg-white/80">
       {/* Model stats */}
       <div>
         <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
           Model Overview
         </div>
         <div className="grid grid-cols-2 gap-2 px-1">
-          <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+          <div className="text-center p-2 rounded-lg bg-white border border-border-primary">
             <div className="text-lg font-bold text-text-primary">{entityCount}</div>
             <div className="text-[9px] text-text-muted">Entities</div>
           </div>
-          <div className="text-center p-2 rounded-lg bg-bg-primary border border-border-primary">
+          <div className="text-center p-2 rounded-lg bg-white border border-border-primary">
             <div className="text-lg font-bold text-text-primary">{relCount}</div>
             <div className="text-[9px] text-text-muted">Relationships</div>
           </div>
@@ -246,7 +356,7 @@ function EntitySection() {
   const [expanded, setExpanded] = useState(true);
 
   return (
-    <div className="px-2 py-1">
+    <div className="mx-2 my-1 px-2 py-1 rounded-lg border border-border-primary/80 bg-white/80">
       <button
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-1.5 w-full px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold hover:text-text-secondary transition-colors"
@@ -265,36 +375,29 @@ function EntitySection() {
 }
 
 
-// ── Search side panel ──
-function SearchSection() {
-  return (
-    <div className="px-2 py-1 space-y-2">
-      <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
-        Search
-      </div>
-      <div className="px-1">
-        <p className="text-[10px] text-text-muted leading-relaxed">
-          Use the search panel to find entities, fields, tags, descriptions, and glossary terms across your model.
-        </p>
-        <p className="text-[10px] text-text-muted leading-relaxed mt-1">
-          Shortcut: <kbd className="text-[9px] px-1 py-0.5 rounded bg-bg-tertiary border border-border-primary font-mono">⌘K</kbd>
-        </p>
-      </div>
-    </div>
-  );
-}
-
 // ── Activity Bar (thin icon rail on the far left) ──
-function ActivityBar({ activeActivity, onSelect }) {
+function ActivityBar({ activeActivity, onSelect, onHome }) {
   const topItems = ACTIVITIES.filter((a) => a.group === "top");
   const bottomItems = ACTIVITIES.filter((a) => a.group === "bottom");
+  const homeActive = activeActivity === "search";
 
   return (
-    <div className="w-12 min-w-[48px] bg-bg-secondary border-r border-border-primary flex flex-col items-center py-2 shrink-0">
-      {/* Logo */}
-      <div className="w-8 h-8 rounded-lg bg-accent-blue flex items-center justify-center mb-3 shrink-0">
-        <Database size={16} className="text-white" />
-      </div>
+    <div className="w-14 min-w-[56px] bg-gradient-to-b from-slate-50 to-white border-r border-border-primary flex flex-col items-center py-2 shrink-0 shadow-[inset_-1px_0_0_rgba(148,163,184,0.2)]">
+      {/* Home / Logo */}
+      <button
+        onClick={onHome}
+        title="Home"
+        className={`relative w-11 h-11 flex items-center justify-center rounded-xl mb-3 shrink-0 transition-all ${
+          homeActive
+            ? "bg-blue-50 ring-1 ring-blue-200 shadow-sm"
+            : "bg-white border border-border-primary hover:bg-bg-hover"
+        }`}
+      >
+        {homeActive && (
+          <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
+        )}
+        <img src="/DataLex.png" alt="DataLex" className="w-7 h-7 object-contain" />
+      </button>
 
       {/* Top activities */}
       <div className="flex flex-col items-center gap-0.5 flex-1">
@@ -305,9 +408,9 @@ function ActivityBar({ activeActivity, onSelect }) {
               key={id}
               onClick={() => onSelect(id)}
               title={label}
-              className={`relative w-10 h-10 flex flex-col items-center justify-center rounded-lg transition-all ${
+              className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
                 isActive
-                  ? "bg-bg-active text-accent-blue"
+                  ? "bg-blue-50 text-blue-700 shadow-sm"
                   : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
               }`}
             >
@@ -315,7 +418,7 @@ function ActivityBar({ activeActivity, onSelect }) {
                 <div className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-accent-blue" />
               )}
               <Icon size={18} strokeWidth={isActive ? 2.2 : 1.8} />
-              <span className="text-[8px] mt-0.5 font-medium leading-none">{label}</span>
+              <span className="text-[8px] mt-0.5 font-semibold leading-none">{label}</span>
             </button>
           );
         })}
@@ -330,9 +433,9 @@ function ActivityBar({ activeActivity, onSelect }) {
               key={id}
               onClick={() => onSelect(id)}
               title={label}
-              className={`relative w-10 h-10 flex flex-col items-center justify-center rounded-lg transition-all ${
+              className={`relative w-11 h-11 flex flex-col items-center justify-center rounded-xl transition-all ${
                 isActive
-                  ? "bg-bg-active text-accent-blue"
+                  ? "bg-blue-50 text-blue-700 shadow-sm"
                   : "text-text-muted hover:bg-bg-hover hover:text-text-primary"
               }`}
             >
@@ -352,9 +455,9 @@ function SidePanel({ activity }) {
   const { setSidePanelOpen } = useUiStore();
 
   return (
-    <div className="w-[240px] min-w-[240px] bg-bg-secondary border-r border-border-primary flex flex-col overflow-hidden">
+    <div className="w-[260px] min-w-[260px] bg-gradient-to-b from-white to-slate-50/70 border-r border-border-primary flex flex-col overflow-hidden shadow-[6px_0_20px_rgba(15,23,42,0.05)]">
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border-primary shrink-0">
+      <div className="flex items-center justify-between px-3 py-3 border-b border-border-primary shrink-0 bg-white/90 backdrop-blur-sm">
         <span className="text-xs font-semibold text-text-primary uppercase tracking-wider">{panelTitle}</span>
         <button
           onClick={() => setSidePanelOpen(false)}
@@ -366,7 +469,7 @@ function SidePanel({ activity }) {
       </div>
 
       {/* Panel content */}
-      <div className="flex-1 overflow-y-auto py-1 space-y-1">
+      <div className="flex-1 overflow-y-auto py-2 space-y-1.5">
         {activity === "model" && (
           <>
             <ProjectSection />
@@ -377,7 +480,7 @@ function SidePanel({ activity }) {
           </>
         )}
         {activity === "connect" && (
-          <div className="px-2 py-1 space-y-3">
+          <div className="mx-2 my-1 px-2 py-2 space-y-3 rounded-lg border border-border-primary/80 bg-white/80">
             <div className="px-1 py-1.5 text-[10px] text-text-muted uppercase tracking-wider font-semibold">
               Data Sources
             </div>
@@ -410,15 +513,14 @@ function SidePanel({ activity }) {
         )}
         {activity === "explore" && <ExploreSection />}
         {activity === "import" && (
-          <div className="px-3 py-2">
+          <div className="mx-2 my-1 px-3 py-2 rounded-lg border border-border-primary/80 bg-white/80">
             <p className="text-[10px] text-text-muted leading-relaxed">
               Drag & drop or browse files to import SQL DDL, DBML, or Spark Schema JSON into a DataLex model.
             </p>
           </div>
         )}
-        {activity === "search" && <SearchSection />}
         {activity === "settings" && (
-          <div className="px-3 py-2 space-y-2">
+          <div className="mx-2 my-1 px-3 py-2 space-y-2 rounded-lg border border-border-primary/80 bg-white/80">
             <p className="text-[10px] text-text-muted">Application settings</p>
             <button
               onClick={() => useUiStore.getState().toggleTheme()}
@@ -452,10 +554,15 @@ export default function Sidebar() {
     }
   };
 
+  const handleHomeSelect = () => {
+    setActiveActivity("search");
+    setSidePanelOpen(false);
+  };
+
   return (
     <div className="flex h-full">
-      <ActivityBar activeActivity={activeActivity} onSelect={handleActivitySelect} />
-      {sidePanelOpen && <SidePanel activity={activeActivity} />}
+      <ActivityBar activeActivity={activeActivity} onSelect={handleActivitySelect} onHome={handleHomeSelect} />
+      {sidePanelOpen && activeActivity !== "search" && <SidePanel activity={activeActivity} />}
     </div>
   );
 }

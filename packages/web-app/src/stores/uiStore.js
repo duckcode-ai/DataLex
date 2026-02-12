@@ -3,10 +3,10 @@ import { create } from "zustand";
 const useUiStore = create((set, get) => ({
   // ── Activity bar (left icon rail) ──
   // Primary activity determines what shows in the side panel AND the main content area
-  activeActivity: "model", // "model" | "connect" | "validate" | "explore" | "search" | "settings"
+  activeActivity: "search", // "model" | "connect" | "validate" | "explore" | "search" | "settings"
 
   // ── Side panel ──
-  sidePanelOpen: true,
+  sidePanelOpen: false,
   sidePanelWidth: 260,
 
   // ── Legacy aliases (keep for backward compat during migration) ──
