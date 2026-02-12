@@ -80,7 +80,9 @@ function AddProjectModal() {
   };
 
   const derivedSubfolderName = sanitizeFolderName(name);
-  const effectivePath = createSubfolder ? joinPath(path, derivedSubfolderName) : path;
+  const normalizedBase = String(path || "").replace(/[\\/]+$/, "");
+  const baseEndsWithDerived = normalizedBase.split("/").filter(Boolean).pop() === derivedSubfolderName;
+  const effectivePath = createSubfolder && !baseEndsWithDerived ? joinPath(path, derivedSubfolderName) : path;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -89,9 +91,10 @@ function AddProjectModal() {
       return;
     }
     try {
-      await addProjectFolder(name.trim(), effectivePath.trim(), createIfMissing, {
+      await addProjectFolder(name.trim(), path.trim(), createIfMissing, {
         scaffoldRepo,
         initializeGit,
+        createSubfolder,
       });
       closeModal();
     } catch (err) {
@@ -146,6 +149,11 @@ function AddProjectModal() {
             />
             Create a subfolder named after the project (recommended for a single Git repo with many projects)
           </label>
+          {!createSubfolder && (
+            <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
+              Tip: for “one repo, many projects”, keep this enabled so each project becomes <code className="font-mono">{String(path || "").replace(/[\\/]+$/, "")}/&lt;project&gt;/</code>.
+            </div>
+          )}
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
               type="checkbox"
@@ -248,7 +256,26 @@ function EditProjectModal() {
   const [createIfMissing, setCreateIfMissing] = useState(false);
   const [scaffoldRepo, setScaffoldRepo] = useState(false);
   const [initializeGit, setInitializeGit] = useState(false);
+  const [createSubfolder, setCreateSubfolder] = useState(false);
   const [error, setError] = useState("");
+
+  const sanitizeFolderName = (value) => {
+    const raw = String(value || "").trim();
+    const cleaned = raw
+      .replace(/[\\/]+/g, "-")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "");
+    return cleaned || "duckcodemodeling-project";
+  };
+
+  const joinPath = (basePath, childPath) => {
+    const base = String(basePath || "").replace(/[\\/]+$/, "");
+    const child = String(childPath || "").replace(/^[\\/]+/, "");
+    if (!base) return child;
+    if (!child) return base;
+    return `${base}/${child}`;
+  };
 
   useEffect(() => {
     setName(project?.name || "");
@@ -256,6 +283,7 @@ function EditProjectModal() {
     setCreateIfMissing(false);
     setScaffoldRepo(false);
     setInitializeGit(false);
+    setCreateSubfolder(false);
     setError("");
   }, [project?.id]);
 
@@ -271,12 +299,18 @@ function EditProjectModal() {
       await updateProjectFolder(project.id, name.trim(), path.trim(), createIfMissing, {
         scaffoldRepo,
         initializeGit,
+        createSubfolder,
       });
       closeModal();
     } catch (err) {
       setError(err.message);
     }
   };
+
+  const derivedSubfolderName = sanitizeFolderName(name);
+  const normalizedBase = String(path || "").replace(/[\\/]+$/, "");
+  const baseEndsWithDerived = normalizedBase.split("/").filter(Boolean).pop() === derivedSubfolderName;
+  const effectivePath = createSubfolder && !baseEndsWithDerived ? joinPath(path, derivedSubfolderName) : path;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={closeModal}>
@@ -310,7 +344,18 @@ function EditProjectModal() {
             <p className="mt-1 text-[11px] text-text-muted">
               In Docker mode, this must be a mounted container path (for example <code>/workspace/host/Models</code>).
             </p>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Effective project folder: <code className="font-mono text-[11px]">{effectivePath || "(set a path)"}</code>
+            </p>
           </div>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={createSubfolder}
+              onChange={(e) => setCreateSubfolder(e.target.checked)}
+            />
+            Use a subfolder named after the project (recommended for one repo, many projects)
+          </label>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
               type="checkbox"

@@ -23,7 +23,7 @@ export async function fetchConnections() {
 }
 
 export async function addProject(name, path, createIfMissing = false, options = {}) {
-  const { scaffoldRepo = false, initializeGit = false } = options || {};
+  const { scaffoldRepo = false, initializeGit = false, createSubfolder = false } = options || {};
   const data = await request("/projects", {
     method: "POST",
     body: JSON.stringify({
@@ -32,6 +32,7 @@ export async function addProject(name, path, createIfMissing = false, options = 
       create_if_missing: createIfMissing,
       scaffold_repo: scaffoldRepo,
       initialize_git: initializeGit,
+      create_subfolder: createSubfolder,
     }),
   });
   return data.project;
@@ -42,7 +43,7 @@ export async function removeProject(id) {
 }
 
 export async function updateProject(id, name, path, createIfMissing = false, options = {}) {
-  const { scaffoldRepo = false, initializeGit = false } = options || {};
+  const { scaffoldRepo = false, initializeGit = false, createSubfolder = false } = options || {};
   const data = await request(`/projects/${id}`, {
     method: "PUT",
     body: JSON.stringify({
@@ -51,6 +52,7 @@ export async function updateProject(id, name, path, createIfMissing = false, opt
       create_if_missing: createIfMissing,
       scaffold_repo: scaffoldRepo,
       initialize_git: initializeGit,
+      create_subfolder: createSubfolder,
     }),
   });
   return data.project;

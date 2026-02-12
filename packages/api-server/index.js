@@ -206,6 +206,16 @@ function toPosixPath(value) {
   return String(value || "").replace(/\\/g, "/");
 }
 
+function sanitizeFolderName(value, fallback = "duckcodemodeling-project") {
+  const raw = String(value || "").trim();
+  const cleaned = raw
+    .replace(/[\\/]+/g, "-")
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
+  return cleaned || fallback;
+}
+
 async function writeFileIfMissing(filePath, content) {
   if (existsSync(filePath)) return false;
   await mkdir(dirname(filePath), { recursive: true });
@@ -598,12 +608,19 @@ app.post("/api/projects", async (req, res) => {
       create_if_missing,
       scaffold_repo,
       initialize_git,
+      create_subfolder,
     } = req.body || {};
     if (!name || !folderPath) {
       return res.status(400).json({ error: "name and path are required" });
     }
 
-    const absoluteFolderPath = resolve(String(folderPath));
+    const absoluteBasePath = resolve(String(folderPath));
+    const wantsSubfolder = Boolean(create_subfolder);
+    const derivedSubfolder = wantsSubfolder ? sanitizeFolderName(name) : "";
+    const absoluteFolderPath =
+      wantsSubfolder && basename(absoluteBasePath) !== derivedSubfolder
+        ? resolve(absoluteBasePath, derivedSubfolder)
+        : absoluteBasePath;
     if (!existsSync(absoluteFolderPath)) {
       if (create_if_missing) {
         await mkdir(absoluteFolderPath, { recursive: true });
@@ -636,12 +653,19 @@ app.put("/api/projects/:id", async (req, res) => {
       create_if_missing,
       scaffold_repo,
       initialize_git,
+      create_subfolder,
     } = req.body || {};
     if (!name || !folderPath) {
       return res.status(400).json({ error: "name and path are required" });
     }
 
-    const absoluteFolderPath = resolve(String(folderPath));
+    const absoluteBasePath = resolve(String(folderPath));
+    const wantsSubfolder = Boolean(create_subfolder);
+    const derivedSubfolder = wantsSubfolder ? sanitizeFolderName(name) : "";
+    const absoluteFolderPath =
+      wantsSubfolder && basename(absoluteBasePath) !== derivedSubfolder
+        ? resolve(absoluteBasePath, derivedSubfolder)
+        : absoluteBasePath;
     if (!existsSync(absoluteFolderPath)) {
       if (create_if_missing) {
         await mkdir(absoluteFolderPath, { recursive: true });
