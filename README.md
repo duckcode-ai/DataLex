@@ -8,6 +8,21 @@
 **YAML-first data modeling and metadata intelligence platform**
 
 Open source UI, API, and CLI for modeling, governance, and schema-aware workflows.
+
+<p align="center">
+  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=22c55e" alt="MIT License" />
+  </a>
+  <a href="https://discord.gg/Dnm6bUvk">
+    <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Community" />
+  </a>
+  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/stargazers">
+    <img src="https://img.shields.io/github/stars/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=f59e0b" alt="GitHub Stars" />
+  </a>
+  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/issues">
+    <img src="https://img.shields.io/github/issues/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=0ea5e9" alt="Open Issues" />
+  </a>
+</p>
 </div>
 
 ## Why DuckCodeModeling
@@ -28,6 +43,24 @@ DuckCodeModeling helps data teams treat data models as versioned code.
 - `schemas`: JSON schema contracts
 - `policies`: baseline and strict policy packs
 - `docs`: architecture, specs, SLOs, runbooks
+
+## Supported Connectors
+### Available Now
+<p>
+  <img src="https://img.shields.io/badge/Snowflake-29B5E8?style=for-the-badge&logo=snowflake&logoColor=white" alt="Snowflake" />
+  <img src="https://img.shields.io/badge/Databricks-EF3E42?style=for-the-badge&logo=databricks&logoColor=white" alt="Databricks" />
+  <img src="https://img.shields.io/badge/dbt-FF694B?style=for-the-badge&logo=dbt&logoColor=white" alt="dbt Local Project" />
+  <img src="https://img.shields.io/badge/BigQuery-4285F4?style=for-the-badge&logo=googlebigquery&logoColor=white" alt="BigQuery" />
+  <img src="https://img.shields.io/badge/PostgreSQL-336791?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL" />
+  <img src="https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white" alt="MySQL" />
+</p>
+
+### In Progress / Planned
+<p>
+  <img src="https://img.shields.io/badge/SQL%20Server-CC2927?style=for-the-badge&logo=microsoftsqlserver&logoColor=white" alt="SQL Server" />
+  <img src="https://img.shields.io/badge/Azure%20SQL-0078D4?style=for-the-badge&logo=microsoftazure&logoColor=white" alt="Azure SQL" />
+  <img src="https://img.shields.io/badge/Microsoft%20Fabric-0078D4?style=for-the-badge&logo=microsoftfabric&logoColor=white" alt="Microsoft Fabric" />
+</p>
 
 ## Screenshots
 ![DuckCodeModeling Overview](screenshots/overview.png)
@@ -60,7 +93,7 @@ Local setup gives the best experience because the app can access your folders di
 
 ```bash
 git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
-cd DuckCodeModeling
+cd DuckCode-Modeling
 
 npm --prefix packages/api-server install
 npm --prefix packages/web-app install
@@ -130,11 +163,11 @@ source .venv/bin/activate
 - Contributing guide: `CONTRIBUTING.md`
 - Code of Conduct: `CODE_OF_CONDUCT.md`
 - Security policy: `SECURITY.md`
-- License: `LICENSE`
+- License: [![MIT License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 
 ## Community and Support
-- Discord: `https://discord.gg/Dnm6bUvk`
-- Issues: `https://github.com/duckcode-ai/DuckCode-Modeling/issues`
+- Discord: [![Join Discord](https://img.shields.io/badge/Discord-Join%20DuckCode%20AI-5865F2?logo=discord&logoColor=white)](https://discord.gg/Dnm6bUvk)
+- Issues: [![GitHub Issues](https://img.shields.io/badge/Issues-Report%20or%20Request-0ea5e9)](https://github.com/duckcode-ai/DuckCode-Modeling/issues)
 
 ## Notes
 - Local connector profiles are stored in `.dm-connections.json`.
