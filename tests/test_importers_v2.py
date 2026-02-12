@@ -317,3 +317,76 @@ models:
 
         rels = model.get("relationships", [])
         assert any(r["from"] == "DimCustomers.customer_id" and r["to"] == "StgOrders.customer_id" for r in rels)
+
+    def test_sources_without_columns_get_placeholder_field(self):
+        dbt_schema = """
+version: 2
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: players
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_sources_only")
+        entities = {e["name"]: e for e in model["entities"]}
+        assert "Players" in entities
+        fields = entities["Players"]["fields"]
+        assert len(fields) == 1
+        assert fields[0]["name"] == "row_id"
+
+    def test_empty_dbt_schema_gets_placeholder_entity(self):
+        dbt_schema = """
+version: 2
+models: []
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_empty")
+        assert len(model["entities"]) == 1
+        ent = model["entities"][0]
+        assert ent["name"] == "DbtSchemaInfo"
+        assert ent["fields"][0]["name"] == "row_id"
+
+    def test_import_semantic_models_and_metrics(self):
+        dbt_schema = """
+version: 2
+semantic_models:
+  - name: fact_orders
+    description: Order-level fact.
+    entities:
+      - name: order
+        type: primary
+        expr: order_key
+      - name: customer
+        type: foreign
+        expr: customer_key
+    dimensions:
+      - name: order_date
+        type: time
+      - name: status_code
+        type: categorical
+    measures:
+      - name: order_count
+        agg: count_distinct
+        expr: order_key
+      - name: net_sales
+        agg: sum
+        expr: net_sales_amount
+metrics:
+  - name: avg_order_value_net
+    type: derived
+    description: Net sales divided by order count.
+"""
+        model = import_dbt_schema_yml(dbt_schema, model_name="dbt_semantic")
+        entities = {e["name"]: e for e in model["entities"]}
+        assert "FactOrders" in entities
+        assert "MetricCatalog" in entities
+
+        fact_fields = {f["name"]: f for f in entities["FactOrders"]["fields"]}
+        assert "order_key" in fact_fields
+        assert fact_fields["order_key"].get("primary_key") is True
+        assert "customer_key" in fact_fields
+        assert fact_fields["customer_key"].get("foreign_key") is True
+        assert "order_date" in fact_fields
+        assert "net_sales_amount" in fact_fields
+
+        metric_fields = {f["name"]: f for f in entities["MetricCatalog"]["fields"]}
+        assert "avg_order_value_net" in metric_fields

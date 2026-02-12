@@ -637,6 +637,50 @@ def _upsert_field(entity: Dict[str, Any], field: Dict[str, Any]) -> None:
         existing["foreign_key"] = True
 
 
+def _ensure_non_empty_fields(entity: Dict[str, Any]) -> None:
+    fields = entity.setdefault("fields", [])
+    if fields:
+        return
+    fields.append(
+        {
+            "name": "row_id",
+            "type": "string",
+            "nullable": True,
+            "description": "Placeholder field inferred because dbt schema did not define columns.",
+        }
+    )
+
+
+def _build_placeholder_entity() -> Dict[str, Any]:
+    return {
+        "name": "DbtSchemaInfo",
+        "type": "view",
+        "description": "Placeholder entity generated because dbt schema did not define importable models/sources.",
+        "fields": [
+            {
+                "name": "row_id",
+                "type": "string",
+                "nullable": True,
+                "description": "Placeholder field inferred because dbt schema did not define columns.",
+            }
+        ],
+    }
+
+
+def _semantic_dimension_field_type(dim_type: str) -> str:
+    d = str(dim_type or "").strip().lower()
+    if d == "time":
+        return "date"
+    return "string"
+
+
+def _semantic_measure_field_type(agg: str) -> str:
+    a = str(agg or "").strip().lower()
+    if a in {"count", "count_distinct"}:
+        return "bigint"
+    return "decimal(18,2)"
+
+
 def import_dbt_schema_yml(
     schema_yml_text: str,
     model_name: str = "imported_dbt_model",
@@ -873,6 +917,94 @@ def import_dbt_schema_yml(
                             }
                         )
 
+    # dbt semantic models -> views with semantic keys/dimensions/measures
+    for semantic_model in loaded.get("semantic_models", []) if isinstance(loaded.get("semantic_models"), list) else []:
+        if not isinstance(semantic_model, dict):
+            continue
+        sm_name = str(semantic_model.get("name", "")).strip()
+        if not sm_name:
+            continue
+        sm_tags = semantic_model.get("tags") if isinstance(semantic_model.get("tags"), list) else []
+        entity = get_or_create_entity(
+            raw_name=sm_name,
+            entity_type="view",
+            description=str(semantic_model.get("description", "")).strip(),
+            tags=[*sm_tags, "SEMANTIC_MODEL"],
+        )
+
+        for sem_entity in semantic_model.get("entities", []) if isinstance(semantic_model.get("entities"), list) else []:
+            if not isinstance(sem_entity, dict):
+                continue
+            field_name = _to_snake(str(sem_entity.get("expr") or sem_entity.get("name") or "").strip())
+            if not field_name:
+                continue
+            role = str(sem_entity.get("type") or "").strip().lower()
+            field: Dict[str, Any] = {
+                "name": field_name,
+                "type": "string",
+                "nullable": role != "primary",
+                "description": f"Semantic entity key ({role or 'entity'}).",
+            }
+            if role == "primary":
+                field["primary_key"] = True
+            elif role == "foreign":
+                field["foreign_key"] = True
+            _upsert_field(entity, field)
+
+        for dim in semantic_model.get("dimensions", []) if isinstance(semantic_model.get("dimensions"), list) else []:
+            if not isinstance(dim, dict):
+                continue
+            field_name = _to_snake(str(dim.get("expr") or dim.get("name") or "").strip())
+            if not field_name:
+                continue
+            dim_type = str(dim.get("type") or "").strip()
+            field: Dict[str, Any] = {
+                "name": field_name,
+                "type": _semantic_dimension_field_type(dim_type),
+                "nullable": True,
+                "description": str(dim.get("description") or f"Semantic dimension ({dim_type or 'dimension'})."),
+            }
+            _upsert_field(entity, field)
+
+        for measure in semantic_model.get("measures", []) if isinstance(semantic_model.get("measures"), list) else []:
+            if not isinstance(measure, dict):
+                continue
+            field_name = _to_snake(str(measure.get("expr") or measure.get("name") or "").strip())
+            if not field_name:
+                continue
+            agg = str(measure.get("agg") or "").strip()
+            field: Dict[str, Any] = {
+                "name": field_name,
+                "type": _semantic_measure_field_type(agg),
+                "nullable": True,
+                "description": str(measure.get("description") or f"Semantic measure ({agg or 'measure'})."),
+            }
+            _upsert_field(entity, field)
+
+    # dbt metrics -> compact catalog entity
+    metrics = loaded.get("metrics", []) if isinstance(loaded.get("metrics"), list) else []
+    if metrics:
+        metric_entity = get_or_create_entity(
+            raw_name="metric_catalog",
+            entity_type="view",
+            description="dbt metric definitions imported from semantic layer.",
+            tags=["METRIC"],
+        )
+        for metric in metrics:
+            if not isinstance(metric, dict):
+                continue
+            metric_name = _to_snake(str(metric.get("name", "")).strip())
+            if not metric_name:
+                continue
+            metric_type = str(metric.get("type") or "").strip()
+            field: Dict[str, Any] = {
+                "name": metric_name,
+                "type": "decimal(18,2)",
+                "nullable": True,
+                "description": str(metric.get("description") or metric.get("label") or f"dbt metric ({metric_type or 'metric'})."),
+            }
+            _upsert_field(metric_entity, field)
+
     # Materialize relationship tests into DataLex relationships where resolvable.
     deduped: Dict[Tuple[str, str, str, str], Dict[str, str]] = {}
     for cand in relationship_candidates:
@@ -892,6 +1024,11 @@ def import_dbt_schema_yml(
         key = (rel["name"], rel["from"], rel["to"], rel["cardinality"])
         deduped[key] = rel
 
-    model["entities"] = sorted(entities_by_name.values(), key=lambda e: str(e.get("name", "")))
+    model_entities = sorted(entities_by_name.values(), key=lambda e: str(e.get("name", "")))
+    if not model_entities:
+        model_entities = [_build_placeholder_entity()]
+    for ent in model_entities:
+        _ensure_non_empty_fields(ent)
+    model["entities"] = model_entities
     model["relationships"] = sorted(deduped.values(), key=lambda r: str(r.get("name", "")))
     return model

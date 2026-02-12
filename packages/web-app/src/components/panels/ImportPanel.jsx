@@ -17,7 +17,7 @@ import useUiStore from "../../stores/uiStore";
 const SUPPORTED_FORMATS = [
   { id: "sql", label: "SQL DDL", icon: Database, extensions: [".sql"], description: "PostgreSQL, Snowflake, BigQuery, Databricks DDL" },
   { id: "dbml", label: "DBML", icon: FileCode, extensions: [".dbml"], description: "Database Markup Language" },
-  { id: "dbt", label: "dbt schema.yml", icon: FileText, extensions: [".yml", ".yaml"], description: "dbt model/source contracts" },
+  { id: "dbt", label: "dbt schema (.yml/.yaml)", icon: FileText, extensions: [".yml", ".yaml"], description: "dbt model/source contracts" },
   { id: "spark-schema", label: "Spark Schema", icon: FileJson, extensions: [".json"], description: "Spark StructType JSON / Databricks catalog export" },
 ];
 
@@ -29,7 +29,7 @@ function detectFormat(filename, text = "") {
   if (lower.endsWith("schema.yml") || lower.endsWith("schema.yaml")) return "dbt";
   if (lower.endsWith(".yml") || lower.endsWith(".yaml")) {
     const hasDbtVersion = /(^|\n)\s*version:\s*2\s*($|\n)/m.test(text);
-    const hasDbtSections = /(^|\n)\s*(models|sources)\s*:/m.test(text);
+    const hasDbtSections = /(^|\n)\s*(models|sources|semantic_models|metrics)\s*:/m.test(text);
     if (hasDbtVersion && hasDbtSections) return "dbt";
   }
   return null;
@@ -43,7 +43,7 @@ function deriveModelNameFromPath(pathOrName) {
 }
 
 function buildMergedDbtDocument(entries) {
-  const merged = { version: 2, models: [], sources: [] };
+  const merged = { version: 2, models: [], sources: [], semantic_models: [], metrics: [] };
   for (const entry of entries) {
     let doc;
     try {
@@ -54,6 +54,8 @@ function buildMergedDbtDocument(entries) {
     if (!doc || typeof doc !== "object" || Array.isArray(doc)) continue;
     if (Array.isArray(doc.models)) merged.models.push(...doc.models);
     if (Array.isArray(doc.sources)) merged.sources.push(...doc.sources);
+    if (Array.isArray(doc.semantic_models)) merged.semantic_models.push(...doc.semantic_models);
+    if (Array.isArray(doc.metrics)) merged.metrics.push(...doc.metrics);
   }
   return merged;
 }
@@ -277,10 +279,46 @@ function upsertField(entity, field) {
   if (field.foreign_key) existing.foreign_key = true;
 }
 
+function ensureNonEmptyFields(entity) {
+  entity.fields = Array.isArray(entity.fields) ? entity.fields : [];
+  if (entity.fields.length > 0) return;
+  entity.fields.push({
+    name: "row_id",
+    type: "string",
+    nullable: true,
+    description: "Placeholder field inferred because dbt schema did not define columns.",
+  });
+}
+
+function buildPlaceholderEntity() {
+  return {
+    name: "DbtSchemaInfo",
+    type: "view",
+    description: "Placeholder entity generated because dbt schema did not define importable models/sources.",
+    fields: [
+      {
+        name: "row_id",
+        type: "string",
+        nullable: true,
+        description: "Placeholder field inferred because dbt schema did not define columns.",
+      },
+    ],
+  };
+}
+
+function semanticDimensionFieldType(dimType) {
+  return String(dimType || "").toLowerCase() === "time" ? "date" : "string";
+}
+
+function semanticMeasureFieldType(agg) {
+  const a = String(agg || "").toLowerCase();
+  return a === "count" || a === "count_distinct" ? "bigint" : "decimal(18,2)";
+}
+
 function parseDBTSchemaClient(text, modelName) {
   const doc = yaml.load(text);
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-    throw new Error("dbt schema.yml root must be an object.");
+    throw new Error("dbt schema (.yml/.yaml) root must be an object.");
   }
 
   const entitiesByName = new Map();
@@ -464,7 +502,94 @@ function parseDBTSchemaClient(text, modelName) {
     }
   }
 
-  const entities = Array.from(entitiesByName.values()).sort((a, b) => a.name.localeCompare(b.name));
+  const semanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
+  for (const sm of semanticModels) {
+    if (!sm || typeof sm !== "object") continue;
+    const rawName = String(sm.name || "").trim();
+    if (!rawName) continue;
+    const entity = getOrCreateEntity(rawName, "view", {
+      description: String(sm.description || ""),
+      tags: [...(Array.isArray(sm.tags) ? sm.tags : []), "SEMANTIC_MODEL"],
+    });
+    if (!entity) continue;
+
+    const semEntities = Array.isArray(sm.entities) ? sm.entities : [];
+    for (const semEntity of semEntities) {
+      if (!semEntity || typeof semEntity !== "object") continue;
+      const fieldName = toSnakeCase(String(semEntity.expr || semEntity.name || "").trim());
+      if (!fieldName) continue;
+      const role = String(semEntity.type || "").toLowerCase();
+      const field = {
+        name: fieldName,
+        type: "string",
+        nullable: role !== "primary",
+        description: `Semantic entity key (${role || "entity"}).`,
+      };
+      if (role === "primary") field.primary_key = true;
+      if (role === "foreign") field.foreign_key = true;
+      upsertField(entity, field);
+    }
+
+    const dims = Array.isArray(sm.dimensions) ? sm.dimensions : [];
+    for (const dim of dims) {
+      if (!dim || typeof dim !== "object") continue;
+      const fieldName = toSnakeCase(String(dim.expr || dim.name || "").trim());
+      if (!fieldName) continue;
+      const dimType = String(dim.type || "");
+      upsertField(entity, {
+        name: fieldName,
+        type: semanticDimensionFieldType(dimType),
+        nullable: true,
+        description: String(dim.description || `Semantic dimension (${dimType || "dimension"}).`),
+      });
+    }
+
+    const measures = Array.isArray(sm.measures) ? sm.measures : [];
+    for (const measure of measures) {
+      if (!measure || typeof measure !== "object") continue;
+      const fieldName = toSnakeCase(String(measure.expr || measure.name || "").trim());
+      if (!fieldName) continue;
+      const agg = String(measure.agg || "");
+      upsertField(entity, {
+        name: fieldName,
+        type: semanticMeasureFieldType(agg),
+        nullable: true,
+        description: String(measure.description || `Semantic measure (${agg || "measure"}).`),
+      });
+    }
+  }
+
+  const metrics = Array.isArray(doc.metrics) ? doc.metrics : [];
+  if (metrics.length > 0) {
+    const metricEntity = getOrCreateEntity("metric_catalog", "view", {
+      description: "dbt metric definitions imported from semantic layer.",
+      tags: ["METRIC"],
+    });
+    if (metricEntity) {
+      for (const metric of metrics) {
+        if (!metric || typeof metric !== "object") continue;
+        const metricName = toSnakeCase(String(metric.name || "").trim());
+        if (!metricName) continue;
+        const metricType = String(metric.type || "");
+        upsertField(metricEntity, {
+          name: metricName,
+          type: "decimal(18,2)",
+          nullable: true,
+          description: String(metric.description || metric.label || `dbt metric (${metricType || "metric"}).`),
+        });
+      }
+    }
+  }
+
+  let entities = Array.from(entitiesByName.values())
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((entity) => {
+      ensureNonEmptyFields(entity);
+      return entity;
+    });
+  if (entities.length === 0) {
+    entities = [buildPlaceholderEntity()];
+  }
   const entityMap = new Map(entities.map((e) => [e.name, e]));
   const rels = [];
   const seen = new Set();
@@ -698,7 +823,12 @@ export default function ImportPanel() {
         (hasDbtProjectMarker || dbtSchemaEntries.length > 0)
       ) {
         const mergedDbt = buildMergedDbtDocument(dbtSchemaEntries);
-        if ((mergedDbt.models || []).length > 0 || (mergedDbt.sources || []).length > 0) {
+        if (
+          (mergedDbt.models || []).length > 0 ||
+          (mergedDbt.sources || []).length > 0 ||
+          (mergedDbt.semantic_models || []).length > 0 ||
+          (mergedDbt.metrics || []).length > 0
+        ) {
           const folderName = entries.find((e) => e.path.includes("/"))?.path.split("/")[0] || "dbt_project";
           const modelName = deriveModelNameFromPath(`${folderName}_dbt`);
           const mergedText = yaml.dump(mergedDbt, { lineWidth: 120, noRefs: true, sortKeys: false });

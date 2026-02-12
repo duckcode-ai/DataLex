@@ -996,21 +996,37 @@ app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
       modelName || "imported_model",
     ];
 
-    let yamlOutput;
+    let commandOutput = "";
+    let commandError = "";
+    let hadCliIssues = false;
     try {
-      yamlOutput = execFileSync(PYTHON, args, {
+      commandOutput = execFileSync(PYTHON, args, {
         encoding: "utf-8",
         timeout: 30000,
       });
+    } catch (err) {
+      hadCliIssues = true;
+      commandOutput = String(err?.stdout || "");
+      commandError = String(err?.stderr || err?.message || "");
     } finally {
       try { unlinkSync(tmpFile); } catch (_) {}
       try { rmdirSync(tmpDir); } catch (_) {}
     }
+
+    const yamlStart = commandOutput.indexOf("model:");
+    if (yamlStart < 0) {
+      const fallbackErr = commandError || "Import failed: CLI did not return a model YAML payload.";
+      return res.status(500).json({ error: fallbackErr.trim() });
+    }
+    const yamlText = commandOutput.substring(yamlStart);
+    const preface = commandOutput.substring(0, yamlStart).trim();
+    const cliWarnings = preface
+      ? preface.split("\n").map((line) => line.trim()).filter(Boolean)
+      : [];
+
     let model;
     try {
       // The output may contain issue lines before the YAML
-      const yamlStart = yamlOutput.indexOf("model:");
-      const yamlText = yamlStart >= 0 ? yamlOutput.substring(yamlStart) : yamlOutput;
       model = yaml.load(yamlText);
     } catch (_) {
       model = null;
@@ -1027,7 +1043,10 @@ app.post("/api/import", express.json({ limit: "10mb" }), async (req, res) => {
       fieldCount,
       relationshipCount: relationships.length,
       indexCount: indexes.length,
-      yaml: yamlOutput.indexOf("model:") >= 0 ? yamlOutput.substring(yamlOutput.indexOf("model:")) : yamlOutput,
+      yaml: yamlText,
+      hadCliIssues,
+      cliWarnings,
+      cliError: hadCliIssues ? (commandError.trim() || null) : null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

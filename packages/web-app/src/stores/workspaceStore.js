@@ -25,10 +25,43 @@ function parseYamlObjectSafe(text) {
   }
 }
 
+function isDataLexModelObject(doc) {
+  return !!doc && typeof doc === "object" && !Array.isArray(doc) && !!doc.model && Array.isArray(doc.entities);
+}
+
+function ensurePlaceholderEntityForEmptyModel(yamlText) {
+  const doc = parseYamlObjectSafe(yamlText);
+  if (!isDataLexModelObject(doc)) return { content: yamlText, changed: false };
+  if ((doc.entities || []).length > 0) return { content: yamlText, changed: false };
+  doc.entities = [
+    {
+      name: "DbtSchemaInfo",
+      type: "view",
+      description: "Placeholder entity generated because dbt schema did not define importable models/sources.",
+      fields: [
+        {
+          name: "row_id",
+          type: "string",
+          nullable: true,
+          description: "Placeholder field inferred because dbt schema did not define columns.",
+        },
+      ],
+    },
+  ];
+  return {
+    content: yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false }),
+    changed: true,
+  };
+}
+
 function isLikelyDbtSchema(text, sourceName = "") {
   const doc = parseYamlObjectSafe(text);
   if (!doc) return false;
-  const hasDbtSections = Array.isArray(doc.models) || Array.isArray(doc.sources);
+  const hasDbtSections =
+    Array.isArray(doc.models) ||
+    Array.isArray(doc.sources) ||
+    Array.isArray(doc.semantic_models) ||
+    Array.isArray(doc.metrics);
   if (!hasDbtSections) return false;
   const version = String(doc.version ?? "").trim();
   const looksLikeSchemaFile = /(^|\/)schema\.ya?ml$/i.test(String(sourceName || ""));
@@ -370,8 +403,12 @@ const useWorkspaceStore = create((set, get) => ({
         }
       }
 
+      const placeholderFix = ensurePlaceholderEntityForEmptyModel(renderedContent);
+      renderedContent = placeholderFix.content;
+      const hadEmptyModelFix = placeholderFix.changed;
+
       let autoSavedConvertedContent = false;
-      if (convertedFromDbt && renderedContent && renderedContent !== data.content) {
+      if ((convertedFromDbt || hadEmptyModelFix) && renderedContent && renderedContent !== data.content) {
         try {
           await saveFileContent(fileInfo.fullPath, renderedContent);
           autoSavedConvertedContent = true;

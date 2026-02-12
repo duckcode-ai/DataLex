@@ -55,7 +55,11 @@ function parseYaml(yamlText) {
 
 function looksLikeDbtSchemaDocument(model) {
   if (!isObject(model)) return false;
-  const hasDbtSections = Array.isArray(model.models) || Array.isArray(model.sources);
+  const hasDbtSections =
+    Array.isArray(model.models) ||
+    Array.isArray(model.sources) ||
+    Array.isArray(model.semantic_models) ||
+    Array.isArray(model.metrics);
   if (!hasDbtSections) return false;
   const version = String(model.version ?? "").trim();
   return version === "2" || version === "2.0";
@@ -816,7 +820,7 @@ export function runModelChecks(yamlText) {
     const dbtIssue = issue(
       "warn",
       "DBT_SCHEMA_DETECTED",
-      "This file looks like dbt schema.yml. Import it as dbt to generate a DataLex model.",
+      "This file looks like a dbt schema file (.yml/.yaml). Import it as dbt to generate a DataLex model.",
       "/"
     );
     return {
