@@ -99,6 +99,9 @@ Output:
 - `POST /api/git/push`
   - body: `{ projectId, branch?, remote?, set_upstream? }`
   - pushes branch to remote (defaults to `origin`)
+- `POST /api/git/pull`
+  - body: `{ projectId, remote?, branch?, ff_only? }`
+  - pulls latest changes (defaults to fast-forward only)
 - `POST /api/git/github/pr`
   - body: `{ projectId, token, title, body?, base?, head?, draft? }`
   - opens a GitHub pull request using the project remote

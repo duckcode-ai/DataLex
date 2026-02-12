@@ -31,6 +31,24 @@ const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 const IS_DOCKER_RUNTIME = existsSync("/.dockerenv");
 const DIRECT_APPLY_ENABLED = ["1", "true", "yes", "on"].includes(String(process.env.DM_ENABLE_DIRECT_APPLY || "").toLowerCase());
+const DUCKCODE_CONFIG_DIRNAME = ".duckcodemodeling";
+const DUCKCODE_PROJECT_CONFIG = join(DUCKCODE_CONFIG_DIRNAME, "project.json");
+const DUCKCODE_DEFAULT_STRUCTURE = {
+  version: 1,
+  modelsDir: "models",
+  migrationsDir: "migrations",
+  ddlDir: "ddl",
+  migrationDialects: {
+    snowflake: "migrations/snowflake",
+    databricks: "migrations/databricks",
+    bigquery: "migrations/bigquery",
+  },
+  ddlDialects: {
+    snowflake: "ddl/snowflake",
+    databricks: "ddl/databricks",
+    bigquery: "ddl/bigquery",
+  },
+};
 
 async function loadProjects() {
   try {
@@ -177,6 +195,180 @@ function parseGitHubRemote(remoteUrl) {
   return null;
 }
 
+
+function normalizeRelativeSubpath(value, fallback = "") {
+  const text = String(value || "").trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  if (!text || text === ".") return fallback;
+  return text;
+}
+
+function toPosixPath(value) {
+  return String(value || "").replace(/\\/g, "/");
+}
+
+async function writeFileIfMissing(filePath, content) {
+  if (existsSync(filePath)) return false;
+  await mkdir(dirname(filePath), { recursive: true });
+  await writeFile(filePath, content, "utf-8");
+  return true;
+}
+
+function tryGetGitRoot(cwd) {
+  try {
+    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      cwd,
+      encoding: "utf-8",
+      timeout: 8000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const trimmed = String(root || "").trim();
+    return trimmed || null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+async function bootstrapProjectStructure(projectPath, { initializeGit = false } = {}) {
+  const absoluteProjectPath = resolve(projectPath);
+  await mkdir(absoluteProjectPath, { recursive: true });
+
+  // If the project lives inside an existing git repo, avoid creating a nested .git folder.
+  // Also, GitHub Actions only loads workflows from the repo root .github/workflows.
+  const gitRoot = tryGetGitRoot(absoluteProjectPath);
+  const isInsideExistingRepo = Boolean(gitRoot) && isPathInside(gitRoot, absoluteProjectPath);
+
+  const dirs = [
+    "models",
+    "migrations/snowflake",
+    "migrations/databricks",
+    "migrations/bigquery",
+    "ddl/snowflake",
+    "ddl/databricks",
+    "ddl/bigquery",
+    "guides/setup",
+    "guides/gitops",
+    "guides/testing",
+    DUCKCODE_CONFIG_DIRNAME,
+  ];
+  for (const relDir of dirs) {
+    await mkdir(join(absoluteProjectPath, relDir), { recursive: true });
+  }
+
+  const readme = [
+    `# ${basename(absoluteProjectPath)}` ,
+    "",
+    "Programmable data modeling repository managed by DuckCodeModeling.",
+    "",
+    "## Structure",
+    "",
+    "- models/: source .model.yaml files",
+    "- migrations/: generated SQL artifacts by connector",
+    "- guides/: team onboarding and runbooks",
+    "- .github/workflows/: CI/CD automation templates",
+    "",
+  ].join("\n");
+
+  const gitignore = [
+    "# DuckCodeModeling",
+    ".secrets/",
+    "*.pem",
+    "*.p8",
+    "*.key",
+    ".env",
+    ".env.*",
+    "",
+    "# Python",
+    ".venv/",
+    "__pycache__/",
+    "*.pyc",
+    "",
+    "# macOS",
+    ".DS_Store",
+    "",
+  ].join("\n");
+
+  const workflow = [
+    "name: validate-models",
+    "",
+    "on:",
+    "  pull_request:",
+    "    branches: [main]",
+    "",
+    "jobs:",
+    "  validate:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - uses: actions/checkout@v4",
+    "      - name: Placeholder",
+    "        run: echo \"Add dm validate/migrate checks here\"",
+    "",
+  ].join("\n");
+
+  await writeFileIfMissing(join(absoluteProjectPath, "README.md"), readme);
+  await writeFileIfMissing(join(absoluteProjectPath, ".gitignore"), gitignore);
+  await writeFileIfMissing(
+    join(absoluteProjectPath, DUCKCODE_PROJECT_CONFIG),
+    `${JSON.stringify(DUCKCODE_DEFAULT_STRUCTURE, null, 2)}\n`
+  );
+  await writeFileIfMissing(join(absoluteProjectPath, "models", ".gitkeep"), "");
+  await writeFileIfMissing(
+    join(absoluteProjectPath, "guides", "README.md"),
+    "# Guides\n\nAdd setup, GitOps, and testing playbooks for your team.\n"
+  );
+
+  const workflowRoot = isInsideExistingRepo ? gitRoot : absoluteProjectPath;
+  await mkdir(join(workflowRoot, ".github", "workflows"), { recursive: true });
+  await writeFileIfMissing(join(workflowRoot, ".github", "workflows", "validate-models.yml"), workflow);
+
+  if (initializeGit && !isInsideExistingRepo && !existsSync(join(absoluteProjectPath, ".git"))) {
+    try {
+      execFileSync("git", ["init", "-b", "main"], {
+        cwd: absoluteProjectPath,
+        encoding: "utf-8",
+        timeout: 15000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (_err) {
+      execFileSync("git", ["init"], {
+        cwd: absoluteProjectPath,
+        encoding: "utf-8",
+        timeout: 15000,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    }
+  }
+}
+
+async function loadProjectStructure(projectPath) {
+  const absoluteProjectPath = resolve(projectPath);
+  const configPath = join(absoluteProjectPath, DUCKCODE_PROJECT_CONFIG);
+
+  let projectConfig = null;
+  if (existsSync(configPath)) {
+    try {
+      const raw = await readFile(configPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        projectConfig = parsed;
+      }
+    } catch (_err) {
+      projectConfig = null;
+    }
+  }
+
+  const configuredModelsDir = normalizeRelativeSubpath(projectConfig?.modelsDir, "");
+  const candidateModelPath = configuredModelsDir
+    ? resolve(absoluteProjectPath, configuredModelsDir)
+    : absoluteProjectPath;
+  const modelPath = isPathInside(absoluteProjectPath, candidateModelPath)
+    ? candidateModelPath
+    : absoluteProjectPath;
+
+  return {
+    projectConfig,
+    modelPath,
+  };
+}
 
 const SECRET_KEYS = new Set(["password", "token", "private_key_content", "private_key_path"]);
 
@@ -400,22 +592,36 @@ app.get("/api/projects", async (_req, res) => {
 // Add a project folder
 app.post("/api/projects", async (req, res) => {
   try {
-    const { name, path: folderPath, create_if_missing } = req.body;
+    const {
+      name,
+      path: folderPath,
+      create_if_missing,
+      scaffold_repo,
+      initialize_git,
+    } = req.body || {};
     if (!name || !folderPath) {
       return res.status(400).json({ error: "name and path are required" });
     }
-    if (!existsSync(folderPath)) {
+
+    const absoluteFolderPath = resolve(String(folderPath));
+    if (!existsSync(absoluteFolderPath)) {
       if (create_if_missing) {
-        await mkdir(folderPath, { recursive: true });
+        await mkdir(absoluteFolderPath, { recursive: true });
       } else {
-        return res.status(400).json({ error: `Path does not exist: ${folderPath}` });
+        return res.status(400).json({ error: `Path does not exist: ${absoluteFolderPath}` });
       }
     }
+
+    if (scaffold_repo) {
+      await bootstrapProjectStructure(absoluteFolderPath, { initializeGit: Boolean(initialize_git) });
+    }
+
     const projects = await loadProjects();
     const id = `proj_${Date.now()}`;
-    projects.push({ id, name, path: folderPath });
+    const project = { id, name, path: absoluteFolderPath };
+    projects.push(project);
     await saveProjects(projects);
-    res.json({ project: { id, name, path: folderPath } });
+    res.json({ project });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -424,17 +630,28 @@ app.post("/api/projects", async (req, res) => {
 // Update an existing project folder
 app.put("/api/projects/:id", async (req, res) => {
   try {
-    const { name, path: folderPath, create_if_missing } = req.body || {};
+    const {
+      name,
+      path: folderPath,
+      create_if_missing,
+      scaffold_repo,
+      initialize_git,
+    } = req.body || {};
     if (!name || !folderPath) {
       return res.status(400).json({ error: "name and path are required" });
     }
 
-    if (!existsSync(folderPath)) {
+    const absoluteFolderPath = resolve(String(folderPath));
+    if (!existsSync(absoluteFolderPath)) {
       if (create_if_missing) {
-        await mkdir(folderPath, { recursive: true });
+        await mkdir(absoluteFolderPath, { recursive: true });
       } else {
-        return res.status(400).json({ error: `Path does not exist: ${folderPath}` });
+        return res.status(400).json({ error: `Path does not exist: ${absoluteFolderPath}` });
       }
+    }
+
+    if (scaffold_repo) {
+      await bootstrapProjectStructure(absoluteFolderPath, { initializeGit: Boolean(initialize_git) });
     }
 
     const projects = await loadProjects();
@@ -446,7 +663,7 @@ app.put("/api/projects/:id", async (req, res) => {
     const updated = {
       ...projects[idx],
       name,
-      path: folderPath,
+      path: absoluteFolderPath,
     };
     projects[idx] = updated;
     await saveProjects(projects);
@@ -490,8 +707,19 @@ app.get("/api/projects/:id/files", async (req, res) => {
       });
     }
 
-    const files = await walkYamlFiles(project.path);
-    res.json({ projectId: project.id, projectPath: project.path, files });
+    const structure = await loadProjectStructure(project.path);
+    if (!existsSync(structure.modelPath)) {
+      await mkdir(structure.modelPath, { recursive: true });
+    }
+
+    const files = await walkYamlFiles(structure.modelPath);
+    res.json({
+      projectId: project.id,
+      projectPath: project.path,
+      projectModelPath: structure.modelPath,
+      projectConfig: structure.projectConfig,
+      files,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -806,6 +1034,60 @@ app.post("/api/git/push", express.json(), async (req, res) => {
   }
 });
 
+// Git: pull (fast-forward only by default)
+app.post("/api/git/pull", express.json(), async (req, res) => {
+  try {
+    const { projectId, remote = "origin", branch, ff_only = true } = req.body || {};
+    const normalizedProjectId = String(projectId || "").trim();
+    if (!normalizedProjectId) {
+      return res.status(400).json({ error: "projectId is required" });
+    }
+
+    const projectPath = await resolveProjectPath(normalizedProjectId);
+    if (!projectPath) {
+      return res.status(404).json({ error: "Project not found" });
+    }
+
+    const status = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    const branchName = String(branch || "").trim() || status.branch;
+    if (!branchName || branchName === "HEAD") {
+      return res.status(400).json({ error: "Unable to determine branch to pull (detached HEAD)." });
+    }
+
+    const args = ["pull"];
+    if (ff_only) args.push("--ff-only");
+
+    // If a branch is explicitly provided, use remote+branch; otherwise rely on upstream tracking.
+    if (String(branch || "").trim()) {
+      args.push(String(remote || "origin"), branchName);
+    }
+
+    const output = execFileSync("git", args, {
+      cwd: projectPath,
+      encoding: "utf-8",
+      timeout: 120000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const refreshed = parseGitStatus(runGit(["status", "--porcelain=1", "--branch"], projectPath));
+    res.json({
+      ok: true,
+      projectId: normalizedProjectId,
+      branch: branchName,
+      remote: String(remote || "origin"),
+      ffOnly: Boolean(ff_only),
+      output: String(output || "").trim(),
+      ...refreshed,
+    });
+  } catch (err) {
+    const stderr = (err.stderr || err.message || "").toString();
+    if (stderr.includes("not a git repository")) {
+      return res.status(400).json({ error: "Selected project is not a git repository" });
+    }
+    res.status(500).json({ error: stderr.trim() || String(err.message || err) });
+  }
+});
+
 // GitHub: create pull request for current branch
 app.post("/api/git/github/pr", express.json({ limit: "1mb" }), async (req, res) => {
   try {
@@ -1004,17 +1286,28 @@ app.post("/api/projects/:id/files", async (req, res) => {
       return res.status(400).json({ error: "name is required" });
     }
 
-    const filePath = join(project.path, name);
+    const structure = await loadProjectStructure(project.path);
+    if (!existsSync(structure.modelPath)) {
+      await mkdir(structure.modelPath, { recursive: true });
+    }
+
+    const relativeName = toPosixPath(String(name));
+    const filePath = resolve(structure.modelPath, relativeName);
+    if (!isPathInside(structure.modelPath, filePath)) {
+      return res.status(400).json({ error: "name must stay inside project model path" });
+    }
+
     if (existsSync(filePath)) {
       return res.status(409).json({ error: "File already exists" });
     }
 
+    await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, content, "utf-8");
     const stats = await stat(filePath);
     res.json({
       path: relative(project.path, filePath),
       fullPath: filePath,
-      name,
+      name: basename(filePath),
       size: stats.size,
       modifiedAt: stats.mtime.toISOString(),
     });
@@ -1060,12 +1353,17 @@ app.post("/api/projects/:id/move-file", async (req, res) => {
       return res.status(400).json({ error: "Only .yaml/.yml files can be moved" });
     }
 
-    let targetFullPath = join(targetProject.path, sourceName);
+    const targetStructure = await loadProjectStructure(targetProject.path);
+    if (!existsSync(targetStructure.modelPath)) {
+      await mkdir(targetStructure.modelPath, { recursive: true });
+    }
+
+    let targetFullPath = join(targetStructure.modelPath, sourceName);
     if (existsSync(targetFullPath)) {
       const stem = sourceName.slice(0, -ext.length);
       let i = 1;
       while (existsSync(targetFullPath)) {
-        targetFullPath = join(targetProject.path, `${stem}_${i}${ext}`);
+        targetFullPath = join(targetStructure.modelPath, `${stem}_${i}${ext}`);
         i += 1;
       }
     }

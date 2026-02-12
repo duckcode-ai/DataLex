@@ -22,10 +22,17 @@ export async function fetchConnections() {
   return data.connections || [];
 }
 
-export async function addProject(name, path, createIfMissing = false) {
+export async function addProject(name, path, createIfMissing = false, options = {}) {
+  const { scaffoldRepo = false, initializeGit = false } = options || {};
   const data = await request("/projects", {
     method: "POST",
-    body: JSON.stringify({ name, path, create_if_missing: createIfMissing }),
+    body: JSON.stringify({
+      name,
+      path,
+      create_if_missing: createIfMissing,
+      scaffold_repo: scaffoldRepo,
+      initialize_git: initializeGit,
+    }),
   });
   return data.project;
 }
@@ -34,10 +41,17 @@ export async function removeProject(id) {
   return request(`/projects/${id}`, { method: "DELETE" });
 }
 
-export async function updateProject(id, name, path, createIfMissing = false) {
+export async function updateProject(id, name, path, createIfMissing = false, options = {}) {
+  const { scaffoldRepo = false, initializeGit = false } = options || {};
   const data = await request(`/projects/${id}`, {
     method: "PUT",
-    body: JSON.stringify({ name, path, create_if_missing: createIfMissing }),
+    body: JSON.stringify({
+      name,
+      path,
+      create_if_missing: createIfMissing,
+      scaffold_repo: scaffoldRepo,
+      initialize_git: initializeGit,
+    }),
   });
   return data.project;
 }
@@ -119,4 +133,50 @@ export async function unstageGitFiles(projectId, paths) {
 
 export async function fetchGitLog(projectId, limit = 20) {
   return request(`/git/log?projectId=${encodeURIComponent(projectId)}&limit=${encodeURIComponent(limit)}`);
+}
+export async function createGitBranch(projectId, { branch, from = "" } = {}) {
+  return request("/git/branch/create", {
+    method: "POST",
+    body: JSON.stringify({ projectId, branch, from: from || undefined }),
+  });
+}
+
+export async function pushGitBranch(projectId, { remote = "origin", branch = "", setUpstream = true } = {}) {
+  return request("/git/push", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId,
+      remote,
+      branch: branch || undefined,
+      set_upstream: Boolean(setUpstream),
+    }),
+  });
+}
+
+export async function pullGitBranch(projectId, { remote = "origin", branch = "", ffOnly = true } = {}) {
+  return request("/git/pull", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId,
+      remote,
+      branch: branch || undefined,
+      ff_only: Boolean(ffOnly),
+    }),
+  });
+}
+
+export async function createGitHubPr(projectId, { token, title, body = "", base = "main", head = "", draft = false, remote = "origin" } = {}) {
+  return request("/git/github/pr", {
+    method: "POST",
+    body: JSON.stringify({
+      projectId,
+      token,
+      title,
+      body,
+      base,
+      head: head || undefined,
+      draft: Boolean(draft),
+      remote,
+    }),
+  });
 }

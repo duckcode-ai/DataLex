@@ -13,17 +13,21 @@ import {
   Upload,
   ArrowUpToLine,
   ArrowDownToLine,
-} from "lucide-react";
-import useWorkspaceStore from "../../stores/workspaceStore";
-import useUiStore from "../../stores/uiStore";
-import { runGate } from "../../modelQuality";
-import {
+  } from "lucide-react";
+  import useWorkspaceStore from "../../stores/workspaceStore";
+  import useUiStore from "../../stores/uiStore";
+  import { runGate } from "../../modelQuality";
+  import {
   fetchGitStatus,
   fetchGitDiff,
   commitGit,
   fetchGitLog,
   stageGitFiles,
   unstageGitFiles,
+  createGitBranch,
+  pushGitBranch,
+  pullGitBranch,
+  createGitHubPr,
 } from "../../lib/api";
 
 function summarizeFileStatus(file) {
@@ -51,6 +55,21 @@ export default function DiffPanel() {
   const [commitMessage, setCommitMessage] = useState("");
   const [commitLoading, setCommitLoading] = useState(false);
   const [gitActionLoading, setGitActionLoading] = useState(false);
+
+  const [gitRemote, setGitRemote] = useState("origin");
+  const [gitBranchInput, setGitBranchInput] = useState("");
+  const [gitBranchLoading, setGitBranchLoading] = useState(false);
+  const [gitPushLoading, setGitPushLoading] = useState(false);
+  const [gitPullLoading, setGitPullLoading] = useState(false);
+  const [gitPushOutput, setGitPushOutput] = useState("");
+  const [gitPullOutput, setGitPullOutput] = useState("");
+
+  const [prTitle, setPrTitle] = useState("chore: model updates");
+  const [prBase, setPrBase] = useState("main");
+  const [prBody, setPrBody] = useState("Automated changes generated/managed in DuckCodeModeling.");
+  const [prToken, setPrToken] = useState("");
+  const [prCreating, setPrCreating] = useState(false);
+  const [prUrl, setPrUrl] = useState("");
 
   const gateResult = useMemo(() => {
     if (!activeFileContent || !baselineContent) return null;
@@ -109,6 +128,11 @@ export default function DiffPanel() {
   useEffect(() => {
     loadGitWorkspace();
   }, [loadGitWorkspace]);
+
+  useEffect(() => {
+    if (!gitStatus?.branch || gitStatus.branch === "HEAD") return;
+    setGitBranchInput((prev) => prev || gitStatus.branch);
+  }, [gitStatus?.branch]);
 
   useEffect(() => {
     loadGitDiffText();
@@ -195,6 +219,113 @@ export default function DiffPanel() {
     }
   }, [activeProjectId, offlineMode, gitStatus, selectedPath, addToast, loadGitWorkspace, loadGitDiffText]);
 
+
+  const onCreateBranch = useCallback(async () => {
+    if (!activeProjectId || offlineMode) return;
+    const branch = String(gitBranchInput || "").trim();
+    if (!branch) {
+      setGitError("Branch name is required");
+      return;
+    }
+    setGitBranchLoading(true);
+    setGitError("");
+    try {
+      await createGitBranch(activeProjectId, { branch });
+      addToast?.({ type: "success", message: "Checked out " + branch });
+      await loadGitWorkspace();
+      await loadGitDiffText();
+    } catch (err) {
+      setGitError(err.message);
+    } finally {
+      setGitBranchLoading(false);
+    }
+  }, [activeProjectId, offlineMode, gitBranchInput, addToast, loadGitWorkspace, loadGitDiffText]);
+
+  const onPush = useCallback(async () => {
+    if (!activeProjectId || offlineMode || !gitStatus) return;
+    const branch = String(gitBranchInput || gitStatus.branch || "").trim();
+    if (!branch || branch === "HEAD") {
+      setGitError("Unable to push: detached HEAD");
+      return;
+    }
+    setGitPushLoading(true);
+    setGitError("");
+    setGitPushOutput("");
+    try {
+      const result = await pushGitBranch(activeProjectId, { remote: gitRemote || "origin", branch, setUpstream: true });
+      setGitPushOutput(result.output || "Push completed");
+      addToast?.({ type: "success", message: "Pushed " + branch });
+      await loadGitWorkspace();
+      await loadGitDiffText();
+    } catch (err) {
+      setGitError(err.message);
+    } finally {
+      setGitPushLoading(false);
+    }
+  }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, addToast, loadGitWorkspace, loadGitDiffText]);
+
+  const onPull = useCallback(async () => {
+    if (!activeProjectId || offlineMode || !gitStatus) return;
+    const branch = String(gitBranchInput || gitStatus.branch || "").trim();
+    if (!branch || branch === "HEAD") {
+      setGitError("Unable to pull: detached HEAD");
+      return;
+    }
+    setGitPullLoading(true);
+    setGitError("");
+    setGitPullOutput("");
+    try {
+      const result = await pullGitBranch(activeProjectId, { remote: gitRemote || "origin", ffOnly: true });
+      setGitPullOutput(result.output || "Pull completed");
+      addToast?.({ type: "success", message: "Pulled latest changes" });
+      await loadGitWorkspace();
+      await loadGitDiffText();
+    } catch (err) {
+      setGitError(err.message);
+    } finally {
+      setGitPullLoading(false);
+    }
+  }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, addToast, loadGitWorkspace, loadGitDiffText]);
+
+  const onCreatePr = useCallback(async () => {
+    if (!activeProjectId || offlineMode || !gitStatus) return;
+    const token = String(prToken || "").trim();
+    if (!token) {
+      setGitError("GitHub token is required to open a PR");
+      return;
+    }
+    const title = String(prTitle || "").trim();
+    if (!title) {
+      setGitError("PR title is required");
+      return;
+    }
+    const head = String(gitBranchInput || gitStatus.branch || "").trim();
+    if (!head || head === "HEAD") {
+      setGitError("Head branch is required");
+      return;
+    }
+
+    setPrCreating(true);
+    setGitError("");
+    setPrUrl("");
+    try {
+      const pr = await createGitHubPr(activeProjectId, {
+        token,
+        title,
+        body: String(prBody || ""),
+        base: String(prBase || "main").trim() || "main",
+        head,
+        remote: gitRemote || "origin",
+      });
+      const url = pr?.pullRequest?.url || "";
+      setPrUrl(url);
+      addToast?.({ type: "success", message: url ? "Opened PR" : "PR created" });
+    } catch (err) {
+      setGitError(err.message);
+    } finally {
+      setPrCreating(false);
+    }
+  }, [activeProjectId, offlineMode, gitStatus, gitBranchInput, gitRemote, prToken, prTitle, prBody, prBase, addToast]);
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="flex items-center gap-3 px-3 py-2 border-b border-border-primary bg-bg-secondary/50 shrink-0">
@@ -408,7 +539,132 @@ export default function DiffPanel() {
                           {commitLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
                           Commit
                         </button>
+                        <button
+                          onClick={onPush}
+                          disabled={gitPushLoading || !gitStatus}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-xs font-medium border border-border-primary bg-bg-primary text-text-secondary hover:bg-bg-hover disabled:opacity-60"
+                          title="Push current branch to origin"
+                        >
+                          {gitPushLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+                          Push
+                        </button>
                       </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-text-muted uppercase tracking-wider font-semibold block">Git Actions</label>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div>
+                          <div className="text-[10px] text-text-muted mb-1">Remote</div>
+                          <input
+                            value={gitRemote}
+                            onChange={(e) => setGitRemote(e.target.value)}
+                            placeholder="origin"
+                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-[10px] text-text-muted mb-1">Branch</div>
+                          <input
+                            value={gitBranchInput}
+                            onChange={(e) => setGitBranchInput(e.target.value)}
+                            placeholder={gitStatus?.branch && gitStatus.branch !== "HEAD" ? gitStatus.branch : "feature/my-change"}
+                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+                          />
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <button
+                            onClick={onCreateBranch}
+                            disabled={gitBranchLoading}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
+                          >
+                            {gitBranchLoading ? <Loader2 size={10} className="animate-spin" /> : <GitBranch size={10} />}
+                            Create/Checkout
+                          </button>
+                          <button
+                            onClick={onPull}
+                            disabled={gitPullLoading || !gitStatus}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
+                          >
+                            {gitPullLoading ? <Loader2 size={10} className="animate-spin" /> : <RefreshCw size={10} />}
+                            Pull
+                          </button>
+                          <button
+                            onClick={onPush}
+                            disabled={gitPushLoading || !gitStatus}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded border border-border-primary text-[10px] text-text-secondary hover:bg-bg-hover disabled:opacity-60"
+                          >
+                            {gitPushLoading ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+                            Push
+                          </button>
+                        </div>
+                      </div>
+
+                      {(gitPullOutput || gitPushOutput) && (
+                        <details className="mt-2 border border-border-primary rounded-md bg-bg-primary p-2">
+                          <summary className="text-[10px] text-text-muted cursor-pointer">Last git output</summary>
+                          <pre className="mt-2 text-[10px] font-mono whitespace-pre-wrap break-words max-h-32 overflow-auto">
+                            {gitPullOutput || gitPushOutput}
+                          </pre>
+                        </details>
+                      )}
+
+                      <details className="mt-2 border border-border-primary rounded-md bg-bg-primary p-2">
+                        <summary className="text-[10px] text-text-muted cursor-pointer">Open GitHub PR</summary>
+                        <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <div>
+                            <div className="text-[10px] text-text-muted mb-1">PR Title</div>
+                            <input
+                              value={prTitle}
+                              onChange={(e) => setPrTitle(e.target.value)}
+                              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
+                            />
+                          </div>
+                          <div>
+                            <div className="text-[10px] text-text-muted mb-1">Base Branch</div>
+                            <input
+                              value={prBase}
+                              onChange={(e) => setPrBase(e.target.value)}
+                              placeholder="main"
+                              className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+                            />
+                          </div>
+                        </div>
+                        <div className="mt-2">
+                          <div className="text-[10px] text-text-muted mb-1">GitHub Token</div>
+                          <input
+                            type="password"
+                            value={prToken}
+                            onChange={(e) => setPrToken(e.target.value)}
+                            placeholder="ghp_..."
+                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue font-mono"
+                          />
+                        </div>
+                        <div className="mt-2">
+                          <div className="text-[10px] text-text-muted mb-1">Description</div>
+                          <textarea
+                            value={prBody}
+                            onChange={(e) => setPrBody(e.target.value)}
+                            rows={3}
+                            className="w-full bg-bg-primary border border-border-primary rounded-md px-2 py-1.5 text-xs text-text-primary outline-none focus:border-accent-blue"
+                          />
+                        </div>
+                        <div className="mt-2 flex items-center gap-2">
+                          <button
+                            onClick={onCreatePr}
+                            disabled={prCreating || !gitStatus}
+                            className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-[10px] font-semibold bg-accent-blue text-white hover:bg-accent-blue/85 disabled:opacity-60"
+                          >
+                            {prCreating ? <Loader2 size={10} className="animate-spin" /> : <Upload size={10} />}
+                            Open PR
+                          </button>
+                          {prUrl && (
+                            <a href={prUrl} target="_blank" rel="noreferrer" className="text-[10px] text-accent-blue underline">
+                              {prUrl}
+                            </a>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+
                     </div>
 
                     {gitLog.length > 0 && (

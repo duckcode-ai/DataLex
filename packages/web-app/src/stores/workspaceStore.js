@@ -68,6 +68,13 @@ function isLikelyDbtSchema(text, sourceName = "") {
   return version === "2" || version === "2.0" || looksLikeSchemaFile;
 }
 
+function joinPath(basePath, childPath) {
+  const base = String(basePath || "").replace(/[\/]+$/, "");
+  const child = String(childPath || "").replace(/^[\/]+/, "");
+  if (!base) return child;
+  if (!child) return base;
+  return `${base}/${child}`;
+}
 function deriveModelNameFromPath(pathOrName) {
   const raw = String(pathOrName || "imported_model").replace(/\.ya?ml$/i, "");
   const normalizedPath = raw.replace(/\\/g, "/");
@@ -96,6 +103,7 @@ const useWorkspaceStore = create((set, get) => ({
   activeProjectId: null,
   projectFiles: [],
   projectPath: "",
+  projectModelPath: "",
 
   // Active document
   activeFile: null,
@@ -160,12 +168,13 @@ const useWorkspaceStore = create((set, get) => ({
 
   loadImportedYaml: async (name, yamlContent) => {
     const fileName = name.endsWith(".model.yaml") ? name : `${name}.model.yaml`;
-    const { offlineMode, localDocuments, projectPath, activeProjectId } = get();
+    const { offlineMode, localDocuments, projectPath, projectModelPath, activeProjectId } = get();
+    const targetModelPath = projectModelPath || projectPath;
 
     // Online mode with an active project: save to disk and open from project
-    if (!offlineMode && projectPath && activeProjectId) {
+    if (!offlineMode && targetModelPath && activeProjectId) {
       try {
-        const fullPath = `${projectPath}/${fileName}`;
+        const fullPath = joinPath(targetModelPath, fileName);
         await saveFileContent(fullPath, yamlContent);
         // Refresh project file list
         const data = await fetchProjectFiles(activeProjectId);
@@ -181,8 +190,9 @@ const useWorkspaceStore = create((set, get) => ({
             isDirty: false,
             openTabs: [...s.openTabs.filter((t) => t.fullPath !== fullPath), file],
           }));
+          return savedFile.fullPath || fullPath;
         }
-        return;
+        return fullPath;
       } catch (err) {
         console.warn("[workspace] Failed to save imported model to disk:", err.message);
         // Fall through to in-memory tab
@@ -215,18 +225,20 @@ const useWorkspaceStore = create((set, get) => ({
         openTabs: [...get().openTabs.filter((t) => t.id !== doc.id), doc],
       });
     }
+    return null;
   },
 
   loadMultipleImportedYaml: async (files) => {
     if (!files || files.length === 0) return;
-    const { offlineMode, localDocuments, openTabs, projectPath, activeProjectId } = get();
+    const { offlineMode, localDocuments, openTabs, projectPath, projectModelPath, activeProjectId } = get();
+    const targetModelPath = projectModelPath || projectPath;
 
     // Online mode with an active project: save all files to disk
-    if (!offlineMode && projectPath && activeProjectId) {
+    if (!offlineMode && targetModelPath && activeProjectId) {
       try {
         for (const f of files) {
           const fileName = f.name.endsWith(".model.yaml") ? f.name : `${f.name}.model.yaml`;
-          const fullPath = `${projectPath}/${fileName}`;
+          const fullPath = joinPath(targetModelPath, fileName);
           await saveFileContent(fullPath, f.yaml);
         }
         // Refresh project file list
@@ -258,8 +270,9 @@ const useWorkspaceStore = create((set, get) => ({
             isDirty: false,
             openTabs: newTabs,
           });
+          return fileTabs.map((ft) => ft.fullPath).filter(Boolean);
         }
-        return;
+        return [];
       } catch (err) {
         console.warn("[workspace] Failed to save imported files to disk:", err.message);
         // Fall through to in-memory mode
@@ -297,6 +310,7 @@ const useWorkspaceStore = create((set, get) => ({
         openTabs: newTabs,
       });
     }
+    return [];
   },
 
   saveOfflineDocs: () => {
@@ -304,10 +318,10 @@ const useWorkspaceStore = create((set, get) => ({
     localStorage.setItem("dm_offline_docs", JSON.stringify(localDocuments));
   },
 
-  addProjectFolder: async (name, path, createIfMissing = false) => {
+  addProjectFolder: async (name, path, createIfMissing = false, options = {}) => {
     set({ loading: true, error: null });
     try {
-      const project = await addProject(name, path, createIfMissing);
+      const project = await addProject(name, path, createIfMissing, options);
       set((s) => ({ projects: [...s.projects, project], loading: false }));
       await get().selectProject(project.id);
     } catch (err) {
@@ -315,10 +329,10 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
-  updateProjectFolder: async (id, name, path, createIfMissing = false) => {
+  updateProjectFolder: async (id, name, path, createIfMissing = false, options = {}) => {
     set({ loading: true, error: null });
     try {
-      const updated = await updateProject(id, name, path, createIfMissing);
+      const updated = await updateProject(id, name, path, createIfMissing, options);
       set((s) => ({
         projects: s.projects.map((p) => (p.id === id ? updated : p)),
         loading: false,
@@ -342,6 +356,8 @@ const useWorkspaceStore = create((set, get) => ({
         if (s.activeProjectId === id) {
           newState.activeProjectId = projects[0]?.id || null;
           newState.projectFiles = [];
+          newState.projectPath = "";
+          newState.projectModelPath = "";
           newState.activeFile = null;
           newState.activeFileContent = "";
           newState.openTabs = [];
@@ -364,6 +380,7 @@ const useWorkspaceStore = create((set, get) => ({
       set({
         projectFiles: data.files || [],
         projectPath: data.projectPath || "",
+        projectModelPath: data.projectModelPath || data.projectPath || "",
         loading: false,
       });
       // Auto-open first file

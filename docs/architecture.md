@@ -142,6 +142,7 @@ DuckCodeModeling is a YAML-first data modeling platform (Schema v2) with three r
 - `POST /api/forward/apply` -> wraps `dm apply` for Snowflake/Databricks/BigQuery (disabled by default; enable with `DM_ENABLE_DIRECT_APPLY=true`)
 - `POST /api/git/branch/create` -> create/checkout feature branch in project repo
 - `POST /api/git/push` -> push branch to remote origin
+- `POST /api/git/pull` -> pull latest changes (fast-forward only by default)
 - `POST /api/git/github/pr` -> open GitHub pull request from feature branch to base branch
 
 ## 3. End-to-End Data Flow

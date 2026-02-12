@@ -56,7 +56,31 @@ function AddProjectModal() {
   const [name, setName] = useState("");
   const [path, setPath] = useState("");
   const [createIfMissing, setCreateIfMissing] = useState(true);
+  const [scaffoldRepo, setScaffoldRepo] = useState(true);
+  const [initializeGit, setInitializeGit] = useState(true);
+  const [createSubfolder, setCreateSubfolder] = useState(true);
   const [error, setError] = useState("");
+
+  const sanitizeFolderName = (value) => {
+    const raw = String(value || "").trim();
+    const cleaned = raw
+      .replace(/[\\/]+/g, "-")
+      .replace(/[^A-Za-z0-9._-]+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "");
+    return cleaned || "duckcodemodeling-project";
+  };
+
+  const joinPath = (basePath, childPath) => {
+    const base = String(basePath || "").replace(/[\\/]+$/, "");
+    const child = String(childPath || "").replace(/^[\\/]+/, "");
+    if (!base) return child;
+    if (!child) return base;
+    return `${base}/${child}`;
+  };
+
+  const derivedSubfolderName = sanitizeFolderName(name);
+  const effectivePath = createSubfolder ? joinPath(path, derivedSubfolderName) : path;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -65,7 +89,10 @@ function AddProjectModal() {
       return;
     }
     try {
-      await addProjectFolder(name.trim(), path.trim(), createIfMissing);
+      await addProjectFolder(name.trim(), effectivePath.trim(), createIfMissing, {
+        scaffoldRepo,
+        initializeGit,
+      });
       closeModal();
     } catch (err) {
       setError(err.message);
@@ -107,7 +134,18 @@ function AddProjectModal() {
               Recommended: run DuckCodeModeling locally for full file access. In Docker, use mounted container paths like
               {" "}<code>/workspace/host/...</code>.
             </p>
+            <p className="mt-1 text-[11px] text-text-muted">
+              Final project folder: <code className="font-mono text-[11px]">{effectivePath || "(set a path)"}</code>
+            </p>
           </div>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={createSubfolder}
+              onChange={(e) => setCreateSubfolder(e.target.checked)}
+            />
+            Create a subfolder named after the project (recommended for a single Git repo with many projects)
+          </label>
           <label className="flex items-center gap-2 text-xs text-text-muted">
             <input
               type="checkbox"
@@ -115,6 +153,23 @@ function AddProjectModal() {
               onChange={(e) => setCreateIfMissing(e.target.checked)}
             />
             Create folder if it does not exist
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={scaffoldRepo}
+              onChange={(e) => setScaffoldRepo(e.target.checked)}
+            />
+            Initialize DuckCodeModeling repo structure (models, migrations, guides, CI template)
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={initializeGit}
+              onChange={(e) => setInitializeGit(e.target.checked)}
+              disabled={!scaffoldRepo}
+            />
+            Initialize git repository if missing
           </label>
           {error && (
             <div className="flex items-center gap-2 text-xs text-status-error">
@@ -191,12 +246,16 @@ function EditProjectModal() {
   const [name, setName] = useState(project?.name || "");
   const [path, setPath] = useState(project?.path || "");
   const [createIfMissing, setCreateIfMissing] = useState(false);
+  const [scaffoldRepo, setScaffoldRepo] = useState(false);
+  const [initializeGit, setInitializeGit] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setName(project?.name || "");
     setPath(project?.path || "");
     setCreateIfMissing(false);
+    setScaffoldRepo(false);
+    setInitializeGit(false);
     setError("");
   }, [project?.id]);
 
@@ -209,7 +268,10 @@ function EditProjectModal() {
       return;
     }
     try {
-      await updateProjectFolder(project.id, name.trim(), path.trim(), createIfMissing);
+      await updateProjectFolder(project.id, name.trim(), path.trim(), createIfMissing, {
+        scaffoldRepo,
+        initializeGit,
+      });
       closeModal();
     } catch (err) {
       setError(err.message);
@@ -256,6 +318,23 @@ function EditProjectModal() {
               onChange={(e) => setCreateIfMissing(e.target.checked)}
             />
             Create folder if it does not exist
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={scaffoldRepo}
+              onChange={(e) => setScaffoldRepo(e.target.checked)}
+            />
+            Add/repair DuckCodeModeling repo structure
+          </label>
+          <label className="flex items-center gap-2 text-xs text-text-muted">
+            <input
+              type="checkbox"
+              checked={initializeGit}
+              onChange={(e) => setInitializeGit(e.target.checked)}
+              disabled={!scaffoldRepo}
+            />
+            Initialize git repository if missing
           </label>
           {error && (
             <div className="flex items-center gap-2 text-xs text-status-error">
