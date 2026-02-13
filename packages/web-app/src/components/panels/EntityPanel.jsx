@@ -3,6 +3,7 @@ import {
   X,
   Plus,
   Trash2,
+  Pencil,
   Key,
   Tag,
   FileText,
@@ -15,17 +16,22 @@ import {
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
 import {
   updateEntityMeta,
   updateEntityTags,
   updateFieldProperty,
   addField,
   removeField,
+  removeEntity,
+  renameField,
+  renameEntity,
 } from "../../lib/yamlRoundTrip";
 
 export default function EntityPanel() {
   const { selectedEntity, selectedEntityId, clearSelection, model } = useDiagramStore();
   const { activeFileContent, updateContent } = useWorkspaceStore();
+  const { addToast } = useUiStore();
 
   if (!selectedEntity) {
     return (
@@ -59,6 +65,64 @@ export default function EntityPanel() {
     if (!result.error) updateContent(result.yaml);
   };
 
+  const handleRenameEntity = () => {
+    const next = window.prompt("New table name (logical entity name)", selectedEntityId || "");
+    if (next == null) return;
+    const trimmed = String(next).trim();
+    if (!trimmed) {
+      addToast?.({ type: "error", message: "Table name cannot be empty." });
+      return;
+    }
+    const result = renameEntity(activeFileContent, selectedEntityId, trimmed);
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+    if (result.yaml === activeFileContent) {
+      addToast?.({ type: "info", message: "No changes applied (name may already exist)." });
+      return;
+    }
+    updateContent(result.yaml);
+    // Keep selection on the renamed entity
+    useDiagramStore.getState().selectEntity(trimmed);
+    addToast?.({ type: "success", message: `Renamed table to ${trimmed}.` });
+  };
+
+  const handleDeleteEntity = () => {
+    if (!selectedEntityId) return;
+    const ok = window.confirm(`Delete table ${selectedEntityId}? This will remove its relationships and indexes.`);
+    if (!ok) return;
+    const result = removeEntity(activeFileContent, selectedEntityId);
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+    updateContent(result.yaml);
+    clearSelection();
+    addToast?.({ type: "success", message: `Deleted table ${selectedEntityId}.` });
+  };
+
+  const handleRenameField = (oldName) => {
+    const next = window.prompt("New column name", oldName || "");
+    if (next == null) return;
+    const trimmed = String(next).trim();
+    if (!trimmed) {
+      addToast?.({ type: "error", message: "Column name cannot be empty." });
+      return;
+    }
+    const result = renameField(activeFileContent, selectedEntityId, oldName, trimmed);
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+    if (result.yaml === activeFileContent) {
+      addToast?.({ type: "info", message: "No changes applied (name may already exist)." });
+      return;
+    }
+    updateContent(result.yaml);
+    addToast?.({ type: "success", message: `Renamed column ${oldName} -> ${trimmed}.` });
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -69,12 +133,29 @@ export default function EntityPanel() {
             {selectedEntity.type || "table"}
           </span>
         </div>
-        <button
-          onClick={clearSelection}
-          className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleRenameEntity}
+            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+            title="Rename table"
+          >
+            <Pencil size={14} />
+          </button>
+          <button
+            onClick={handleDeleteEntity}
+            className="p-1 rounded-md hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
+            title="Delete table"
+          >
+            <Trash2 size={14} />
+          </button>
+          <button
+            onClick={clearSelection}
+            className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+            title="Close"
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Content */}
@@ -189,7 +270,7 @@ export default function EntityPanel() {
               className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-accent-blue hover:bg-accent-blue/10 transition-colors"
             >
               <Plus size={10} />
-              Add
+              Add Column
             </button>
           </div>
 
@@ -210,7 +291,16 @@ export default function EntityPanel() {
                 {(selectedEntity.fields || []).map((field) => (
                   <tr key={field.name} className="border-t border-border-primary/50 hover:bg-bg-hover/30">
                     <td className="px-2 py-1">
-                      <code className="text-text-primary font-mono">{field.name}</code>
+                      <div className="flex items-center gap-1">
+                        <code className="text-text-primary font-mono">{field.name}</code>
+                        <button
+                          onClick={() => handleRenameField(field.name)}
+                          className="p-0.5 rounded hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
+                          title="Rename column"
+                        >
+                          <Pencil size={10} />
+                        </button>
+                      </div>
                     </td>
                     <td className="px-2 py-1">
                       <input

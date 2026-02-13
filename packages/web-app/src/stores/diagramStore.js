@@ -40,7 +40,11 @@ const useDiagramStore = create((set, get) => ({
 
   // --- Actions ---
   setGraph: ({ nodes, edges, warnings, model }) => {
-    set({ nodes, edges, warnings, model });
+    const selectedEntityId = get().selectedEntityId;
+    const selectedEntity = selectedEntityId
+      ? (model?.entities || []).find((e) => e.name === selectedEntityId) || null
+      : null;
+    set({ nodes, edges, warnings, model, selectedEntity });
   },
 
   clearGraph: () => {

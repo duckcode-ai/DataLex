@@ -1,6 +1,9 @@
 import React, { useState, useMemo } from "react";
-import { Search, X, ArrowUpDown, Table2, Eye, ArrowRightLeft, Database, ChevronRight } from "lucide-react";
+import { Search, X, ArrowUpDown, Table2, Eye, ArrowRightLeft, Database, ChevronRight, Plus } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
+import { addEntity, parseYamlSafe } from "../../lib/yamlRoundTrip";
 
 const TYPE_BADGE = {
   table: "bg-blue-100 text-blue-700",
@@ -25,6 +28,8 @@ export default function EntityListPanel() {
     setCenterEntityId,
     getSchemaOptions,
   } = useDiagramStore();
+  const { activeFileContent, updateContent } = useWorkspaceStore();
+  const { addToast } = useUiStore();
 
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("name");
@@ -77,12 +82,48 @@ export default function EntityListPanel() {
     setCenterEntityId(entityName);
   };
 
+  const handleAddTable = () => {
+    if (!activeFileContent) {
+      addToast?.({ type: "error", message: "Open a model file first." });
+      return;
+    }
+    const requested = window.prompt("New table name (logical entity name)", "NewEntity");
+    if (requested == null) return;
+
+    const before = new Set((model?.entities || []).map((e) => e.name));
+    const result = addEntity(activeFileContent, String(requested || "").trim());
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+
+    updateContent(result.yaml);
+
+    const parsed = parseYamlSafe(result.yaml);
+    const after = (parsed.doc?.entities || []).map((e) => e.name);
+    const added = after.find((name) => !before.has(name));
+    if (added) {
+      selectEntity(added);
+      setCenterEntityId(added);
+      addToast?.({ type: "success", message: `Added table ${added}.` });
+    } else {
+      addToast?.({ type: "success", message: "Added table." });
+    }
+  };
+
   if (entities.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12">
         <Database size={32} className="text-slate-300 mb-3" />
         <p className="text-sm text-slate-500 font-medium">No entities loaded</p>
         <p className="text-xs text-slate-400 mt-1">Open a model file to see entities here.</p>
+        <button
+          onClick={handleAddTable}
+          className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+        >
+          <Plus size={14} />
+          New Table
+        </button>
       </div>
     );
   }
@@ -132,6 +173,15 @@ export default function EntityListPanel() {
               ))}
             </select>
           )}
+
+          <button
+            onClick={handleAddTable}
+            className="ml-auto inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+            title="Add a new table to this model"
+          >
+            <Plus size={12} />
+            Table
+          </button>
         </div>
       </div>
 
