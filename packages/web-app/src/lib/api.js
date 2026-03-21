@@ -137,6 +137,28 @@ export async function generateForwardSql(modelPath, dialect = "snowflake") {
   return data;
 }
 
+export async function transformActiveModel({ modelContent, modelPath, transform, dialect = "postgres" }) {
+  return request("/model/transform", {
+    method: "POST",
+    body: JSON.stringify({
+      model_content: modelContent,
+      model_path: modelPath || undefined,
+      transform,
+      dialect,
+    }),
+  });
+}
+
+export async function standardsFixModel({ modelContent, modelPath }) {
+  return request("/model/standards/fix", {
+    method: "POST",
+    body: JSON.stringify({
+      model_content: modelContent,
+      model_path: modelPath || undefined,
+    }),
+  });
+}
+
 export async function fetchModelGraph(projectId) {
   return request(`/projects/${projectId}/model-graph`);
 }

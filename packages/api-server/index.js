@@ -1890,6 +1890,23 @@ app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (re
   }
 });
 
+function resolveYamlInput({ content, path, label = "model_path" }) {
+  if (typeof content === "string" && content.trim()) return content;
+  if (path) {
+    if (!existsSync(String(path))) {
+      throw new Error(`${label} not found: ${path}`);
+    }
+    return readFileSync(String(path), "utf-8");
+  }
+  throw new Error(`Provide ${label} or inline content`);
+}
+
+function cleanupTempDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (_) {}
+}
+
 // Forward engineering: generate SQL from model YAML
 app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, res) => {
   try {
@@ -1913,6 +1930,189 @@ app.post("/api/forward/generate-sql", requireAdmin, express.json(), async (req, 
   } catch (err) {
     const stderr = err.stderr || err.message;
     res.status(500).json({ error: String(stderr).trim() });
+  }
+});
+
+app.post("/api/model/transform", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
+  const tmpDir = join(tmpdir(), `dm-transform-${Date.now()}`);
+  try {
+    const { model_content, model_path, transform, dialect = "postgres", out, write_back } = req.body || {};
+    if (!transform) {
+      return res.status(400).json({ error: "transform is required" });
+    }
+    const modelYaml = resolveYamlInput({ content: model_content, path: model_path, label: "model_path" });
+
+    mkdirSync(tmpDir, { recursive: true });
+    const tmpModel = join(tmpDir, "model.yaml");
+    writeFileSync(tmpModel, modelYaml, "utf-8");
+
+    const args = [join(REPO_ROOT, "dm"), "transform", String(transform), tmpModel];
+    if (transform === "logical-to-physical") {
+      args.push("--dialect", String(dialect));
+    }
+    if (out) {
+      args.push("--out", String(out));
+    }
+
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    const transformedYaml = out ? readFileSync(String(out), "utf-8") : output;
+
+    if (model_path && write_back === true) {
+      writeFileSync(String(model_path), transformedYaml, "utf-8");
+    }
+
+    res.json({
+      success: true,
+      transform: String(transform),
+      dialect: String(dialect),
+      out: out ? String(out) : null,
+      writeBack: Boolean(model_path && write_back),
+      transformedYaml,
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  } finally {
+    cleanupTempDir(tmpDir);
+  }
+});
+
+app.post("/api/model/standards/check", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
+  const tmpDir = join(tmpdir(), `dm-standards-check-${Date.now()}`);
+  try {
+    const { model_content, model_path } = req.body || {};
+    const modelYaml = resolveYamlInput({ content: model_content, path: model_path, label: "model_path" });
+
+    mkdirSync(tmpDir, { recursive: true });
+    const tmpModel = join(tmpDir, "model.yaml");
+    writeFileSync(tmpModel, modelYaml, "utf-8");
+
+    const args = [join(REPO_ROOT, "dm"), "standards", "check", tmpModel, "--output-json"];
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    res.json({ success: true, report: JSON.parse(output) });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  } finally {
+    cleanupTempDir(tmpDir);
+  }
+});
+
+app.post("/api/model/standards/fix", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
+  const tmpDir = join(tmpdir(), `dm-standards-fix-${Date.now()}`);
+  try {
+    const { model_content, model_path, out, write_back } = req.body || {};
+    const modelYaml = resolveYamlInput({ content: model_content, path: model_path, label: "model_path" });
+
+    mkdirSync(tmpDir, { recursive: true });
+    const tmpModel = join(tmpDir, "model.yaml");
+    writeFileSync(tmpModel, modelYaml, "utf-8");
+
+    const args = [join(REPO_ROOT, "dm"), "standards", "fix", tmpModel];
+    if (out) args.push("--out", String(out));
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    const fixedYaml = out ? readFileSync(String(out), "utf-8") : output.replace(/^#.*\n/gm, "").trimStart();
+
+    if (model_path && write_back === true) {
+      writeFileSync(String(model_path), fixedYaml, "utf-8");
+    }
+
+    res.json({
+      success: true,
+      out: out ? String(out) : null,
+      writeBack: Boolean(model_path && write_back),
+      fixedYaml,
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  } finally {
+    cleanupTempDir(tmpDir);
+  }
+});
+
+app.post("/api/model/sync/compare", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
+  const tmpDir = join(tmpdir(), `dm-sync-compare-${Date.now()}`);
+  try {
+    const {
+      current_content,
+      current_path,
+      candidate_content,
+      candidate_path,
+      allow_breaking = true,
+    } = req.body || {};
+
+    const currentYaml = resolveYamlInput({ content: current_content, path: current_path, label: "current_path" });
+    const candidateYaml = resolveYamlInput({ content: candidate_content, path: candidate_path, label: "candidate_path" });
+
+    mkdirSync(tmpDir, { recursive: true });
+    const currentFile = join(tmpDir, "current.yaml");
+    const candidateFile = join(tmpDir, "candidate.yaml");
+    writeFileSync(currentFile, currentYaml, "utf-8");
+    writeFileSync(candidateFile, candidateYaml, "utf-8");
+
+    const args = [join(REPO_ROOT, "dm"), "sync", "compare", currentFile, candidateFile];
+    if (allow_breaking) args.push("--allow-breaking");
+
+    let output = "";
+    try {
+      output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    } catch (err) {
+      output = String(err.stdout || "");
+      if (!output.trim()) throw err;
+    }
+
+    res.json({ success: true, diff: JSON.parse(output) });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  } finally {
+    cleanupTempDir(tmpDir);
+  }
+});
+
+app.post("/api/model/sync/merge", requireAdmin, express.json({ limit: "10mb" }), async (req, res) => {
+  const tmpDir = join(tmpdir(), `dm-sync-merge-${Date.now()}`);
+  try {
+    const {
+      current_content,
+      current_path,
+      candidate_content,
+      candidate_path,
+      out,
+      write_back,
+    } = req.body || {};
+
+    const currentYaml = resolveYamlInput({ content: current_content, path: current_path, label: "current_path" });
+    const candidateYaml = resolveYamlInput({ content: candidate_content, path: candidate_path, label: "candidate_path" });
+
+    mkdirSync(tmpDir, { recursive: true });
+    const currentFile = join(tmpDir, "current.yaml");
+    const candidateFile = join(tmpDir, "candidate.yaml");
+    writeFileSync(currentFile, currentYaml, "utf-8");
+    writeFileSync(candidateFile, candidateYaml, "utf-8");
+
+    const args = [join(REPO_ROOT, "dm"), "sync", "merge", currentFile, candidateFile];
+    if (out) args.push("--out", String(out));
+
+    const output = execFileSync(PYTHON, args, { encoding: "utf-8", timeout: 120000, cwd: REPO_ROOT });
+    const mergedYaml = out ? readFileSync(String(out), "utf-8") : output;
+
+    if (candidate_path && write_back === true) {
+      writeFileSync(String(candidate_path), mergedYaml, "utf-8");
+    }
+
+    res.json({
+      success: true,
+      out: out ? String(out) : null,
+      writeBack: Boolean(candidate_path && write_back),
+      mergedYaml,
+    });
+  } catch (err) {
+    const stderr = err.stderr || err.message;
+    res.status(500).json({ error: String(stderr).trim() });
+  } finally {
+    cleanupTempDir(tmpDir);
   }
 });
 

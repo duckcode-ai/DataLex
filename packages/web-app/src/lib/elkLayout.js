@@ -5,6 +5,7 @@ const elk = new ELK();
 const LAYOUT_OPTIONS = {
   "elk.algorithm": "layered",
   "elk.direction": "RIGHT",
+  "elk.hierarchyHandling": "INCLUDE_CHILDREN",
   "elk.spacing.nodeNode": "90",
   "elk.layered.spacing.nodeNodeBetweenLayers": "140",
   "elk.layered.spacing.edgeNodeBetweenLayers": "48",
@@ -50,6 +51,15 @@ function parseLayoutOptions(options) {
 
 function getSchemaKey(node) {
   return node?.data?.subject_area || node?.data?.schema || "(default)";
+}
+
+function groupNodeId(groupName) {
+  const cleaned = String(groupName || "default")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return `__group_${cleaned || "default"}`;
 }
 
 function getVisibleFieldCount(node, fieldView) {
@@ -111,6 +121,77 @@ function buildSizeMap(nodes, options = {}) {
     });
   }
   return map;
+}
+
+function buildSubjectAreaGroupNodes(nodes, options = {}) {
+  if (!nodes || nodes.length === 0) return [];
+
+  const parsed = parseLayoutOptions(options);
+  const groupBySubjectArea = parsed.groupBySubjectArea !== false;
+  if (!groupBySubjectArea) return [];
+
+  const groups = new Map();
+  for (const node of nodes) {
+    if (node?.type !== "entityNode") continue;
+    const key = getSchemaKey(node);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(node);
+  }
+
+  if (groups.size <= 1) return [];
+
+  const sizeMap = buildSizeMap(nodes, {
+    isLargeGraph: nodes.length > LARGE_GRAPH_THRESHOLD,
+    fieldView: parsed.fieldView || "all",
+  });
+  const paddingX = 24;
+  const paddingY = 20;
+  const titleHeight = 30;
+
+  return Array.from(groups.entries())
+    .sort((a, b) => b[1].length - a[1].length)
+    .map(([groupName, groupNodes], index) => {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+
+      for (const node of groupNodes) {
+        const pos = node.position || { x: 0, y: 0 };
+        const size = sizeMap.get(node.id) || { width: 280, height: 160 };
+        minX = Math.min(minX, pos.x);
+        minY = Math.min(minY, pos.y);
+        maxX = Math.max(maxX, pos.x + size.width);
+        maxY = Math.max(maxY, pos.y + size.height);
+      }
+
+      const color = getSubjectAreaColor(index);
+      return {
+        id: groupNodeId(groupName),
+        type: "group",
+        position: {
+          x: minX - paddingX,
+          y: minY - paddingY - titleHeight,
+        },
+        style: {
+          width: Math.max(220, maxX - minX + paddingX * 2),
+          height: Math.max(120, maxY - minY + paddingY * 2 + titleHeight),
+          background: color.bg,
+          border: `1px dashed ${color.border}`,
+          borderRadius: "18px",
+          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.45)",
+          pointerEvents: "none",
+        },
+        draggable: false,
+        selectable: false,
+        connectable: false,
+        zIndex: -1,
+        data: {
+          label: groupName,
+          color,
+        },
+      };
+    });
 }
 
 export async function layoutWithElk(nodes, edges, options = {}) {
@@ -178,8 +259,9 @@ export async function layoutWithElk(nodes, edges, options = {}) {
         position: pos || node.position,
       };
     });
+    const groupNodes = buildSubjectAreaGroupNodes(layoutedNodes, parsed);
 
-    return { nodes: layoutedNodes, edges, groupNodes: [] };
+    return { nodes: layoutedNodes, edges, groupNodes };
   } catch (err) {
     console.warn("[elk] Layout failed, falling back to grid:", err);
     return fallbackGridLayout(nodes, edges, parsed);
@@ -310,6 +392,11 @@ export function fallbackGridLayout(nodes, edges, options = "normal") {
     ...node,
     position: absolutePositions.get(node.id) || node.position,
   }));
+  const groupNodes = buildSubjectAreaGroupNodes(layoutedNodes, parsed);
 
-  return { nodes: layoutedNodes, edges, groupNodes: [] };
+  if (groupNodes.length === 0) {
+    return { nodes: layoutedNodes, edges, groupNodes: [] };
+  }
+
+  return { nodes: layoutedNodes, edges, groupNodes };
 }

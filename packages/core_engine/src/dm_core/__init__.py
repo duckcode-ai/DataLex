@@ -12,6 +12,13 @@ from dm_core.completion import generate_bash_completion, generate_fish_completio
 from dm_core.doctor import diagnostics_as_json, format_diagnostics, run_diagnostics
 from dm_core.generators import dbt_scaffold_files, generate_sql_ddl, write_dbt_scaffold
 from dm_core.migrate import generate_migration, write_migration
+from dm_core.modeling import (
+    apply_standards_fixes,
+    merge_models_preserving_docs,
+    normalize_model,
+    standards_issues,
+    transform_model,
+)
 from dm_core.importers import (
     import_dbt_schema_yml,
     import_dbml,
@@ -63,15 +70,20 @@ __all__ = [
     "load_policy_pack",
     "load_policy_pack_with_inheritance",
     "merge_policy_packs",
+    "merge_models_preserving_docs",
     "load_schema",
     "load_yaml_model",
     "ModelCompleteness",
+    "normalize_model",
     "policy_issues",
     "project_diff",
     "resolve_model",
     "resolve_project",
+    "apply_standards_fixes",
     "schema_issues",
     "semantic_diff",
+    "standards_issues",
+    "transform_model",
     "run_diagnostics",
     "write_changelog",
     "write_dbt_scaffold",

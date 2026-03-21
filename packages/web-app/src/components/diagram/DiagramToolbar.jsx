@@ -229,7 +229,7 @@ export default function DiagramToolbar() {
         {/* Filters */}
         <Filter size={10} className="text-slate-400 shrink-0" />
         <ToolbarSelect value={vizSettings.entityTypeFilter} onChange={(v) => updateVizSetting("entityTypeFilter", v)} label="Entity type"
-          options={[{ value: "all", label: "All Models" }, { value: "table", label: "Relational" }, { value: "view", label: "Views" }, { value: "dimension_table", label: "Dimensional" }]} />
+          options={[{ value: "all", label: "All Models" }, { value: "table", label: "Relational" }, { value: "view", label: "Views" }, { value: "dimension_table", label: "Dimensional" }, { value: "data_vault", label: "Data Vault" }]} />
         {tagOptions.length > 0 && (
           <ToolbarSelect value={vizSettings.tagFilter} onChange={(v) => updateVizSetting("tagFilter", v)} label="Tag filter"
             options={[{ value: "all", label: "All Tags" }, ...tagOptions.map((t) => ({ value: t, label: t }))]} />
@@ -246,6 +246,13 @@ export default function DiagramToolbar() {
           options={[{ value: "all", label: "All Fields" }, { value: "keys", label: "Keys Only" }, { value: "minimal", label: "Top 8" }]} />
         <ToolbarButton onClick={() => requestLayoutRefresh()} title="Auto arrange and fit">
           <RefreshCw size={10} /> Auto Layout
+        </ToolbarButton>
+        <ToolbarButton
+          active={vizSettings.groupBySubjectArea}
+          onClick={() => updateVizSetting("groupBySubjectArea", !vizSettings.groupBySubjectArea)}
+          title="Group by subject area"
+        >
+          <Layers size={10} /> Group
         </ToolbarButton>
 
         <ToolbarDivider />

@@ -19,6 +19,40 @@ const SORT_OPTIONS = [
   { value: "rels", label: "Relationships" },
 ];
 
+function NameModal({ title, value, onChange, onClose, onSubmit, confirmLabel = "Create" }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-[360px] max-w-[92vw] rounded-xl border border-border-primary bg-bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-border-primary">
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+          className="p-4 space-y-3"
+        >
+          <input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-blue"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover transition-colors">
+              Cancel
+            </button>
+            <button type="submit" className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors">
+              {confirmLabel}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function EntityListPanel() {
   const {
     model,
@@ -34,6 +68,8 @@ export default function EntityListPanel() {
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState("name");
   const [schemaFilter, setSchemaFilter] = useState("all");
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [requestedName, setRequestedName] = useState("NewEntity");
 
   const entities = model?.entities || [];
   const schemaOptions = getSchemaOptions();
@@ -87,11 +123,13 @@ export default function EntityListPanel() {
       addToast?.({ type: "error", message: "Open a model file first." });
       return;
     }
-    const requested = window.prompt("New table name (logical entity name)", "NewEntity");
-    if (requested == null) return;
+    setRequestedName("NewEntity");
+    setCreateDialogOpen(true);
+  };
 
+  const handleCreateEntity = () => {
     const before = new Set((model?.entities || []).map((e) => e.name));
-    const result = addEntity(activeFileContent, String(requested || "").trim());
+    const result = addEntity(activeFileContent, String(requestedName || "").trim());
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
       return;
@@ -109,27 +147,40 @@ export default function EntityListPanel() {
     } else {
       addToast?.({ type: "success", message: "Added table." });
     }
+    setCreateDialogOpen(false);
   };
 
   if (entities.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12">
-        <Database size={32} className="text-slate-300 mb-3" />
-        <p className="text-sm text-slate-500 font-medium">No entities loaded</p>
-        <p className="text-xs text-slate-400 mt-1">Open a model file to see entities here.</p>
-        <button
-          onClick={handleAddTable}
-          className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-        >
-          <Plus size={14} />
-          New Table
-        </button>
-      </div>
+      <>
+        <div className="flex flex-col items-center justify-center h-full text-center px-6 py-12">
+          <Database size={32} className="text-slate-300 mb-3" />
+          <p className="text-sm text-slate-500 font-medium">No entities loaded</p>
+          <p className="text-xs text-slate-400 mt-1">Open a model file to see entities here.</p>
+          <button
+            onClick={handleAddTable}
+            className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+          >
+            <Plus size={14} />
+            New Table
+          </button>
+        </div>
+        {createDialogOpen && (
+          <NameModal
+            title="New Table"
+            value={requestedName}
+            onChange={setRequestedName}
+            onClose={() => setCreateDialogOpen(false)}
+            onSubmit={handleCreateEntity}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <>
+      <div className="flex flex-col h-full">
       {/* Search + controls */}
       <div className="px-3 py-2 border-b border-slate-200 space-y-2">
         <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-md px-2 py-1.5 focus-within:border-blue-300 focus-within:ring-1 focus-within:ring-blue-100 transition-all">
@@ -245,6 +296,16 @@ export default function EntityListPanel() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+      {createDialogOpen && (
+        <NameModal
+          title="New Table"
+          value={requestedName}
+          onChange={setRequestedName}
+          onClose={() => setCreateDialogOpen(false)}
+          onSubmit={handleCreateEntity}
+        />
+      )}
+    </>
   );
 }

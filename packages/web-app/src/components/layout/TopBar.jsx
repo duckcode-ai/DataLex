@@ -14,12 +14,15 @@ import {
   FileCode2,
   LifeBuoy,
   Download,
+  Sparkles,
+  ArrowRightLeft,
 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import UserMenu from "../auth/UserMenu";
+import { standardsFixModel, transformActiveModel } from "../../lib/api";
 
 const ACTIVITY_LABELS = {
   model:    { label: "Model",    icon: LayoutDashboard, color: "text-accent-blue" },
@@ -32,6 +35,7 @@ const ACTIVITY_LABELS = {
 export default function TopBar() {
   const {
     activeFile,
+    activeFileContent,
     isDirty,
     saveCurrentFile,
     openTabs,
@@ -39,11 +43,14 @@ export default function TopBar() {
     closeTab,
     loading,
     offlineMode,
+    projectConfig,
+    updateContent,
   } = useWorkspaceStore();
 
   const { model } = useDiagramStore();
-  const { theme, toggleTheme, activeActivity } = useUiStore();
+  const { theme, toggleTheme, activeActivity, addToast } = useUiStore();
   const { canEdit } = useAuthStore();
+  const [modelOpLoading, setModelOpLoading] = React.useState(false);
 
   const handleQuickExport = () => {
     const el = document.querySelector(".react-flow");
@@ -58,8 +65,52 @@ export default function TopBar() {
     });
   };
   const modelMeta = model?.model || {};
+  const modelKind = modelMeta.kind || "physical";
+  const nextTransform =
+    modelKind === "conceptual"
+      ? { command: "conceptual-to-logical", label: "To Logical" }
+      : modelKind === "logical"
+      ? { command: "logical-to-physical", label: "To Physical" }
+      : null;
   const activityInfo = ACTIVITY_LABELS[activeActivity] || ACTIVITY_LABELS.model;
   const ActivityIcon = activityInfo.icon;
+
+  const handleTransform = React.useCallback(async () => {
+    if (!nextTransform || !activeFileContent) return;
+    setModelOpLoading(true);
+    try {
+      const dialect = String(projectConfig?.defaultDialect || "postgres").toLowerCase();
+      const result = await transformActiveModel({
+        modelContent: activeFileContent,
+        modelPath: activeFile?.fullPath,
+        transform: nextTransform.command,
+        dialect,
+      });
+      updateContent(result.transformedYaml || "");
+      addToast?.({ type: "success", message: `Transformed model ${nextTransform.label.toLowerCase()}.` });
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Transform failed" });
+    } finally {
+      setModelOpLoading(false);
+    }
+  }, [nextTransform, activeFileContent, activeFile, projectConfig, updateContent, addToast]);
+
+  const handleStandardsFix = React.useCallback(async () => {
+    if (!activeFileContent) return;
+    setModelOpLoading(true);
+    try {
+      const result = await standardsFixModel({
+        modelContent: activeFileContent,
+        modelPath: activeFile?.fullPath,
+      });
+      updateContent(result.fixedYaml || "");
+      addToast?.({ type: "success", message: "Applied standards autofixes." });
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message || "Standards fix failed" });
+    } finally {
+      setModelOpLoading(false);
+    }
+  }, [activeFileContent, activeFile, updateContent, addToast]);
 
   return (
     <div className="h-auto bg-bg-surface border-b border-border-primary/80 flex flex-col">
@@ -119,6 +170,9 @@ export default function TopBar() {
                   v{modelMeta.version}
                 </span>
               )}
+              <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 text-[10px] font-medium">
+                {modelKind}
+              </span>
               {modelMeta.domain && (
                 <span className="px-1.5 py-0.5 rounded-full bg-accent-purple/10 text-accent-purple text-[10px]">
                   {modelMeta.domain}
@@ -146,6 +200,28 @@ export default function TopBar() {
           )}
           {loading && (
             <Loader2 size={12} className="text-text-muted animate-spin" />
+          )}
+          {canEdit() && modelMeta.name && (
+            <button
+              onClick={handleStandardsFix}
+              disabled={modelOpLoading || !activeFile}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title="Apply supported standards autofixes"
+            >
+              {modelOpLoading ? <Loader2 size={11} className="animate-spin" /> : <Sparkles size={11} />}
+              Standards
+            </button>
+          )}
+          {canEdit() && modelMeta.name && nextTransform && (
+            <button
+              onClick={handleTransform}
+              disabled={modelOpLoading || !activeFile}
+              className="flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-border-primary text-text-secondary hover:bg-bg-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              title={`Transform model ${nextTransform.label.toLowerCase()}`}
+            >
+              {modelOpLoading ? <Loader2 size={11} className="animate-spin" /> : <ArrowRightLeft size={11} />}
+              {nextTransform.label}
+            </button>
           )}
           <a
             href="https://discord.gg/Dnm6bUvk"

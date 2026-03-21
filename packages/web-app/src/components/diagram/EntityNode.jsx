@@ -30,6 +30,9 @@ const TYPE_COLORS = {
   fact_table: { bg: "from-orange-50 to-amber-100/60", border: "border-orange-300", badge: "bg-orange-100 text-orange-700" },
   dimension_table: { bg: "from-sky-50 to-cyan-100/60", border: "border-sky-300", badge: "bg-sky-100 text-sky-700" },
   bridge_table: { bg: "from-rose-50 to-pink-100/60", border: "border-rose-300", badge: "bg-rose-100 text-rose-700" },
+  hub: { bg: "from-emerald-50 to-green-100/60", border: "border-emerald-300", badge: "bg-emerald-100 text-emerald-700" },
+  link: { bg: "from-fuchsia-50 to-pink-100/60", border: "border-fuchsia-300", badge: "bg-fuchsia-100 text-fuchsia-700" },
+  satellite: { bg: "from-lime-50 to-yellow-100/60", border: "border-lime-300", badge: "bg-lime-100 text-lime-700" },
 };
 
 const SENSITIVITY_COLORS = {
@@ -124,7 +127,7 @@ function FieldBadges({ field, entityName, classifications, indexedFields }) {
   return badges.length > 0 ? <>{badges}</> : null;
 }
 
-function DimBadges({ entityType, scdType, conformed, dimensionRefs }) {
+function DimBadges({ entityType, scdType, conformed, dimensionRefs, businessKeys, linkRefs, parentEntity }) {
   const badges = [];
   if (entityType === "dimension_table" && scdType === 2) {
     badges.push(
@@ -144,6 +147,27 @@ function DimBadges({ entityType, scdType, conformed, dimensionRefs }) {
     badges.push(
       <span key="dims" className="px-1.5 py-0 rounded text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-300" title={dimensionRefs.join(", ")}>
         {dimensionRefs.length}D
+      </span>
+    );
+  }
+  if (entityType === "hub" && Array.isArray(businessKeys) && businessKeys.length > 0) {
+    badges.push(
+      <span key="hub" className="px-1.5 py-0 rounded text-[9px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-300">
+        {businessKeys.length}BK
+      </span>
+    );
+  }
+  if (entityType === "link" && Array.isArray(linkRefs) && linkRefs.length > 0) {
+    badges.push(
+      <span key="link" className="px-1.5 py-0 rounded text-[9px] font-bold bg-fuchsia-100 text-fuchsia-700 border border-fuchsia-300" title={linkRefs.join(", ")}>
+        {linkRefs.length}H
+      </span>
+    );
+  }
+  if (entityType === "satellite" && parentEntity) {
+    badges.push(
+      <span key="sat" className="px-1.5 py-0 rounded text-[9px] font-bold bg-lime-100 text-lime-700 border border-lime-300" title={parentEntity}>
+        SAT
       </span>
     );
   }
@@ -171,6 +195,9 @@ export default function EntityNode({ data }) {
   const scdType = data.scd_type ?? null;
   const conformed = data.conformed ?? false;
   const dimensionRefs = Array.isArray(data.dimension_refs) ? data.dimension_refs : [];
+  const businessKeys = Array.isArray(data.business_keys) ? data.business_keys : [];
+  const linkRefs = Array.isArray(data.link_refs) ? data.link_refs : [];
+  const parentEntity = data.parent_entity || "";
 
   const schemaColor = getSchemaColor(data.schemaColorIndex);
   const schemaName = data.subject_area || data.schema || null;
@@ -241,7 +268,7 @@ export default function EntityNode({ data }) {
                   {schemaName}
                 </span>
               )}
-              <DimBadges entityType={entityType} scdType={scdType} conformed={conformed} dimensionRefs={dimensionRefs} />
+              <DimBadges entityType={entityType} scdType={scdType} conformed={conformed} dimensionRefs={dimensionRefs} businessKeys={businessKeys} linkRefs={linkRefs} parentEntity={parentEntity} />
               {relCount > 0 && (
                 <span className="flex items-center gap-0.5 text-[10px] text-text-muted">
                   <ArrowRightLeft size={9} />

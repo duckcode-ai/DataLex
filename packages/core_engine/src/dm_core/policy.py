@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 import yaml
 
 from dm_core.issues import Issue
+from dm_core.modeling import normalize_model
 
 
 def load_policy_pack(path: str) -> Dict[str, Any]:
@@ -693,6 +694,199 @@ def _custom_expression(
     return issues
 
 
+def _modeling_convention(
+    model: Dict[str, Any],
+    severity: str,
+    policy_id: str,
+    params: Dict[str, Any],
+) -> List[Issue]:
+    normalized = normalize_model(model)
+    issues: List[Issue] = []
+
+    allowed_model_kinds = set(_normalize_list(params.get("allowed_model_kinds")))
+    allowed_layers = set(_normalize_list(params.get("allowed_layers")))
+    allowed_entity_types = set(_normalize_list(params.get("allowed_entity_types")))
+    require_candidate_keys_for_types = set(_normalize_list(params.get("require_candidate_keys_for_types")))
+    require_dimension_refs_for_types = set(_normalize_list(params.get("require_dimension_refs_for_types")))
+    require_data_vault_metadata = bool(params.get("require_data_vault_metadata", False))
+
+    model_meta = normalized.get("model", {})
+    model_kind = str(model_meta.get("kind", "physical"))
+    model_layer = str(model_meta.get("layer", ""))
+
+    if allowed_model_kinds and model_kind not in allowed_model_kinds:
+        issues.append(
+            _policy_issue(
+                severity,
+                f"POLICY_{policy_id}",
+                f"Model kind '{model_kind}' is not allowed. Expected one of {sorted(allowed_model_kinds)}.",
+                "/model/kind",
+            )
+        )
+
+    if allowed_layers and model_layer not in allowed_layers:
+        issues.append(
+            _policy_issue(
+                severity,
+                f"POLICY_{policy_id}",
+                f"Model layer '{model_layer or '(none)'}' is not allowed. Expected one of {sorted(allowed_layers)}.",
+                "/model/layer",
+            )
+        )
+
+    entities = normalized.get("entities", [])
+    entity_map = {
+        str(entity.get("name", "")): entity
+        for entity in entities
+        if isinstance(entity, dict) and entity.get("name")
+    }
+
+    def has_field(entity: Dict[str, Any], field_name: str) -> bool:
+        return any(str(field.get("name", "")) == field_name for field in entity.get("fields", []))
+
+    for entity in entities:
+        entity_name = str(entity.get("name", ""))
+        entity_type = str(entity.get("type", "table"))
+
+        if allowed_entity_types and entity_type not in allowed_entity_types:
+            issues.append(
+                _policy_issue(
+                    severity,
+                    f"POLICY_{policy_id}",
+                    f"Entity '{entity_name}' type '{entity_type}' is not allowed. Expected one of {sorted(allowed_entity_types)}.",
+                    f"/entities/{entity_name}/type",
+                )
+            )
+
+        if entity_type in require_candidate_keys_for_types:
+            has_candidate_keys = bool(entity.get("candidate_keys"))
+            has_primary_key = any(field.get("primary_key") is True for field in entity.get("fields", []))
+            if not has_candidate_keys and not has_primary_key:
+                issues.append(
+                    _policy_issue(
+                        severity,
+                        f"POLICY_{policy_id}",
+                        f"Entity '{entity_name}' must declare candidate_keys or a primary key.",
+                        f"/entities/{entity_name}/candidate_keys",
+                    )
+                )
+
+        if entity_type in require_dimension_refs_for_types:
+            dimension_refs = entity.get("dimension_refs")
+            if not isinstance(dimension_refs, list) or not dimension_refs:
+                issues.append(
+                    _policy_issue(
+                        severity,
+                        f"POLICY_{policy_id}",
+                        f"Entity '{entity_name}' must declare dimension_refs.",
+                        f"/entities/{entity_name}/dimension_refs",
+                    )
+                )
+
+        if require_data_vault_metadata:
+            if entity_type == "hub":
+                business_keys = entity.get("business_keys")
+                hash_key = str(entity.get("hash_key", "")).strip()
+                if not isinstance(business_keys, list) or not business_keys:
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Hub '{entity_name}' must declare business_keys.",
+                            f"/entities/{entity_name}/business_keys",
+                        )
+                    )
+                if not hash_key or not has_field(entity, hash_key):
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Hub '{entity_name}' must declare a valid hash_key field.",
+                            f"/entities/{entity_name}/hash_key",
+                        )
+                    )
+            elif entity_type == "link":
+                link_refs = entity.get("link_refs")
+                if not isinstance(link_refs, list) or len(link_refs) < 2:
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Link '{entity_name}' must reference at least two hubs in link_refs.",
+                            f"/entities/{entity_name}/link_refs",
+                        )
+                    )
+                else:
+                    for ref_name in link_refs:
+                        referenced = entity_map.get(str(ref_name))
+                        if referenced is None or str(referenced.get("type", "")) != "hub":
+                            issues.append(
+                                _policy_issue(
+                                    severity,
+                                    f"POLICY_{policy_id}",
+                                    f"Link '{entity_name}' link_refs entry '{ref_name}' must reference a hub.",
+                                    f"/entities/{entity_name}/link_refs",
+                                )
+                            )
+                hash_key = str(entity.get("hash_key", "")).strip()
+                if not hash_key or not has_field(entity, hash_key):
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Link '{entity_name}' must declare a valid hash_key field.",
+                            f"/entities/{entity_name}/hash_key",
+                        )
+                    )
+            elif entity_type == "satellite":
+                parent_entity = str(entity.get("parent_entity", "")).strip()
+                hash_diff_fields = entity.get("hash_diff_fields")
+                if not parent_entity:
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Satellite '{entity_name}' must declare parent_entity.",
+                            f"/entities/{entity_name}/parent_entity",
+                        )
+                    )
+                else:
+                    parent = entity_map.get(parent_entity)
+                    if parent is None or str(parent.get("type", "")) not in {"hub", "link"}:
+                        issues.append(
+                            _policy_issue(
+                                severity,
+                                f"POLICY_{policy_id}",
+                                f"Satellite '{entity_name}' parent_entity '{parent_entity}' must reference a hub or link.",
+                                f"/entities/{entity_name}/parent_entity",
+                            )
+                        )
+                if not isinstance(hash_diff_fields, list) or not hash_diff_fields:
+                    issues.append(
+                        _policy_issue(
+                            severity,
+                            f"POLICY_{policy_id}",
+                            f"Satellite '{entity_name}' must declare hash_diff_fields.",
+                            f"/entities/{entity_name}/hash_diff_fields",
+                        )
+                    )
+
+            if entity_type in {"hub", "link", "satellite"}:
+                for prop_name in ("load_timestamp_field", "record_source_field"):
+                    field_name = str(entity.get(prop_name, "")).strip()
+                    if not field_name or not has_field(entity, field_name):
+                        issues.append(
+                            _policy_issue(
+                                severity,
+                                f"POLICY_{policy_id}",
+                                f"{entity_type.title()} '{entity_name}' must declare a valid {prop_name}.",
+                                f"/entities/{entity_name}/{prop_name}",
+                            )
+                        )
+
+    return issues
+
+
 _POLICY_HANDLERS = {
     "require_entity_tags": _require_entity_tags,
     "require_field_descriptions": _require_field_descriptions,
@@ -704,6 +898,7 @@ _POLICY_HANDLERS = {
     "require_sla": _require_sla,
     "deprecation_check": _deprecation_check,
     "custom_expression": _custom_expression,
+    "modeling_convention": _modeling_convention,
 }
 
 

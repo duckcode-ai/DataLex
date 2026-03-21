@@ -5,12 +5,16 @@ from typing import List
 _COMMANDS = [
     "init", "validate", "lint", "compile", "diff", "validate-all",
     "gate", "policy-check", "generate", "import", "resolve",
-    "resolve-project", "diff-all", "fmt", "stats", "print-schema",
-    "print-policy-schema", "doctor", "migrate", "apply", "watch",
+    "resolve-project", "diff-all", "transform", "standards", "sync",
+    "fmt", "stats", "print-schema", "print-policy-schema", "doctor",
+    "migrate", "apply", "watch",
 ]
 
 _GENERATE_SUBCOMMANDS = ["sql", "dbt", "metadata", "docs", "changelog"]
 _IMPORT_SUBCOMMANDS = ["sql", "dbml", "json-schema", "dbt", "avro"]
+_TRANSFORM_SUBCOMMANDS = ["conceptual-to-logical", "logical-to-physical"]
+_STANDARDS_SUBCOMMANDS = ["check", "fix"]
+_SYNC_SUBCOMMANDS = ["compare", "merge", "pull"]
 _DIALECTS = ["postgres", "snowflake", "bigquery", "databricks"]
 
 
@@ -18,6 +22,9 @@ def generate_bash_completion() -> str:
     cmds = " ".join(_COMMANDS)
     gen_subs = " ".join(_GENERATE_SUBCOMMANDS)
     imp_subs = " ".join(_IMPORT_SUBCOMMANDS)
+    transform_subs = " ".join(_TRANSFORM_SUBCOMMANDS)
+    standards_subs = " ".join(_STANDARDS_SUBCOMMANDS)
+    sync_subs = " ".join(_SYNC_SUBCOMMANDS)
     dialects = " ".join(_DIALECTS)
 
     return f'''# bash completion for dm (DuckCodeModeling CLI)
@@ -40,6 +47,24 @@ _dm_completions() {{
         import)
             if [[ $COMP_CWORD -eq 2 ]]; then
                 COMPREPLY=( $(compgen -W "{imp_subs}" -- "$cur") )
+                return 0
+            fi
+            ;;
+        transform)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{transform_subs}" -- "$cur") )
+                return 0
+            fi
+            ;;
+        standards)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{standards_subs}" -- "$cur") )
+                return 0
+            fi
+            ;;
+        sync)
+            if [[ $COMP_CWORD -eq 2 ]]; then
+                COMPREPLY=( $(compgen -W "{sync_subs}" -- "$cur") )
                 return 0
             fi
             ;;
@@ -81,6 +106,9 @@ def generate_zsh_completion() -> str:
     cmds_list = "\n            ".join([f"'{c}:{c} command'" for c in _COMMANDS])
     gen_subs = " ".join(_GENERATE_SUBCOMMANDS)
     imp_subs = " ".join(_IMPORT_SUBCOMMANDS)
+    transform_subs = " ".join(_TRANSFORM_SUBCOMMANDS)
+    standards_subs = " ".join(_STANDARDS_SUBCOMMANDS)
+    sync_subs = " ".join(_SYNC_SUBCOMMANDS)
     dialects = " ".join(_DIALECTS)
 
     return f'''#compdef dm
@@ -108,6 +136,15 @@ _dm() {{
                     ;;
                 import)
                     _values 'subcommand' {imp_subs}
+                    ;;
+                transform)
+                    _values 'subcommand' {transform_subs}
+                    ;;
+                standards)
+                    _values 'subcommand' {standards_subs}
+                    ;;
+                sync)
+                    _values 'subcommand' {sync_subs}
                     ;;
                 *)
                     case $words[-2] in
@@ -152,6 +189,12 @@ def generate_fish_completion() -> str:
         lines.append(f"complete -c dm -n '__fish_seen_subcommand_from generate' -a '{sub}'")
     for sub in _IMPORT_SUBCOMMANDS:
         lines.append(f"complete -c dm -n '__fish_seen_subcommand_from import' -a '{sub}'")
+    for sub in _TRANSFORM_SUBCOMMANDS:
+        lines.append(f"complete -c dm -n '__fish_seen_subcommand_from transform' -a '{sub}'")
+    for sub in _STANDARDS_SUBCOMMANDS:
+        lines.append(f"complete -c dm -n '__fish_seen_subcommand_from standards' -a '{sub}'")
+    for sub in _SYNC_SUBCOMMANDS:
+        lines.append(f"complete -c dm -n '__fish_seen_subcommand_from sync' -a '{sub}'")
 
     lines.append("")
     for d in _DIALECTS:

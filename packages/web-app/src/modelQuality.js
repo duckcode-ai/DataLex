@@ -357,8 +357,9 @@ const REF_NAME = /^[A-Z][A-Za-z0-9]*\.[a-z][a-z0-9_]*$/;
 
 const ALLOWED_STATES = new Set(["draft", "approved", "deprecated"]);
 const ALLOWED_LAYERS = new Set(["source", "transform", "report"]);
-const ALLOWED_ENTITY_TYPES = new Set(["table", "view", "materialized_view", "external_table", "snapshot", "fact_table", "dimension_table", "bridge_table"]);
-const PK_REQUIRED_TYPES = new Set(["table", "fact_table", "dimension_table"]);
+const ALLOWED_KINDS = new Set(["conceptual", "logical", "physical"]);
+const ALLOWED_ENTITY_TYPES = new Set(["concept", "logical_entity", "table", "view", "materialized_view", "external_table", "snapshot", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"]);
+const PK_REQUIRED_TYPES = new Set(["table", "fact_table", "dimension_table", "hub", "link"]);
 const GRAIN_REQUIRED_TYPES = new Set(["table", "view", "materialized_view", "fact_table"]);
 const ALLOWED_CARDINALITY = new Set([
   "one_to_one",
@@ -476,6 +477,16 @@ function structuralIssues(model) {
         )
       );
     }
+    if (meta.kind !== undefined && (typeof meta.kind !== "string" || !ALLOWED_KINDS.has(meta.kind))) {
+      issues.push(
+        issue(
+          "error",
+          "INVALID_MODEL_KIND",
+          "model.kind must be one of conceptual|logical|physical.",
+          "/model/kind"
+        )
+      );
+    }
   }
 
   if (!Array.isArray(model.entities) || model.entities.length === 0) {
@@ -503,7 +514,7 @@ function structuralIssues(model) {
           issue(
             "error",
             "INVALID_ENTITY_TYPE",
-            "Entity type must be one of: table, view, materialized_view, external_table, snapshot, fact_table, dimension_table, bridge_table.",
+            "Entity type must be one of: concept, logical_entity, table, view, materialized_view, external_table, snapshot, fact_table, dimension_table, bridge_table, hub, link, satellite.",
             `/entities/${entityIdx}/type`
           )
         );

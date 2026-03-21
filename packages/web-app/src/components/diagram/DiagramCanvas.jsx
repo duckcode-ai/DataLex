@@ -15,6 +15,7 @@ import "@xyflow/react/dist/style.css";
 import EntityNode from "./EntityNode";
 import AnnotationNode from "./AnnotationNode";
 import SchemaOverviewNode from "./SchemaOverviewNode";
+import SubjectAreaGroup from "./SubjectAreaGroup";
 import DiagramToolbar from "./DiagramToolbar";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
@@ -26,7 +27,7 @@ import { buildSchemaColorMap, SCHEMA_COLORS } from "../../lib/schemaColors";
 
 const SCHEMA_COLORS_HEX = SCHEMA_COLORS.map((c) => c.hex);
 
-const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, schemaOverview: SchemaOverviewNode };
+const nodeTypes = { entityNode: EntityNode, annotation: AnnotationNode, group: SubjectAreaGroup, schemaOverview: SchemaOverviewNode };
 
 const LARGE_MODEL_THRESHOLD = 100;
 const COMPACT_MODE_THRESHOLD = 200;
@@ -48,6 +49,7 @@ const TYPE_FILTER_GROUPS = {
   table: new Set(["table", "external_table", "snapshot"]),
   view: new Set(["view", "materialized_view"]),
   dimension_table: new Set(["dimension_table", "fact_table", "bridge_table"]),
+  data_vault: new Set(["hub", "link", "satellite"]),
 };
 
 // Star schema layout: fact tables centered, dimensions radiating outward
@@ -400,6 +402,7 @@ function FlowCanvas() {
       } else {
         layoutResult = fallbackGridLayout(filtered, filteredEdges, {
           density: vizSettings.layoutDensity,
+          groupBySubjectArea: vizSettings.groupBySubjectArea,
           fieldView: vizSettings.fieldView,
         });
       }
@@ -418,10 +421,14 @@ function FlowCanvas() {
 
       // Apply compact mode flag
       const finalNodes = useCompact
-        ? visualNodes.map((n) => ({ ...n, data: { ...n.data, compactMode: true } }))
-        : visualNodes;
+        ? visualNodes.map((n) => ({ ...n, data: { ...n.data, compactMode: true }, zIndex: 10 }))
+        : visualNodes.map((n) => ({ ...n, zIndex: 10 }));
+      const groupNodes = (layoutResult.groupNodes || []).map((node) => ({
+        ...node,
+        zIndex: -1,
+      }));
 
-      setRfNodes(finalNodes);
+      setRfNodes([...groupNodes, ...finalNodes]);
       setRfEdges(visualEdges);
       setLayoutDone(true);
     };
@@ -454,7 +461,7 @@ function FlowCanvas() {
 
   const onNodeClick = useCallback((_event, node) => {
     // Schema overview nodes handle their own click
-    if (node.type === "schemaOverview") return;
+    if (node.type === "schemaOverview" || node.type === "group") return;
     selectEntity(node.id);
   }, [selectEntity]);
 

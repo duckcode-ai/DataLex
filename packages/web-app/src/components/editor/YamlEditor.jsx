@@ -53,10 +53,10 @@ const lightTheme = EditorView.theme({
 
 // Schema-aware YAML completions
 const SCHEMA_KEYWORDS = {
-  root: ["model:", "entities:", "relationships:", "indexes:", "metrics:", "rules:", "governance:", "glossary:", "display:"],
-  model: ["name:", "spec_version:", "version:", "domain:", "owners:", "state:", "layer:", "description:", "imports:"],
-  entity: ["name:", "type:", "description:", "fields:", "grain:", "tags:", "schema:", "database:", "subject_area:", "owner:", "sla:"],
-  field: ["name:", "type:", "nullable:", "primary_key:", "unique:", "foreign_key:", "default:", "check:", "computed:", "computed_expression:", "sensitivity:", "description:", "deprecated:", "deprecated_message:", "examples:"],
+  root: ["model:", "entities:", "relationships:", "indexes:", "metrics:", "rules:", "governance:", "glossary:", "domains:", "enums:", "templates:", "naming_rules:", "subject_areas:", "display:"],
+  model: ["name:", "kind:", "spec_version:", "version:", "domain:", "owners:", "state:", "layer:", "description:", "imports:"],
+  entity: ["name:", "type:", "description:", "derived_from:", "mapped_from:", "fields:", "grain:", "candidate_keys:", "business_keys:", "hash_key:", "tags:", "template:", "templates:", "schema:", "database:", "physical_name:", "subject_area:", "owner:", "sla:", "natural_key:", "surrogate_key:", "scd_type:", "conformed:", "subtype_of:", "subtypes:", "dimension_refs:", "link_refs:", "parent_entity:", "hash_diff_fields:", "load_timestamp_field:", "record_source_field:", "partition_by:", "cluster_by:", "distribution:", "storage:"],
+  field: ["name:", "type:", "domain:", "enum:", "mapped_from:", "nullable:", "primary_key:", "unique:", "foreign_key:", "identity:", "sequence:", "default:", "check:", "computed:", "computed_expression:", "sensitivity:", "description:", "deprecated:", "deprecated_message:", "examples:"],
   relationship: ["name:", "from:", "to:", "cardinality:", "on_update:", "description:"],
   index: ["name:", "entity:", "fields:", "unique:"],
   metric: ["name:", "entity:", "description:", "expression:", "aggregation:", "grain:", "dimensions:", "time_dimension:", "owner:", "tags:", "deprecated:", "deprecated_message:"],
@@ -65,9 +65,10 @@ const SCHEMA_KEYWORDS = {
   glossary: ["term:", "abbreviation:", "definition:", "related_fields:", "tags:"],
   types: ["string", "integer", "bigint", "float", "decimal", "boolean", "date", "timestamp", "datetime", "uuid", "json", "text", "varchar"],
   cardinalities: ["one_to_one", "one_to_many", "many_to_one", "many_to_many"],
+  kinds: ["conceptual", "logical", "physical"],
   states: ["draft", "approved", "deprecated"],
   layers: ["source", "transform", "report"],
-  entityTypes: ["table", "view", "materialized_view", "external_table", "snapshot"],
+  entityTypes: ["concept", "logical_entity", "table", "view", "materialized_view", "external_table", "snapshot", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"],
   aggregations: ["sum", "count", "count_distinct", "avg", "min", "max", "custom"],
   severity: ["info", "warn", "error"],
   sensitivity: ["public", "internal", "confidential", "restricted"],
@@ -94,6 +95,7 @@ function yamlCompletions(context) {
     if (section === "entities" && indent <= 6) return { from: context.pos, options: SCHEMA_KEYWORDS.entityTypes.map((t) => ({ label: t, type: "enum" })) };
     return { from: context.pos, options: SCHEMA_KEYWORDS.types.map((t) => ({ label: t, type: "type" })) };
   }
+  if (/kind:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.kinds.map((t) => ({ label: t, type: "enum" })) };
   if (/cardinality:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.cardinalities.map((t) => ({ label: t, type: "enum" })) };
   if (/state:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.states.map((t) => ({ label: t, type: "enum" })) };
   if (/layer:\s*$/.test(textBefore)) return { from: context.pos, options: SCHEMA_KEYWORDS.layers.map((t) => ({ label: t, type: "enum" })) };

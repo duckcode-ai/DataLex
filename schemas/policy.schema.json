@@ -44,7 +44,8 @@
               "require_owner",
               "require_sla",
               "deprecation_check",
-              "custom_expression"
+              "custom_expression",
+              "modeling_convention"
             ]
           },
           "severity": { "type": "string", "enum": ["info", "warn", "error"] },

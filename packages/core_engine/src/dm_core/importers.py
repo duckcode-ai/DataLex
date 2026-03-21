@@ -90,6 +90,8 @@ def _default_model(model_name: str, domain: str, owners: List[str]) -> Dict[str,
     return {
         "model": {
             "name": _to_model_name(model_name),
+            "kind": "physical",
+            "spec_version": 3,
             "version": "1.0.0",
             "domain": domain,
             "owners": owners,

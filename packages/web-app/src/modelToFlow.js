@@ -153,6 +153,13 @@ export function modelToFlow(doc) {
       surrogate_key: toDisplayText(entity?.surrogate_key, ""),
       conformed: Boolean(entity?.conformed),
       dimension_refs: Array.isArray(entity?.dimension_refs) ? entity.dimension_refs.map((r) => toDisplayText(r, "").trim()).filter(Boolean) : [],
+      business_keys: Array.isArray(entity?.business_keys) ? entity.business_keys : [],
+      hash_key: toDisplayText(entity?.hash_key, ""),
+      link_refs: Array.isArray(entity?.link_refs) ? entity.link_refs.map((r) => toDisplayText(r, "").trim()).filter(Boolean) : [],
+      parent_entity: toDisplayText(entity?.parent_entity, ""),
+      hash_diff_fields: Array.isArray(entity?.hash_diff_fields) ? entity.hash_diff_fields : [],
+      load_timestamp_field: toDisplayText(entity?.load_timestamp_field, ""),
+      record_source_field: toDisplayText(entity?.record_source_field, ""),
       grain: Array.isArray(entity?.grain) ? entity.grain : [],
     };
     normalizedEntities.push(normalizedEntity);
@@ -189,6 +196,13 @@ export function modelToFlow(doc) {
         surrogate_key: entity.surrogate_key,
         conformed: entity.conformed,
         dimension_refs: entity.dimension_refs,
+        business_keys: entity.business_keys,
+        hash_key: entity.hash_key,
+        link_refs: entity.link_refs,
+        parent_entity: entity.parent_entity,
+        hash_diff_fields: entity.hash_diff_fields,
+        load_timestamp_field: entity.load_timestamp_field,
+        record_source_field: entity.record_source_field,
         grain: entity.grain,
       }
     };

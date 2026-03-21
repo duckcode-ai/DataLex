@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import yaml
 
 from dm_core import (
+    apply_standards_fixes,
     compile_model,
     completeness_as_dict,
     completeness_report,
@@ -40,6 +41,7 @@ from dm_core import (
     load_schema,
     load_yaml_model,
     merge_policy_packs,
+    merge_models_preserving_docs,
     policy_issues,
     project_diff,
     resolve_model,
@@ -47,6 +49,8 @@ from dm_core import (
     run_diagnostics,
     schema_issues,
     semantic_diff,
+    standards_issues,
+    transform_model,
     write_changelog,
     write_dbt_scaffold,
     write_html_docs,
@@ -818,6 +822,15 @@ def _issues_as_json(issues: List[Issue]) -> List[Dict[str, str]]:
 def _write_yaml(path: str, payload: Dict[str, Any]) -> None:
     output = yaml.safe_dump(payload, sort_keys=False)
     Path(path).write_text(output, encoding="utf-8")
+
+
+def _print_or_write_yaml(payload: Dict[str, Any], out: str = "") -> None:
+    output = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    if out:
+        Path(out).write_text(output, encoding="utf-8")
+        print(f"Wrote model: {out}")
+    else:
+        print(output)
 
 
 def _init_schemas_and_policies(root: Path) -> List[Path]:
@@ -1780,6 +1793,70 @@ def cmd_diff_all(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_transform(args: argparse.Namespace) -> int:
+    schema = load_schema(args.schema)
+    model, issues = _validate_model_file(args.model, schema)
+    if has_errors(issues):
+        _print_issues(issues)
+        return 1
+
+    target_kind = "logical" if args.transform_command == "conceptual-to-logical" else "physical"
+    transformed = transform_model(model, target_kind=target_kind, dialect=getattr(args, "dialect", "postgres"))
+    transformed_issues = _combined_issues(transformed, schema)
+    if has_errors(transformed_issues):
+        _print_issues(transformed_issues)
+        return 1
+
+    _print_or_write_yaml(transformed, getattr(args, "out", "") or "")
+    return 0
+
+
+def cmd_standards_check(args: argparse.Namespace) -> int:
+    schema = load_schema(args.schema)
+    model, issues = _validate_model_file(args.model, schema)
+    issues.extend(standards_issues(model))
+
+    if args.output_json:
+        print(json.dumps({"issues": _issues_as_json(issues)}, indent=2))
+    else:
+        _print_issues(issues)
+    return 1 if has_errors(issues) else 0
+
+
+def cmd_standards_fix(args: argparse.Namespace) -> int:
+    model = load_yaml_model(args.model)
+    fixed, changes = apply_standards_fixes(model)
+
+    if not args.write and not args.out:
+        print("# Applied supported standards autofixes")
+        for change in changes:
+            print(f"# - {change}")
+        print("")
+
+    _print_or_write_yaml(fixed, args.model if args.write else (args.out or ""))
+    return 0
+
+
+def cmd_sync_compare(args: argparse.Namespace) -> int:
+    current_model = load_yaml_model(args.current)
+    candidate_model = load_yaml_model(args.candidate)
+    diff = semantic_diff(current_model, candidate_model)
+    print(json.dumps(diff, indent=2))
+    return 0 if not diff["has_breaking_changes"] or args.allow_breaking else 2
+
+
+def cmd_sync_merge(args: argparse.Namespace) -> int:
+    current_model = load_yaml_model(args.current)
+    candidate_model = load_yaml_model(args.candidate)
+    merged = merge_models_preserving_docs(current_model, candidate_model)
+    _print_or_write_yaml(merged, getattr(args, "out", "") or "")
+    return 0
+
+
+def cmd_sync_pull(args: argparse.Namespace) -> int:
+    return cmd_pull(args)
+
+
 def cmd_resolve_project(args: argparse.Namespace) -> int:
     search_dirs = args.search_dir if args.search_dir else []
     results = resolve_project(args.directory, search_dirs=search_dirs)
@@ -2659,6 +2736,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow breaking changes (exit 0 even with breaking changes)",
     )
     diff_all_parser.set_defaults(func=cmd_diff_all)
+
+    transform_parser = sub.add_parser("transform", help="Transform a model between conceptual, logical, and physical forms")
+    transform_sub = transform_parser.add_subparsers(dest="transform_command", required=True)
+
+    transform_to_logical = transform_sub.add_parser("conceptual-to-logical", help="Transform a conceptual model into a logical model")
+    transform_to_logical.add_argument("model", help="Path to source model YAML")
+    transform_to_logical.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
+    transform_to_logical.add_argument("--out", help="Write transformed model YAML")
+    transform_to_logical.set_defaults(func=cmd_transform)
+
+    transform_to_physical = transform_sub.add_parser("logical-to-physical", help="Transform a logical model into a physical model")
+    transform_to_physical.add_argument("model", help="Path to source model YAML")
+    transform_to_physical.add_argument("--dialect", default="postgres", choices=["postgres", "snowflake", "bigquery", "databricks"])
+    transform_to_physical.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
+    transform_to_physical.add_argument("--out", help="Write transformed model YAML")
+    transform_to_physical.set_defaults(func=cmd_transform)
+
+    standards_parser = sub.add_parser("standards", help="Check or autofix model standards, naming rules, and shared libraries")
+    standards_sub = standards_parser.add_subparsers(dest="standards_command", required=True)
+
+    standards_check = standards_sub.add_parser("check", help="Evaluate standards and naming rules")
+    standards_check.add_argument("model", help="Path to model YAML")
+    standards_check.add_argument("--schema", default=_default_schema_path(), help="Path to model schema JSON")
+    standards_check.add_argument("--output-json", action="store_true", help="Print standards report as JSON")
+    standards_check.set_defaults(func=cmd_standards_check)
+
+    standards_fix = standards_sub.add_parser("fix", help="Apply supported standards autofixes")
+    standards_fix.add_argument("model", help="Path to model YAML")
+    standards_fix.add_argument("--write", "-w", action="store_true", help="Overwrite the input model in-place")
+    standards_fix.add_argument("--out", help="Write fixed YAML to a new path")
+    standards_fix.set_defaults(func=cmd_standards_fix)
+
+    sync_parser = sub.add_parser("sync", help="Round-trip compare, merge, or pull workflows")
+    sync_sub = sync_parser.add_subparsers(dest="sync_command", required=True)
+
+    sync_compare = sync_sub.add_parser("compare", help="Compare current and candidate models")
+    sync_compare.add_argument("current", help="Current local model YAML")
+    sync_compare.add_argument("candidate", help="Candidate/live model YAML")
+    sync_compare.add_argument("--allow-breaking", action="store_true", help="Return 0 even when breaking changes are detected")
+    sync_compare.set_defaults(func=cmd_sync_compare)
+
+    sync_merge = sync_sub.add_parser("merge", help="Merge documentation metadata from current into candidate model")
+    sync_merge.add_argument("current", help="Current local model YAML")
+    sync_merge.add_argument("candidate", help="Candidate/live model YAML")
+    sync_merge.add_argument("--out", help="Write merged model YAML")
+    sync_merge.set_defaults(func=cmd_sync_merge)
+
+    sync_pull = sync_sub.add_parser("pull", help="Alias of 'dm pull' for round-trip workflows")
+    sync_pull.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")
+    sync_pull.add_argument("--host", help="Database host (or Snowflake account, Databricks server hostname)")
+    sync_pull.add_argument("--port", type=int, help="Database port")
+    sync_pull.add_argument("--database", help="Database name")
+    sync_pull.add_argument("--db-schema", help="Schema name (default: public/PUBLIC/default)")
+    sync_pull.add_argument("--user", help="Database user")
+    sync_pull.add_argument("--password", help="Database password")
+    sync_pull.add_argument("--warehouse", help="Snowflake warehouse")
+    sync_pull.add_argument("--project", help="BigQuery project ID")
+    sync_pull.add_argument("--dataset", help="BigQuery dataset")
+    sync_pull.add_argument("--catalog", help="Databricks Unity Catalog name")
+    sync_pull.add_argument("--token", help="Access token (Databricks)")
+    sync_pull.add_argument("--http-path", help="Databricks SQL Warehouse/Cluster HTTP path")
+    sync_pull.add_argument("--odbc-driver", help="ODBC driver for SQL Server-family connectors")
+    sync_pull.add_argument("--encrypt", help="SQL Server encryption setting (yes/no)")
+    sync_pull.add_argument("--trust-server-certificate", help="SQL Server TrustServerCertificate setting (yes/no)")
+    sync_pull.add_argument("--private-key-path", help="Path to RSA private key PEM file (Snowflake key-pair auth)")
+    sync_pull.add_argument("--tables", nargs="*", help="Only include these tables")
+    sync_pull.add_argument("--exclude-tables", nargs="*", help="Exclude these tables")
+    sync_pull.add_argument("--model-name", default="imported_model", help="Model name")
+    sync_pull.add_argument("--domain", default="imported", help="Domain value")
+    sync_pull.add_argument("--owner", help="Owner email")
+    sync_pull.add_argument("--out", help="Output YAML model file path")
+    sync_pull.add_argument("--project-dir", help="Project folder to write extracted model YAML")
+    sync_pull.add_argument("--create-project-dir", action="store_true", help="Create --project-dir if missing")
+    sync_pull.add_argument("--test", action="store_true", help="Test connection only, do not pull schema")
+    sync_pull.set_defaults(func=cmd_sync_pull)
 
     fmt_parser = sub.add_parser("fmt", help="Auto-format YAML model to canonical style")
     fmt_parser.add_argument("model", help="Path to model YAML")

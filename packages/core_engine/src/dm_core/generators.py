@@ -2,6 +2,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from dm_core.modeling import normalize_model
+
 SUPPORTED_DIALECTS = {"postgres", "snowflake", "bigquery", "databricks"}
 
 
@@ -129,6 +131,7 @@ def _format_default(value: Any, dialect: str) -> Optional[str]:
 
 
 def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
+    model = normalize_model(model)
     dialect = dialect.lower()
     if dialect not in SUPPORTED_DIALECTS:
         raise ValueError(f"Unsupported SQL dialect. Use one of: {', '.join(sorted(SUPPORTED_DIALECTS))}.")
@@ -145,6 +148,8 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
 
     for entity in entities:
         entity_type = entity.get("type", "table")
+        if entity_type in {"concept", "logical_entity"}:
+            entity_type = "table"
         entity_name = str(entity.get("name", ""))
         qualified = _qualified_name(entity, dialect)
         fields = entity.get("fields", [])
@@ -186,6 +191,30 @@ def generate_sql_ddl(model: Dict[str, Any], dialect: str = "postgres") -> str:
             )
         elif entity_type == "bridge_table":
             dim_header = f"-- Bridge table: {entity_name} (many-to-many resolution)"
+        elif entity_type == "hub":
+            business_keys = entity.get("business_keys", [])
+            business_key_str = ", ".join("/".join(keyset) for keyset in business_keys) if business_keys else "not declared"
+            dim_header = (
+                f"-- Data Vault Hub: {entity_name}\n"
+                f"-- Business keys: {business_key_str}\n"
+                f"-- Hash key: {entity.get('hash_key') or 'not declared'}"
+            )
+        elif entity_type == "link":
+            link_refs = entity.get("link_refs", [])
+            link_ref_str = ", ".join(link_refs) if link_refs else "not declared"
+            dim_header = (
+                f"-- Data Vault Link: {entity_name}\n"
+                f"-- References: {link_ref_str}\n"
+                f"-- Hash key: {entity.get('hash_key') or 'not declared'}"
+            )
+        elif entity_type == "satellite":
+            hash_diff = entity.get("hash_diff_fields", [])
+            hash_diff_str = ", ".join(hash_diff) if hash_diff else "not declared"
+            dim_header = (
+                f"-- Data Vault Satellite: {entity_name}\n"
+                f"-- Parent: {entity.get('parent_entity') or 'not declared'}\n"
+                f"-- Hash diff fields: {hash_diff_str}"
+            )
 
         column_lines: List[str] = []
         pk_fields: List[str] = []
@@ -333,6 +362,12 @@ def dbt_scaffold_files(
             model_name = f"dim_{table_name}"
         elif entity_type == "bridge_table":
             model_name = f"brd_{table_name}"
+        elif entity_type == "hub":
+            model_name = f"hub_{table_name}"
+        elif entity_type == "link":
+            model_name = f"lnk_{table_name}"
+        elif entity_type == "satellite":
+            model_name = f"sat_{table_name}"
         else:
             model_name = f"stg_{table_name}"
         fields = entity.get("fields", [])
@@ -355,7 +390,7 @@ def dbt_scaffold_files(
         if entity.get("subject_area"):
             entity_meta.append(f"      subject_area: \"{entity['subject_area']}\"")
         # Dimensional modeling metadata in dbt meta block
-        if entity_type in {"fact_table", "dimension_table", "bridge_table"}:
+        if entity_type in {"fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"}:
             entity_meta.append(f"      entity_type: \"{entity_type}\"")
             if entity.get("scd_type"):
                 entity_meta.append(f"      scd_type: {entity['scd_type']}")
@@ -365,6 +400,16 @@ def dbt_scaffold_files(
                 entity_meta.append("      conformed: true")
             if entity.get("dimension_refs"):
                 entity_meta.append(f"      dimension_refs: {entity['dimension_refs']}")
+            if entity.get("business_keys"):
+                entity_meta.append(f"      business_keys: {entity['business_keys']}")
+            if entity.get("hash_key"):
+                entity_meta.append(f"      hash_key: \"{entity['hash_key']}\"")
+            if entity.get("link_refs"):
+                entity_meta.append(f"      link_refs: {entity['link_refs']}")
+            if entity.get("parent_entity"):
+                entity_meta.append(f"      parent_entity: \"{entity['parent_entity']}\"")
+            if entity.get("hash_diff_fields"):
+                entity_meta.append(f"      hash_diff_fields: {entity['hash_diff_fields']}")
         if entity_meta:
             schema_lines.append("    meta:")
             schema_lines.extend(entity_meta)

@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dm_core.canonical import compile_model
 from dm_core.loader import load_yaml_model
+from dm_core.modeling import normalize_model
 
 
 def _index_entities(model: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
@@ -26,6 +27,18 @@ def _relationship_key(relationship: Dict[str, Any]) -> Tuple[str, str, str, str]
 def _index_key(idx: Dict[str, Any]) -> str:
     fields = ",".join(idx.get("fields", []))
     return f"{idx.get('name', '')}|{idx.get('entity', '')}|{fields}|{idx.get('unique', False)}"
+
+
+def _normalized_meta_value(value: Any) -> Any:
+    if isinstance(value, list):
+        normalized_items = [_normalized_meta_value(item) for item in value]
+        try:
+            return sorted(normalized_items)
+        except TypeError:
+            return normalized_items
+    if isinstance(value, dict):
+        return {key: _normalized_meta_value(value[key]) for key in sorted(value.keys())}
+    return value
 
 
 def _diff_indexes(
@@ -93,8 +106,11 @@ def _diff_metrics(
 
 
 def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[str, Any]:
-    old_canonical = compile_model(old_model)
-    new_canonical = compile_model(new_model)
+    old_canonical = compile_model(normalize_model(old_model))
+    new_canonical = compile_model(normalize_model(new_model))
+
+    old_meta = old_canonical.get("model", {})
+    new_meta = new_canonical.get("model", {})
 
     old_entities = _index_entities(old_canonical)
     new_entities = _index_entities(new_canonical)
@@ -107,6 +123,15 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
 
     changed_entities: List[Dict[str, Any]] = []
     breaking_changes: List[str] = []
+
+    if old_meta.get("kind") != new_meta.get("kind"):
+        breaking_changes.append(
+            f"Model kind changed: {old_meta.get('kind', 'physical')} -> {new_meta.get('kind', 'physical')}"
+        )
+    if old_meta.get("layer") != new_meta.get("layer"):
+        breaking_changes.append(
+            f"Model layer changed: {old_meta.get('layer', '(none)')} -> {new_meta.get('layer', '(none)')}"
+        )
 
     for name in sorted(old_entity_names & new_entity_names):
         old_entity = old_entities[name]
@@ -123,6 +148,7 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
 
         type_changes = []
         nullability_changes = []
+        metadata_changes = []
 
         for field in sorted(old_field_names & new_field_names):
             old_field = old_fields[field]
@@ -148,11 +174,50 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
                 if old_nullable and not new_nullable:
                     breaking_changes.append(f"Field became non-nullable: {name}.{field}")
 
+        for meta_field in (
+            "type",
+            "grain",
+            "candidate_keys",
+            "business_keys",
+            "subtype_of",
+            "subtypes",
+            "natural_key",
+            "surrogate_key",
+            "scd_type",
+            "conformed",
+            "dimension_refs",
+            "hash_key",
+            "link_refs",
+            "parent_entity",
+            "hash_diff_fields",
+            "load_timestamp_field",
+            "record_source_field",
+            "partition_by",
+            "cluster_by",
+            "physical_name",
+        ):
+            old_value = _normalized_meta_value(old_entity.get(meta_field))
+            new_value = _normalized_meta_value(new_entity.get(meta_field))
+            if old_value != new_value:
+                metadata_changes.append(
+                    {
+                        "field": meta_field,
+                        "from": old_entity.get(meta_field),
+                        "to": new_entity.get(meta_field),
+                    }
+                )
+                if meta_field == "type":
+                    breaking_changes.append(
+                        f"Entity type changed: {name} ({old_entity.get(meta_field)} -> {new_entity.get(meta_field)})"
+                    )
+                else:
+                    breaking_changes.append(f"Entity modeling metadata changed: {name}.{meta_field}")
+
         if removed_fields:
             for field in removed_fields:
                 breaking_changes.append(f"Field removed: {name}.{field}")
 
-        if added_fields or removed_fields or type_changes or nullability_changes:
+        if added_fields or removed_fields or type_changes or nullability_changes or metadata_changes:
             changed_entities.append(
                 {
                     "entity": name,
@@ -160,6 +225,7 @@ def semantic_diff(old_model: Dict[str, Any], new_model: Dict[str, Any]) -> Dict[
                     "removed_fields": removed_fields,
                     "type_changes": type_changes,
                     "nullability_changes": nullability_changes,
+                    "metadata_changes": metadata_changes,
                 }
             )
 

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   X,
   Plus,
@@ -29,12 +29,73 @@ import {
   renameEntity,
 } from "../../lib/yamlRoundTrip";
 
+function NameModal({ title, value, onChange, onClose, onSubmit, confirmLabel = "Save" }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-[360px] max-w-[92vw] rounded-xl border border-border-primary bg-bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-border-primary">
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        </div>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            onSubmit();
+          }}
+          className="p-4 space-y-3"
+        >
+          <input
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-bg-primary border border-border-primary rounded-md px-3 py-2 text-sm text-text-primary outline-none focus:border-accent-blue"
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover transition-colors">
+              Cancel
+            </button>
+            <button type="submit" className="px-3 py-1.5 rounded-md text-xs font-medium bg-accent-blue text-white hover:bg-accent-blue/80 transition-colors">
+              {confirmLabel}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmModal({ title, message, onClose, onConfirm }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-[380px] max-w-[92vw] rounded-xl border border-border-primary bg-bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-border-primary">
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+        </div>
+        <div className="p-4 space-y-3">
+          <p className="text-sm text-text-secondary">{message}</p>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="px-3 py-1.5 rounded-md text-xs text-text-muted hover:bg-bg-hover transition-colors">
+              Cancel
+            </button>
+            <button type="button" onClick={onConfirm} className="px-3 py-1.5 rounded-md text-xs font-medium bg-red-600 text-white hover:bg-red-500 transition-colors">
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function EntityPanel() {
   const { selectedEntity, selectedEntityId, clearSelection, model } = useDiagramStore();
   const { activeFileContent, updateContent } = useWorkspaceStore();
   const { addToast } = useUiStore();
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
+  const [renameEntityOpen, setRenameEntityOpen] = useState(false);
+  const [renameEntityValue, setRenameEntityValue] = useState("");
+  const [deleteEntityOpen, setDeleteEntityOpen] = useState(false);
+  const [renameFieldState, setRenameFieldState] = useState({ open: false, oldName: "", nextName: "" });
 
   if (!selectedEntity) {
     return (
@@ -69,9 +130,12 @@ export default function EntityPanel() {
   };
 
   const handleRenameEntity = () => {
-    const next = window.prompt("New table name (logical entity name)", selectedEntityId || "");
-    if (next == null) return;
-    const trimmed = String(next).trim();
+    setRenameEntityValue(String(selectedEntityId || "").trim());
+    setRenameEntityOpen(true);
+  };
+
+  const submitRenameEntity = () => {
+    const trimmed = String(renameEntityValue || "").trim();
     if (!trimmed) {
       addToast?.({ type: "error", message: "Table name cannot be empty." });
       return;
@@ -89,12 +153,15 @@ export default function EntityPanel() {
     // Keep selection on the renamed entity
     useDiagramStore.getState().selectEntity(trimmed);
     addToast?.({ type: "success", message: `Renamed table to ${trimmed}.` });
+    setRenameEntityOpen(false);
   };
 
   const handleDeleteEntity = () => {
     if (!selectedEntityId) return;
-    const ok = window.confirm(`Delete table ${selectedEntityId}? This will remove its relationships and indexes.`);
-    if (!ok) return;
+    setDeleteEntityOpen(true);
+  };
+
+  const confirmDeleteEntity = () => {
     const result = removeEntity(activeFileContent, selectedEntityId);
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
@@ -103,17 +170,20 @@ export default function EntityPanel() {
     updateContent(result.yaml);
     clearSelection();
     addToast?.({ type: "success", message: `Deleted table ${selectedEntityId}.` });
+    setDeleteEntityOpen(false);
   };
 
   const handleRenameField = (oldName) => {
-    const next = window.prompt("New column name", oldName || "");
-    if (next == null) return;
-    const trimmed = String(next).trim();
+    setRenameFieldState({ open: true, oldName, nextName: oldName || "" });
+  };
+
+  const submitRenameField = () => {
+    const trimmed = String(renameFieldState.nextName || "").trim();
     if (!trimmed) {
       addToast?.({ type: "error", message: "Column name cannot be empty." });
       return;
     }
-    const result = renameField(activeFileContent, selectedEntityId, oldName, trimmed);
+    const result = renameField(activeFileContent, selectedEntityId, renameFieldState.oldName, trimmed);
     if (result.error) {
       addToast?.({ type: "error", message: result.error });
       return;
@@ -123,11 +193,13 @@ export default function EntityPanel() {
       return;
     }
     updateContent(result.yaml);
-    addToast?.({ type: "success", message: `Renamed column ${oldName} -> ${trimmed}.` });
+    addToast?.({ type: "success", message: `Renamed column ${renameFieldState.oldName} -> ${trimmed}.` });
+    setRenameFieldState({ open: false, oldName: "", nextName: "" });
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <>
+      <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-border-primary bg-bg-secondary/50">
         <div className="min-w-0">
@@ -139,7 +211,9 @@ export default function EntityPanel() {
         <div className="flex items-center gap-1">
           {canEdit && (
             <button
-              onClick={handleRenameEntity}
+              onClick={() => {
+                handleRenameEntity();
+              }}
               className="p-1 rounded-md hover:bg-bg-hover text-text-muted hover:text-text-primary transition-colors"
               title="Rename table"
             >
@@ -148,7 +222,9 @@ export default function EntityPanel() {
           )}
           {canEdit && (
             <button
-              onClick={handleDeleteEntity}
+              onClick={() => {
+                handleDeleteEntity();
+              }}
               className="p-1 rounded-md hover:bg-red-50 text-text-muted hover:text-red-600 transition-colors"
               title="Delete table"
             >
@@ -524,6 +600,33 @@ export default function EntityPanel() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+      {renameEntityOpen && (
+        <NameModal
+          title="Rename Table"
+          value={renameEntityValue}
+          onChange={setRenameEntityValue}
+          onClose={() => setRenameEntityOpen(false)}
+          onSubmit={submitRenameEntity}
+        />
+      )}
+      {renameFieldState.open && (
+        <NameModal
+          title="Rename Column"
+          value={renameFieldState.nextName}
+          onChange={(value) => setRenameFieldState((state) => ({ ...state, nextName: value }))}
+          onClose={() => setRenameFieldState({ open: false, oldName: "", nextName: "" })}
+          onSubmit={submitRenameField}
+        />
+      )}
+      {deleteEntityOpen && (
+        <ConfirmModal
+          title="Delete Table"
+          message={`Delete table ${selectedEntityId}? This will remove its relationships and indexes.`}
+          onClose={() => setDeleteEntityOpen(false)}
+          onConfirm={confirmDeleteEntity}
+        />
+      )}
+    </>
   );
 }

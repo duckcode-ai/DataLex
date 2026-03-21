@@ -3,13 +3,18 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dm_core.issues import Issue
+from dm_core.modeling import (
+    DATA_VAULT_ENTITY_TYPES,
+    DIMENSIONAL_ENTITY_TYPES,
+    normalize_model,
+)
 
 PASCAL_CASE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 SNAKE_CASE = re.compile(r"^[a-z][a-z0-9_]*$")
 REL_REF = re.compile(r"^[A-Z][A-Za-z0-9]*\.[a-z][a-z0-9_]*$")
 ALLOWED_CLASSIFICATIONS = {"PUBLIC", "INTERNAL", "CONFIDENTIAL", "PII", "PCI", "PHI"}
 ALLOWED_SENSITIVITY = {"public", "internal", "confidential", "restricted"}
-PK_REQUIRED_TYPES = {"table", "fact_table", "dimension_table"}
+PK_REQUIRED_TYPES = {"table", "fact_table", "dimension_table", "hub", "link"}
 
 # Field name patterns that imply financial/sensitive values
 _FINANCIAL_PATTERN = re.compile(r"(amount|revenue|cost|price|fee|salary|balance|total|gross|net)", re.IGNORECASE)
@@ -243,6 +248,26 @@ def _entity_field_names(model: Dict[str, Any]) -> Dict[str, Set[str]]:
             if field_name:
                 names.add(field_name)
         result[entity_name] = names
+    return result
+
+
+def _entity_map(model: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    return {
+        str(entity.get("name", "")): entity
+        for entity in model.get("entities", [])
+        if isinstance(entity, dict) and entity.get("name")
+    }
+
+
+def _normalized_keysets(value: Any) -> List[Tuple[str, ...]]:
+    result: List[Tuple[str, ...]] = []
+    if not isinstance(value, list):
+        return result
+    for keyset in value:
+        if not isinstance(keyset, list):
+            continue
+        cleaned = [str(item) for item in keyset if str(item).strip()]
+        result.append(tuple(sorted(cleaned)))
     return result
 
 
@@ -790,7 +815,399 @@ def _lint_smart_nudges(
     return issues
 
 
+def _lint_phase1_modeling_core(
+    model: Dict[str, Any],
+    entity_field_map: Dict[str, Set[str]],
+) -> List[Issue]:
+    issues: List[Issue] = []
+    entities_by_name = _entity_map(model)
+    kind = str(model.get("model", {}).get("kind", "physical")).lower().strip()
+    model_layer = str(model.get("model", {}).get("layer", "")).lower().strip()
+
+    if kind in {"conceptual", "logical"} and model_layer:
+        issues.append(
+            Issue(
+                severity="warn",
+                code="PIPELINE_LAYER_ON_NON_PHYSICAL_MODEL",
+                message=(
+                    f"Model kind '{kind}' also declares pipeline layer '{model_layer}'. "
+                    "Pipeline layers are usually reserved for physical execution models."
+                ),
+                path="/model/layer",
+            )
+        )
+
+    subtype_graph: Dict[str, Set[str]] = {name: set() for name in entities_by_name}
+
+    def validate_keysets(entity_name: str, keysets: Any, local_fields: Set[str], path_key: str, prefix: str) -> None:
+        seen: Set[Tuple[str, ...]] = set()
+        if not isinstance(keysets, list):
+            return
+        for index, keyset in enumerate(keysets):
+            if not isinstance(keyset, list) or not keyset:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code=f"{prefix}_EMPTY",
+                        message=f"Entity '{entity_name}' {path_key} entry {index + 1} must contain at least one field.",
+                        path=f"/entities/{entity_name}/{path_key}",
+                    )
+                )
+                continue
+            local_seen: Set[str] = set()
+            for field_name in keyset:
+                name = str(field_name)
+                if name in local_seen:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code=f"{prefix}_DUPLICATE_FIELD",
+                            message=f"Entity '{entity_name}' {path_key} contains duplicate field '{name}'.",
+                            path=f"/entities/{entity_name}/{path_key}",
+                        )
+                    )
+                else:
+                    local_seen.add(name)
+                if name not in local_fields:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code=f"{prefix}_FIELD_NOT_FOUND",
+                            message=f"Entity '{entity_name}' {path_key} field '{name}' does not exist.",
+                            path=f"/entities/{entity_name}/{path_key}",
+                        )
+                    )
+            signature = tuple(sorted(local_seen))
+            if signature in seen:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code=f"{prefix}_DUPLICATE_SET",
+                        message=f"Entity '{entity_name}' declares the same {path_key} more than once.",
+                        path=f"/entities/{entity_name}/{path_key}",
+                    )
+                )
+            else:
+                seen.add(signature)
+
+    def validate_field_property(entity_name: str, local_fields: Set[str], prop_name: str, code: str) -> None:
+        field_name = str(entities_by_name[entity_name].get(prop_name) or "").strip()
+        if not field_name:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code=f"MISSING_{code}",
+                    message=f"Entity '{entity_name}' must declare '{prop_name}'.",
+                    path=f"/entities/{entity_name}/{prop_name}",
+                )
+            )
+            return
+        if field_name not in local_fields:
+            issues.append(
+                Issue(
+                    severity="error",
+                    code=f"{code}_FIELD_NOT_FOUND",
+                    message=f"Entity '{entity_name}' {prop_name} field '{field_name}' does not exist.",
+                    path=f"/entities/{entity_name}/{prop_name}",
+                )
+            )
+
+    for entity_name, entity in entities_by_name.items():
+        entity_type = str(entity.get("type", "table"))
+        local_fields = entity_field_map.get(entity_name, set())
+
+        validate_keysets(entity_name, entity.get("candidate_keys"), local_fields, "candidate_keys", "CANDIDATE_KEY")
+        validate_keysets(entity_name, entity.get("business_keys"), local_fields, "business_keys", "BUSINESS_KEY")
+
+        if entity_type == "dimension_table":
+            natural_key = str(entity.get("natural_key") or "").strip()
+            surrogate_key = str(entity.get("surrogate_key") or "").strip()
+            if natural_key and natural_key not in local_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="NATURAL_KEY_FIELD_NOT_FOUND",
+                        message=f"Dimension '{entity_name}' natural_key field '{natural_key}' does not exist.",
+                        path=f"/entities/{entity_name}/natural_key",
+                    )
+                )
+            if surrogate_key and surrogate_key not in local_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="SURROGATE_KEY_FIELD_NOT_FOUND",
+                        message=f"Dimension '{entity_name}' surrogate_key field '{surrogate_key}' does not exist.",
+                        path=f"/entities/{entity_name}/surrogate_key",
+                    )
+                )
+            if natural_key and surrogate_key and natural_key == surrogate_key:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="DIMENSION_KEYS_COLLIDE",
+                        message=f"Dimension '{entity_name}' uses the same field for natural_key and surrogate_key.",
+                        path=f"/entities/{entity_name}",
+                    )
+                )
+            if entity.get("scd_type") == 2 and not surrogate_key:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="SCD2_DIMENSION_WITHOUT_SURROGATE_KEY",
+                        message=f"SCD Type 2 dimension '{entity_name}' should declare surrogate_key.",
+                        path=f"/entities/{entity_name}/surrogate_key",
+                    )
+                )
+        else:
+            for prop_name in ("scd_type", "natural_key", "surrogate_key", "conformed"):
+                if entity.get(prop_name) not in (None, False, "", []):
+                    issues.append(
+                        Issue(
+                            severity="warn",
+                            code="DIMENSION_ONLY_PROPERTY_ON_NON_DIMENSION",
+                            message=f"Entity '{entity_name}' declares '{prop_name}' but is not a dimension_table.",
+                            path=f"/entities/{entity_name}/{prop_name}",
+                        )
+                    )
+
+        if entity_type == "fact_table":
+            for ref_name in entity.get("dimension_refs", []) if isinstance(entity.get("dimension_refs"), list) else []:
+                referenced = entities_by_name.get(str(ref_name))
+                if referenced and str(referenced.get("type", "")) not in {"dimension_table", "bridge_table"}:
+                    issues.append(
+                        Issue(
+                            severity="warn",
+                            code="DIMENSION_REF_WRONG_TYPE",
+                            message=(
+                                f"Fact table '{entity_name}' dimension_refs entry '{ref_name}' points to "
+                                f"'{referenced.get('type')}', expected dimension_table or bridge_table."
+                            ),
+                            path=f"/entities/{entity_name}/dimension_refs",
+                        )
+                    )
+        elif entity.get("dimension_refs"):
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="DIMENSION_REFS_ON_NON_FACT",
+                    message=f"Entity '{entity_name}' declares dimension_refs but is not a fact_table.",
+                    path=f"/entities/{entity_name}/dimension_refs",
+                )
+            )
+
+        if entity_type in DATA_VAULT_ENTITY_TYPES:
+            validate_field_property(entity_name, local_fields, "load_timestamp_field", "LOAD_TIMESTAMP")
+            validate_field_property(entity_name, local_fields, "record_source_field", "RECORD_SOURCE")
+
+        if entity_type == "hub":
+            business_keys = entity.get("business_keys")
+            if not isinstance(business_keys, list) or not business_keys:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="HUB_MISSING_BUSINESS_KEYS",
+                        message=f"Hub '{entity_name}' must declare business_keys.",
+                        path=f"/entities/{entity_name}/business_keys",
+                    )
+                )
+            validate_field_property(entity_name, local_fields, "hash_key", "HASH_KEY")
+            hash_key = str(entity.get("hash_key") or "").strip()
+            if hash_key and hash_key in local_fields:
+                hash_field = next((field for field in entity.get("fields", []) if field.get("name") == hash_key), {})
+                if not hash_field.get("primary_key"):
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code="HUB_HASH_KEY_NOT_PRIMARY_KEY",
+                            message=f"Hub '{entity_name}' hash_key '{hash_key}' should be marked primary_key.",
+                            path=f"/entities/{entity_name}/hash_key",
+                        )
+                    )
+        elif entity_type == "link":
+            link_refs = entity.get("link_refs")
+            if not isinstance(link_refs, list) or len(link_refs) < 2:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="LINK_REQUIRES_TWO_REFS",
+                        message=f"Link '{entity_name}' must reference at least two hubs in link_refs.",
+                        path=f"/entities/{entity_name}/link_refs",
+                    )
+                )
+            else:
+                for ref_name in link_refs:
+                    referenced = entities_by_name.get(str(ref_name))
+                    if referenced is None:
+                        issues.append(
+                            Issue(
+                                severity="error",
+                                code="LINK_REF_NOT_FOUND",
+                                message=f"Link '{entity_name}' references unknown hub '{ref_name}'.",
+                                path=f"/entities/{entity_name}/link_refs",
+                            )
+                        )
+                    elif str(referenced.get("type", "")) != "hub":
+                        issues.append(
+                            Issue(
+                                severity="warn",
+                                code="LINK_REF_NOT_HUB",
+                                message=f"Link '{entity_name}' references '{ref_name}' which is not a hub.",
+                                path=f"/entities/{entity_name}/link_refs",
+                            )
+                        )
+            validate_field_property(entity_name, local_fields, "hash_key", "HASH_KEY")
+        elif entity_type == "satellite":
+            parent_entity = str(entity.get("parent_entity") or "").strip()
+            if not parent_entity:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="SATELLITE_MISSING_PARENT",
+                        message=f"Satellite '{entity_name}' must declare parent_entity.",
+                        path=f"/entities/{entity_name}/parent_entity",
+                    )
+                )
+            else:
+                parent = entities_by_name.get(parent_entity)
+                if parent is None:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code="SATELLITE_PARENT_NOT_FOUND",
+                            message=f"Satellite '{entity_name}' references unknown parent_entity '{parent_entity}'.",
+                            path=f"/entities/{entity_name}/parent_entity",
+                        )
+                    )
+                elif str(parent.get("type", "")) not in {"hub", "link"}:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code="SATELLITE_PARENT_WRONG_TYPE",
+                            message=f"Satellite '{entity_name}' parent_entity '{parent_entity}' must be a hub or link.",
+                            path=f"/entities/{entity_name}/parent_entity",
+                        )
+                    )
+
+            hash_diff_fields = entity.get("hash_diff_fields")
+            if not isinstance(hash_diff_fields, list) or not hash_diff_fields:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="SATELLITE_MISSING_HASH_DIFF_FIELDS",
+                        message=f"Satellite '{entity_name}' must declare hash_diff_fields.",
+                        path=f"/entities/{entity_name}/hash_diff_fields",
+                    )
+                )
+        else:
+            for prop_name in ("business_keys", "hash_key", "link_refs", "parent_entity", "hash_diff_fields", "load_timestamp_field", "record_source_field"):
+                if entity.get(prop_name) not in (None, False, "", []):
+                    issues.append(
+                        Issue(
+                            severity="warn",
+                            code="DATA_VAULT_PROPERTY_ON_NON_DV_ENTITY",
+                            message=f"Entity '{entity_name}' declares '{prop_name}' but is not a data vault entity.",
+                            path=f"/entities/{entity_name}/{prop_name}",
+                        )
+                    )
+
+        if model_layer == "source" and entity_type in (DIMENSIONAL_ENTITY_TYPES | DATA_VAULT_ENTITY_TYPES):
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="SOURCE_LAYER_WITH_MODELING_PRIMITIVE",
+                    message=(
+                        f"Entity '{entity_name}' uses '{entity_type}' in a source-layer model. "
+                        "Source layers typically preserve raw source structures rather than dimensional or data vault primitives."
+                    ),
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+        if model_layer == "report" and entity_type in DATA_VAULT_ENTITY_TYPES:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="REPORT_LAYER_WITH_DATA_VAULT_ENTITY",
+                    message=f"Entity '{entity_name}' uses data vault type '{entity_type}' in a report-layer model.",
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+
+        parent_name = str(entity.get("subtype_of") or "").strip()
+        if parent_name:
+            subtype_graph.setdefault(entity_name, set()).add(parent_name)
+            if parent_name == entity_name:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="SUBTYPE_SELF_REFERENCE",
+                        message=f"Entity '{entity_name}' cannot subtype itself.",
+                        path=f"/entities/{entity_name}/subtype_of",
+                    )
+                )
+            elif parent_name in entities_by_name:
+                parent_subtypes = set(str(name) for name in entities_by_name[parent_name].get("subtypes", []) if str(name))
+                if parent_subtypes and entity_name not in parent_subtypes:
+                    issues.append(
+                        Issue(
+                            severity="warn",
+                            code="SUBTYPE_NOT_LISTED_ON_PARENT",
+                            message=f"Entity '{entity_name}' declares subtype_of '{parent_name}' but the parent does not list it in subtypes.",
+                            path=f"/entities/{entity_name}/subtype_of",
+                        )
+                    )
+
+        for child_name in entity.get("subtypes", []) if isinstance(entity.get("subtypes"), list) else []:
+            child_name = str(child_name)
+            subtype_graph.setdefault(child_name, set()).add(entity_name)
+            if child_name == entity_name:
+                issues.append(
+                    Issue(
+                        severity="error",
+                        code="SUPERTYPE_SELF_REFERENCE",
+                        message=f"Entity '{entity_name}' cannot list itself in subtypes.",
+                        path=f"/entities/{entity_name}/subtypes",
+                    )
+                )
+                continue
+            child = entities_by_name.get(child_name)
+            if child is None:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="SUBTYPE_CHILD_NOT_FOUND",
+                        message=f"Entity '{entity_name}' lists unknown subtype '{child_name}'.",
+                        path=f"/entities/{entity_name}/subtypes",
+                    )
+                )
+                continue
+            if str(child.get("subtype_of") or "") not in {"", entity_name}:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="SUPERTYPE_NOT_LINKED_FROM_CHILD",
+                        message=(
+                            f"Entity '{entity_name}' lists subtype '{child_name}', but that child points to "
+                            f"'{child.get('subtype_of')}' instead."
+                        ),
+                        path=f"/entities/{entity_name}/subtypes",
+                    )
+                )
+
+    if any(edges for edges in subtype_graph.values()) and _has_cycle(subtype_graph):
+        issues.append(
+            Issue(
+                severity="error",
+                code="SUBTYPE_CYCLE_DETECTED",
+                message="Subtype/supertype relationships contain a cycle.",
+                path="/entities",
+            )
+        )
+
+    return issues
+
+
 def lint_issues(model: Dict[str, Any]) -> List[Issue]:
+    model = normalize_model(model)
     issues: List[Issue] = []
 
     entities = model.get("entities", [])
@@ -973,6 +1390,8 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
     issues.extend(_lint_glossary(model, refs))
     issues.extend(_lint_grain_and_metrics(model, entity_field_map))
     issues.extend(_lint_smart_nudges(model, entity_field_map, refs))
+    issues.extend(_lint_phase1_modeling_core(model, entity_field_map))
+    issues.extend(_lint_modeling_libraries(model, entity_field_map))
 
     graph = _relationship_graph(model)
     if graph and _has_cycle(graph):
@@ -984,5 +1403,159 @@ def lint_issues(model: Dict[str, Any]) -> List[Issue]:
                 path="/relationships",
             )
         )
+
+    return issues
+
+
+def _lint_modeling_libraries(model: Dict[str, Any], entity_field_map: Dict[str, Set[str]]) -> List[Issue]:
+    issues: List[Issue] = []
+    domain_names = {
+        str(domain.get("name") or "")
+        for domain in model.get("domains", [])
+        if isinstance(domain, dict) and domain.get("name")
+    }
+    template_names = {
+        str(template.get("name") or "")
+        for template in model.get("templates", [])
+        if isinstance(template, dict) and template.get("name")
+    }
+    subject_areas = {
+        str(subject_area.get("name") or "")
+        for subject_area in model.get("subject_areas", [])
+        if isinstance(subject_area, dict) and subject_area.get("name")
+    }
+    kind = str(model.get("model", {}).get("kind", "physical"))
+
+    for entity in model.get("entities", []):
+        if not isinstance(entity, dict):
+            continue
+        entity_name = str(entity.get("name", ""))
+        entity_type = str(entity.get("type", ""))
+        if kind == "conceptual" and entity_type != "concept":
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="CONCEPTUAL_KIND_WITH_PHYSICAL_ENTITY",
+                    message=f"Conceptual model '{entity_name}' should generally use type 'concept'.",
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+        if kind == "logical" and entity_type == "concept":
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="LOGICAL_KIND_WITH_CONCEPT_ENTITY",
+                    message=f"Logical model '{entity_name}' should generally use type 'logical_entity'.",
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+        if kind == "logical" and entity_type in {"table", "view", "materialized_view", "external_table", "snapshot"}:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="LOGICAL_KIND_WITH_PHYSICAL_ENTITY",
+                    message=f"Logical model '{entity_name}' uses physical entity type '{entity_type}'.",
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+        if kind == "physical" and entity_type in {"concept", "logical_entity"}:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="PHYSICAL_KIND_WITH_ABSTRACT_ENTITY",
+                    message=f"Physical model '{entity_name}' should use a physical/dimensional/data-vault entity type.",
+                    path=f"/entities/{entity_name}/type",
+                )
+            )
+        area = str(entity.get("subject_area") or "")
+        if area and subject_areas and area not in subject_areas:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="SUBJECT_AREA_NOT_FOUND",
+                    message=f"Entity '{entity_name}' references undefined subject area '{area}'.",
+                    path=f"/entities/{entity_name}/subject_area",
+                )
+            )
+        template_values = []
+        if entity.get("template"):
+            template_values.append(str(entity.get("template")))
+        template_values.extend(str(item) for item in entity.get("templates", []) if str(item))
+        for template_name in template_values:
+            if template_name not in template_names:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="TEMPLATE_NOT_FOUND",
+                        message=f"Entity '{entity_name}' references unknown template '{template_name}'.",
+                        path=f"/entities/{entity_name}/templates",
+                    )
+                )
+
+        fields = entity.get("fields", [])
+        local_fields = entity_field_map.get(entity_name, set())
+        for field in fields:
+            if not isinstance(field, dict):
+                continue
+            field_name = str(field.get("name", ""))
+            domain_name = str(field.get("domain") or "")
+            if domain_name and domain_name not in domain_names:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="DOMAIN_NOT_FOUND",
+                        message=f"Field '{entity_name}.{field_name}' references unknown domain '{domain_name}'.",
+                        path=f"/entities/{entity_name}/fields/{field_name}/domain",
+                    )
+                )
+        if entity.get("subtype_of") and str(entity.get("subtype_of")) not in entity_field_map:
+            issues.append(
+                Issue(
+                    severity="warn",
+                    code="SUBTYPE_PARENT_NOT_FOUND",
+                    message=f"Entity '{entity_name}' references unknown subtype_of parent '{entity.get('subtype_of')}'.",
+                    path=f"/entities/{entity_name}/subtype_of",
+                )
+            )
+        if entity.get("partition_by"):
+            for field_name in entity.get("partition_by", []):
+                if field_name not in local_fields:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code="PARTITION_FIELD_NOT_FOUND",
+                            message=f"Entity '{entity_name}' partition_by field '{field_name}' does not exist.",
+                            path=f"/entities/{entity_name}/partition_by",
+                        )
+                    )
+            if entity_type in {"concept", "logical_entity"}:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="PHYSICAL_ONLY_PROPERTY_IN_NON_PHYSICAL_MODEL",
+                        message=f"Entity '{entity_name}' declares partition_by in a non-physical entity type.",
+                        path=f"/entities/{entity_name}/partition_by",
+                    )
+                )
+        if entity.get("cluster_by"):
+            for field_name in entity.get("cluster_by", []):
+                if field_name not in local_fields:
+                    issues.append(
+                        Issue(
+                            severity="error",
+                            code="CLUSTER_FIELD_NOT_FOUND",
+                            message=f"Entity '{entity_name}' cluster_by field '{field_name}' does not exist.",
+                            path=f"/entities/{entity_name}/cluster_by",
+                        )
+                    )
+            if entity_type in {"concept", "logical_entity"}:
+                issues.append(
+                    Issue(
+                        severity="warn",
+                        code="PHYSICAL_ONLY_PROPERTY_IN_NON_PHYSICAL_MODEL",
+                        message=f"Entity '{entity_name}' declares cluster_by in a non-physical entity type.",
+                        path=f"/entities/{entity_name}/cluster_by",
+                    )
+                )
 
     return issues
