@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages" / "core_engine" / "src"))
 
-from dm_core.docs_generator import (
+from datalex_core.docs_generator import (
     generate_changelog,
     generate_html_docs,
     generate_markdown_docs,
@@ -17,8 +17,8 @@ from dm_core.docs_generator import (
     write_html_docs,
     write_markdown_docs,
 )
-from dm_core.diffing import semantic_diff
-from dm_core.loader import load_yaml_model
+from datalex_core.diffing import semantic_diff
+from datalex_core.loader import load_yaml_model
 
 ENTERPRISE_MODEL = str(Path(__file__).resolve().parent.parent / "model-examples" / "enterprise-dwh.model.yaml")
 STARTER_MODEL = str(Path(__file__).resolve().parent.parent / "model-examples" / "starter-commerce.model.yaml")

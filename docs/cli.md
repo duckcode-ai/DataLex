@@ -38,7 +38,7 @@ its full option list.
 | `datalex datalex emit ddl <root> --dialect <name>` | Emit per-dialect DDL for every physical entity. `--out <file>` writes to disk; stdout otherwise. |
 
 Currently registered dialects: `postgres`, `snowflake`. The registry is
-pluggable — see `packages/core_engine/src/dm_core/dialects/`.
+pluggable — see `packages/core_engine/src/datalex_core/dialects/`.
 
 ## Semantic diff
 

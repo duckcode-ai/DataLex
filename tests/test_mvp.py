@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core import compile_model, lint_issues, load_schema, load_yaml_model, schema_issues, semantic_diff
+from datalex_core import compile_model, lint_issues, load_schema, load_yaml_model, schema_issues, semantic_diff
 
 
 class MvpTests(unittest.TestCase):

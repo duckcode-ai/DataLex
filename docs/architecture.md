@@ -16,9 +16,9 @@ The authoritative source of truth is a **DataLex project tree** — one YAML
 file per object, dispatched by `kind:`. See
 [datalex-layout.md](./datalex-layout.md) for the reference.
 
-## 2. Core engine modules (`dm_core`)
+## 2. Core engine modules (`datalex_core`)
 
-### 2.1 DataLex loader (`dm_core/datalex/`)
+### 2.1 DataLex loader (`datalex_core/datalex/`)
 
 - **`loader.py`** — streaming, `kind:`-dispatched walker. Reads one file at
   a time; does not materialize the whole project in memory. Source-located
@@ -39,7 +39,7 @@ file per object, dispatched by `kind:`. See
 - **`types.py`** — type palette + composite type parser (`array<T>`,
   `map<K,V>`, `struct<...>`).
 
-### 2.2 Dialect registry (`dm_core/dialects/`)
+### 2.2 Dialect registry (`datalex_core/dialects/`)
 
 - **`base.py`** — `DialectPlugin` protocol (`render_type`,
   `render_entity`, …).
@@ -47,7 +47,7 @@ file per object, dispatched by `kind:`. See
 - **`postgres.py`, `snowflake.py`** — shipped today; plugin shape means
   new dialects are a self-contained module, not an edit to a monolith.
 
-### 2.3 dbt integration (`dm_core/dbt/`)
+### 2.3 dbt integration (`datalex_core/dbt/`)
 
 - **`manifest.py`** — imports `target/manifest.json` into DataLex sources /
   models. Idempotent via `meta.datalex.dbt.unique_id`; user-authored
@@ -64,7 +64,7 @@ file per object, dispatched by `kind:`. See
 - **`emit.py`** — emits `sources.yml` + `models/_schema.yml` with
   `contract.enforced: true` and `data_type:` on every column.
 
-### 2.4 Cross-repo packages (`dm_core/packages.py`)
+### 2.4 Cross-repo packages (`datalex_core/packages.py`)
 
 - `ImportSpec.from_dict` — parses `imports:` entries
   (`org/name@version`, `git:` + `ref:`, or `path:`).
@@ -75,7 +75,7 @@ file per object, dispatched by `kind:`. See
 - Cache root: `~/.datalex/packages/` (override via `--cache-root` or
   `DATALEX_CACHE_ROOT`).
 
-### 2.5 Database connectors (`dm_core/connectors/`)
+### 2.5 Database connectors (`datalex_core/connectors/`)
 
 Full-schema introspection for reverse engineering (distinct from the
 narrow `dbt/warehouse.py`):
@@ -87,12 +87,12 @@ narrow `dbt/warehouse.py`):
 - Used by legacy `datalex pull <connector>` and by `dbt sync` as a fallback
   when the narrow path doesn't support a dialect.
 
-### 2.6 Legacy importers and emitters (`dm_core/`)
+### 2.6 Legacy importers and emitters (`datalex_core/`)
 
 These predate DataLex but remain wired in for reverse-engineering tasks:
 
 - `importers.py` — SQL DDL, DBML, JSON Schema / OpenAPI, Spark schema,
-  dbt manifest (the legacy path; `dm_core/dbt/manifest.py` is the current
+  dbt manifest (the legacy path; `datalex_core/dbt/manifest.py` is the current
   one).
 - `generators.py` — DDL emission; migrated into the dialect registry for
   Postgres and Snowflake, retained for other dialects during rollout.
@@ -128,7 +128,7 @@ See [cli.md](./cli.md) for the current cheat sheet.
 
 ```
 ┌──────────────────┐    1. manifest.json      ┌──────────────────┐
-│ dbt project      │  ─────────────────────▶  │ dm_core.dbt      │
+│ dbt project      │  ─────────────────────▶  │ datalex_core.dbt      │
 │   target/        │    2. profiles.yml       │   .manifest      │
 │   dbt_project.yml│  ─────────────────────▶  │   .profiles      │
 │   profiles.yml   │                          │   .warehouse     │
@@ -164,13 +164,13 @@ Full walkthrough: [tutorial-dbt-sync.md](./tutorial-dbt-sync.md).
 ```text
 DataLex/
   packages/
-    core_engine/src/dm_core/
+    core_engine/src/datalex_core/
       datalex/      # loader, project, migrator, diff, parse cache
       dialects/     # dialect plugin registry (postgres, snowflake, …)
       dbt/          # manifest, profiles, warehouse, sync, emit
       connectors/   # full-schema introspection per warehouse
       …             # legacy importers/emitters/policy kept in parallel
-    cli/src/dm_cli/
+    cli/src/datalex_cli/
       datalex_cli.py        # datalex datalex … subcommand tree
       main.py               # legacy flat commands
     api-server/             # Node.js: UI backend

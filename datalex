@@ -13,7 +13,7 @@ def _add_local_paths() -> None:
 
 def main() -> int:
     _add_local_paths()
-    from dm_cli.main import main as cli_main
+    from datalex_cli.main import main as cli_main
 
     return cli_main()
 

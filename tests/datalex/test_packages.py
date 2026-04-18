@@ -17,9 +17,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
-from dm_core.datalex import load_project  # noqa: E402
-from dm_core.datalex.parse_cache import ParseCache  # noqa: E402
-from dm_core.packages import (  # noqa: E402
+from datalex_core.datalex import load_project  # noqa: E402
+from datalex_core.datalex.parse_cache import ParseCache  # noqa: E402
+from datalex_core.packages import (  # noqa: E402
     ImportSpec,
     PackageResolveError,
     load_imports_for,

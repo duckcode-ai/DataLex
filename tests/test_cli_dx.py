@@ -24,9 +24,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core.migrate import generate_migration, write_migration
-from dm_core.doctor import run_diagnostics, format_diagnostics, diagnostics_as_json, DiagnosticResult
-from dm_core.completion import generate_bash_completion, generate_zsh_completion, generate_fish_completion
+from datalex_core.migrate import generate_migration, write_migration
+from datalex_core.doctor import run_diagnostics, format_diagnostics, diagnostics_as_json, DiagnosticResult
+from datalex_core.completion import generate_bash_completion, generate_zsh_completion, generate_fish_completion
 
 
 # ---------------------------------------------------------------------------
@@ -413,25 +413,25 @@ class TestCLIParser(unittest.TestCase):
     """Tests for CLI parser entries for new commands."""
 
     def test_doctor_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["doctor"])
         self.assertEqual(args.path, ".")
 
     def test_doctor_parser_with_path(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["doctor", "--path", "/tmp"])
         self.assertEqual(args.path, "/tmp")
 
     def test_doctor_parser_json(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["doctor", "--output-json"])
         self.assertTrue(args.output_json)
 
     def test_migrate_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["migrate", "old.yaml", "new.yaml"])
         self.assertEqual(args.old, "old.yaml")
@@ -439,19 +439,19 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.dialect, "postgres")
 
     def test_migrate_parser_dialect(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["migrate", "old.yaml", "new.yaml", "--dialect", "snowflake"])
         self.assertEqual(args.dialect, "snowflake")
 
     def test_migrate_parser_out(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["migrate", "old.yaml", "new.yaml", "--out", "migration.sql"])
         self.assertEqual(args.out, "migration.sql")
 
     def test_apply_parser_sql_file_dry_run(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "apply", "snowflake", "--sql-file", "migration.sql", "--dry-run", "--dialect", "snowflake"
@@ -461,7 +461,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertTrue(args.dry_run)
 
     def test_apply_parser_old_new(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "apply", "bigquery", "--old", "old.model.yaml", "--new", "new.model.yaml", "--project", "p", "--dataset", "d"
@@ -473,7 +473,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.dataset, "d")
 
     def test_apply_parser_guardrail_and_report_flags(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "apply", "snowflake", "--sql-file", "migration.sql", "--allow-destructive",
@@ -488,7 +488,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertTrue(args.output_json)
 
     def test_detect_destructive_statements(self):
-        from dm_cli.main import _detect_destructive_statements
+        from datalex_cli.main import _detect_destructive_statements
         findings = _detect_destructive_statements([
             "CREATE TABLE demo (id INT)",
             "DROP TABLE demo",
@@ -500,32 +500,32 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(findings[1]["statement_index"], 3)
 
     def test_completion_parser_bash(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["completion", "bash"])
         self.assertEqual(args.shell, "bash")
 
     def test_completion_parser_zsh(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["completion", "zsh"])
         self.assertEqual(args.shell, "zsh")
 
     def test_completion_parser_fish(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["completion", "fish"])
         self.assertEqual(args.shell, "fish")
 
     def test_watch_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["watch"])
         self.assertEqual(args.glob, "**/*.model.yaml")
         self.assertEqual(args.interval, 2)
 
     def test_watch_parser_custom(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["watch", "--glob", "models/*.yaml", "--interval", "5"])
         self.assertEqual(args.glob, "models/*.yaml")
@@ -542,7 +542,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_doctor_runs(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "doctor", "--path", str(ROOT)],
+            [sys.executable, "-m", "datalex_cli.main", "doctor", "--path", str(ROOT)],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -551,7 +551,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_doctor_json_runs(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "doctor", "--path", str(ROOT), "--output-json"],
+            [sys.executable, "-m", "datalex_cli.main", "doctor", "--path", str(ROOT), "--output-json"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -563,7 +563,7 @@ class TestCLIIntegration(unittest.TestCase):
         import subprocess
         model_path = str(ROOT / "model-examples" / "starter-commerce.model.yaml")
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "migrate", model_path, model_path],
+            [sys.executable, "-m", "datalex_cli.main", "migrate", model_path, model_path],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -577,7 +577,7 @@ class TestCLIIntegration(unittest.TestCase):
             sql_path = f.name
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
+                [sys.executable, "-m", "datalex_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
                 capture_output=True, text=True, cwd=str(ROOT),
                 env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
             )
@@ -594,7 +594,7 @@ class TestCLIIntegration(unittest.TestCase):
             sql_path = f.name
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
+                [sys.executable, "-m", "datalex_cli.main", "apply", "snowflake", "--sql-file", sql_path, "--dry-run", "--dialect", "snowflake"],
                 capture_output=True, text=True, cwd=str(ROOT),
                 env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
             )
@@ -615,7 +615,7 @@ class TestCLIIntegration(unittest.TestCase):
         try:
             result = subprocess.run(
                 [
-                    sys.executable, "-m", "dm_cli.main", "apply", "snowflake", "--sql-file", sql_path,
+                    sys.executable, "-m", "datalex_cli.main", "apply", "snowflake", "--sql-file", sql_path,
                     "--dry-run", "--dialect", "snowflake", "--allow-destructive",
                     "--report-json", report_path, "--write-sql", write_sql_path, "--output-json",
                 ],
@@ -641,7 +641,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_completion_bash_runs(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "completion", "bash"],
+            [sys.executable, "-m", "datalex_cli.main", "completion", "bash"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -651,7 +651,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_completion_zsh_runs(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "completion", "zsh"],
+            [sys.executable, "-m", "datalex_cli.main", "completion", "zsh"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -661,7 +661,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_completion_fish_runs(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "completion", "fish"],
+            [sys.executable, "-m", "datalex_cli.main", "completion", "fish"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -677,13 +677,13 @@ class TestModuleFiles(unittest.TestCase):
     """Verify new module files exist."""
 
     def test_migrate_module(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "migrate.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "migrate.py").exists())
 
     def test_doctor_module(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "doctor.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "doctor.py").exists())
 
     def test_completion_module(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "completion.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "completion.py").exists())
 
 
 if __name__ == "__main__":

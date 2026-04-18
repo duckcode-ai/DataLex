@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core.importers import import_spark_schema, import_sql_ddl, import_dbml
-from dm_core.connectors.base import (
+from datalex_core.importers import import_spark_schema, import_sql_ddl, import_dbml
+from datalex_core.connectors.base import (
     BaseConnector,
     ConnectorConfig,
     ConnectorResult,
@@ -31,13 +31,13 @@ from dm_core.connectors.base import (
     _to_pascal,
     _default_model,
 )
-from dm_core.connectors.postgres import PostgresConnector
-from dm_core.connectors.mysql import MySQLConnector
-from dm_core.connectors.snowflake import SnowflakeConnector
-from dm_core.connectors.bigquery import BigQueryConnector
-from dm_core.connectors.databricks import DatabricksConnector
-from dm_core.connectors.sqlserver import SQLServerConnector, AzureSQLConnector, AzureFabricConnector
-from dm_core.connectors.redshift import RedshiftConnector
+from datalex_core.connectors.postgres import PostgresConnector
+from datalex_core.connectors.mysql import MySQLConnector
+from datalex_core.connectors.snowflake import SnowflakeConnector
+from datalex_core.connectors.bigquery import BigQueryConnector
+from datalex_core.connectors.databricks import DatabricksConnector
+from datalex_core.connectors.sqlserver import SQLServerConnector, AzureSQLConnector, AzureFabricConnector
+from datalex_core.connectors.redshift import RedshiftConnector
 
 
 FIXTURES = ROOT / "tests" / "fixtures"
@@ -493,7 +493,7 @@ class TestCLIParser(unittest.TestCase):
     """Tests for CLI parser entries for new commands."""
 
     def test_pull_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "postgres", "--host", "localhost", "--database", "mydb"])
         self.assertEqual(args.connector, "postgres")
@@ -501,28 +501,28 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.database, "mydb")
 
     def test_pull_parser_snowflake(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "snowflake", "--host", "acct.snowflakecomputing.com", "--warehouse", "WH"])
         self.assertEqual(args.connector, "snowflake")
         self.assertEqual(args.warehouse, "WH")
 
     def test_pull_parser_bigquery(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "bigquery", "--project", "my-project", "--dataset", "my_dataset"])
         self.assertEqual(args.project, "my-project")
         self.assertEqual(args.dataset, "my_dataset")
 
     def test_pull_parser_databricks(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "databricks", "--host", "host.databricks.com", "--token", "abc", "--catalog", "main"])
         self.assertEqual(args.token, "abc")
         self.assertEqual(args.catalog, "main")
 
     def test_pull_parser_databricks_http_path(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "pull", "databricks", "--host", "host.databricks.com", "--token", "abc",
@@ -531,14 +531,14 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.http_path, "/sql/1.0/warehouses/123")
 
     def test_pull_parser_sqlserver(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "sqlserver", "--host", "sql.example.com", "--database", "warehouse", "--user", "svc"])
         self.assertEqual(args.connector, "sqlserver")
         self.assertEqual(args.database, "warehouse")
 
     def test_pull_parser_sqlserver_odbc_options(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "pull", "sqlserver", "--host", "sql.example.com", "--database", "warehouse",
@@ -550,52 +550,52 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.trust_server_certificate, "yes")
 
     def test_pull_parser_azure_sql(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "azure_sql", "--host", "srv.database.windows.net", "--database", "analytics"])
         self.assertEqual(args.connector, "azure_sql")
         self.assertEqual(args.host, "srv.database.windows.net")
 
     def test_pull_parser_redshift(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "redshift", "--host", "cluster.redshift.amazonaws.com", "--database", "dev"])
         self.assertEqual(args.connector, "redshift")
         self.assertEqual(args.database, "dev")
 
     def test_pull_parser_azure_fabric(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "azure_fabric", "--host", "workspace.fabric.microsoft.com", "--database", "SalesWarehouse"])
         self.assertEqual(args.connector, "azure_fabric")
         self.assertEqual(args.database, "SalesWarehouse")
 
     def test_pull_parser_test_flag(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "postgres", "--test"])
         self.assertTrue(args.test)
 
     def test_pull_parser_tables_filter(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "postgres", "--tables", "users", "orders"])
         self.assertEqual(args.tables, ["users", "orders"])
 
     def test_pull_parser_exclude_tables(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "postgres", "--exclude-tables", "temp"])
         self.assertEqual(args.exclude_tables, ["temp"])
 
     def test_pull_parser_out(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["pull", "mysql", "--out", "model.yaml"])
         self.assertEqual(args.out, "model.yaml")
 
     def test_pull_parser_project_dir(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(
             ["pull", "postgres", "--project-dir", "model-examples/new_project", "--create-project-dir"]
@@ -604,13 +604,13 @@ class TestCLIParser(unittest.TestCase):
         self.assertTrue(args.create_project_dir)
 
     def test_normalize_host_and_port_url_input(self):
-        from dm_cli.main import _normalize_host_and_port
+        from datalex_cli.main import _normalize_host_and_port
         host, port = _normalize_host_and_port("http://127.0.0.1:5432", 0)
         self.assertEqual(host, "127.0.0.1")
         self.assertEqual(port, 5432)
 
     def test_resolve_pull_output_path_project_dir_default_name(self):
-        from dm_cli.main import _resolve_pull_output_path
+        from datalex_cli.main import _resolve_pull_output_path
         with tempfile.TemporaryDirectory() as tmp:
             class Args:
                 project_dir = tmp
@@ -621,7 +621,7 @@ class TestCLIParser(unittest.TestCase):
             self.assertEqual(value, str(Path(tmp) / "orders.model.yaml"))
 
     def test_resolve_pull_output_path_creates_missing_project_dir_when_flagged(self):
-        from dm_cli.main import _resolve_pull_output_path
+        from datalex_cli.main import _resolve_pull_output_path
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "new_project_dir"
 
@@ -636,7 +636,7 @@ class TestCLIParser(unittest.TestCase):
             self.assertEqual(value, str(target / "orders.model.yaml"))
 
     def test_resolve_pull_output_path_prompts_to_create_missing_dir(self):
-        from dm_cli.main import _resolve_pull_output_path
+        from datalex_cli.main import _resolve_pull_output_path
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "prompt_project_dir"
 
@@ -645,7 +645,7 @@ class TestCLIParser(unittest.TestCase):
                 out = ""
                 create_project_dir = False
 
-            with patch("dm_cli.main.sys.stdin.isatty", return_value=True), patch(
+            with patch("datalex_cli.main.sys.stdin.isatty", return_value=True), patch(
                 "builtins.input", return_value="y"
             ):
                 ok, value = _resolve_pull_output_path(Args(), "orders")
@@ -655,7 +655,7 @@ class TestCLIParser(unittest.TestCase):
             self.assertEqual(value, str(target / "orders.model.yaml"))
 
     def test_build_connector_config_normalizes_url_host(self):
-        from dm_cli.main import _build_connector_config, build_parser
+        from datalex_cli.main import _build_connector_config, build_parser
         parser = build_parser()
         args = parser.parse_args(
             ["schemas", "postgres", "--host", "http://127.0.0.1:5432/", "--database", "postgres"]
@@ -665,7 +665,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(config.port, 5432)
 
     def test_build_connector_config_sqlserver_odbc_options(self):
-        from dm_cli.main import _build_connector_config, build_parser
+        from datalex_cli.main import _build_connector_config, build_parser
         parser = build_parser()
         args = parser.parse_args([
             "schemas", "sqlserver", "--host", "sql.example.com", "--database", "warehouse",
@@ -678,7 +678,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(config.extra.get("trust_server_certificate"), "yes")
 
     def test_build_connector_config_databricks_http_path(self):
-        from dm_cli.main import _build_connector_config, build_parser
+        from datalex_cli.main import _build_connector_config, build_parser
         parser = build_parser()
         args = parser.parse_args([
             "schemas", "databricks", "--host", "dbc.example.com", "--token", "abc",
@@ -688,37 +688,37 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(config.extra.get("http_path"), "/sql/1.0/warehouses/123")
 
     def test_connectors_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["connectors"])
         self.assertFalse(args.output_json)
 
     def test_connectors_parser_json(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["connectors", "--output-json"])
         self.assertTrue(args.output_json)
 
     def test_import_spark_schema_parser(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["import", "spark-schema", "schema.json"])
         self.assertEqual(args.input, "schema.json")
 
     def test_import_spark_schema_parser_table_name(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["import", "spark-schema", "schema.json", "--table-name", "users"])
         self.assertEqual(args.table_name, "users")
 
     def test_import_sql_still_works(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["import", "sql", "schema.sql"])
         self.assertEqual(args.input, "schema.sql")
 
     def test_import_dbml_still_works(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args(["import", "dbml", "schema.dbml"])
         self.assertEqual(args.input, "schema.dbml")
@@ -732,15 +732,15 @@ class TestRemovedImporters(unittest.TestCase):
     """Verify old importers are removed."""
 
     def test_no_import_json_schema(self):
-        import dm_core.importers as imp
+        import datalex_core.importers as imp
         self.assertFalse(hasattr(imp, "import_json_schema"))
 
     def test_no_import_dbt_manifest(self):
-        import dm_core.importers as imp
+        import datalex_core.importers as imp
         self.assertFalse(hasattr(imp, "import_dbt_manifest"))
 
     def test_no_import_avro_schema(self):
-        import dm_core.importers as imp
+        import datalex_core.importers as imp
         self.assertFalse(hasattr(imp, "import_avro_schema"))
 
     def test_no_avro_fixture(self):
@@ -782,7 +782,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_connectors_command(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "connectors"],
+            [sys.executable, "-m", "datalex_cli.main", "connectors"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -800,7 +800,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_connectors_json_command(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "connectors", "--output-json"],
+            [sys.executable, "-m", "datalex_cli.main", "connectors", "--output-json"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -814,7 +814,7 @@ class TestCLIIntegration(unittest.TestCase):
         import subprocess
         fixture = str(FIXTURES / "sample_spark_schema.json")
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "import", "spark-schema", fixture, "--table-name", "users"],
+            [sys.executable, "-m", "datalex_cli.main", "import", "spark-schema", fixture, "--table-name", "users"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -826,7 +826,7 @@ class TestCLIIntegration(unittest.TestCase):
     def test_pull_unknown_connector(self):
         import subprocess
         result = subprocess.run(
-            [sys.executable, "-m", "dm_cli.main", "pull", "nonexistent_db"],
+            [sys.executable, "-m", "datalex_cli.main", "pull", "nonexistent_db"],
             capture_output=True, text=True, cwd=str(ROOT),
             env={**os.environ, "PYTHONPATH": str(ROOT / "packages" / "core_engine" / "src") + ":" + str(ROOT / "packages" / "cli" / "src")},
         )
@@ -842,31 +842,31 @@ class TestModuleFiles(unittest.TestCase):
     """Verify connector module files exist."""
 
     def test_connectors_init(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "__init__.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "__init__.py").exists())
 
     def test_connectors_base(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "base.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "base.py").exists())
 
     def test_connectors_postgres(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "postgres.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "postgres.py").exists())
 
     def test_connectors_mysql(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "mysql.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "mysql.py").exists())
 
     def test_connectors_snowflake(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "snowflake.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "snowflake.py").exists())
 
     def test_connectors_bigquery(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "bigquery.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "bigquery.py").exists())
 
     def test_connectors_databricks(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "databricks.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "databricks.py").exists())
 
     def test_connectors_sqlserver(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "sqlserver.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "sqlserver.py").exists())
 
     def test_connectors_redshift(self):
-        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "dm_core" / "connectors" / "redshift.py").exists())
+        self.assertTrue((ROOT / "packages" / "core_engine" / "src" / "datalex_core" / "connectors" / "redshift.py").exists())
 
 
 if __name__ == "__main__":

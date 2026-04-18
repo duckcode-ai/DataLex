@@ -14,10 +14,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
-from dm_core.datalex import load_project
-from dm_core.datalex.diff import diff_entities
-from dm_core.datalex.migrate_layout import migrate_project
-from dm_core.datalex.types import parse_type
+from datalex_core.datalex import load_project
+from datalex_core.datalex.diff import diff_entities
+from datalex_core.datalex.migrate_layout import migrate_project
+from datalex_core.datalex.types import parse_type
 
 
 def _write(p: Path, body: str) -> None:
