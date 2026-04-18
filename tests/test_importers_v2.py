@@ -1,4 +1,4 @@
-"""Tests for importers used by local/open-source DuckCodeModeling workflows."""
+"""Tests for importers used by local/open-source DataLex workflows."""
 
 import json
 import subprocess
@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages" / "core_engine" / "src"))
 
-from dm_core.importers import import_dbt_schema_yml, import_sql_ddl
+from datalex_core.importers import import_dbt_schema_yml, import_sql_ddl
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 DM_CLI = str(Path(__file__).resolve().parent.parent / "dm")

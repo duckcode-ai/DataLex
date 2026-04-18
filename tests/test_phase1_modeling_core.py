@@ -7,11 +7,11 @@ from typing import Any, Dict
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
-from dm_core.diffing import semantic_diff
-from dm_core.modeling import transform_model
-from dm_core.policy import policy_issues
-from dm_core.schema import load_schema, schema_issues
-from dm_core.semantic import lint_issues
+from datalex_core.diffing import semantic_diff
+from datalex_core.modeling import transform_model
+from datalex_core.policy import policy_issues
+from datalex_core.schema import load_schema, schema_issues
+from datalex_core.semantic import lint_issues
 
 
 SCHEMA_PATH = str(ROOT / "schemas" / "model.schema.json")

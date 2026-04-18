@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core import compile_model, lint_issues, load_schema, load_yaml_model, schema_issues, semantic_diff
+from datalex_core import compile_model, lint_issues, load_schema, load_yaml_model, schema_issues, semantic_diff
 
 
 class MvpTests(unittest.TestCase):
@@ -55,7 +55,7 @@ class MvpTests(unittest.TestCase):
 
     def test_cli_validate_all(self) -> None:
         result = subprocess.run(
-            ["./dm", "validate-all", "--glob", "model-examples/*.model.yaml"],
+            ["./datalex", "validate-all", "--glob", "model-examples/*.model.yaml"],
             cwd=ROOT,
             check=False,
             capture_output=True,
@@ -67,7 +67,7 @@ class MvpTests(unittest.TestCase):
     def test_cli_gate_blocks_breaking_changes(self) -> None:
         result = subprocess.run(
             [
-                "./dm",
+                "./datalex",
                 "gate",
                 str(self.sample_model),
                 str(self.updated_model),
@@ -83,7 +83,7 @@ class MvpTests(unittest.TestCase):
     def test_cli_gate_allow_breaking(self) -> None:
         result = subprocess.run(
             [
-                "./dm",
+                "./datalex",
                 "gate",
                 str(self.sample_model),
                 str(self.updated_model),

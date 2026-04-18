@@ -1,6 +1,6 @@
 # Multi-Model Demo
 
-This directory demonstrates DuckCodeModeling's **multi-model cross-reference** capabilities — a key Phase 2 feature that enables real-world projects with 10-50+ model files to compose and reference entities across files.
+This directory demonstrates DataLex's **multi-model cross-reference** capabilities — a key Phase 2 feature that enables real-world projects with 10-50+ model files to compose and reference entities across files.
 
 ## Structure
 
@@ -35,16 +35,16 @@ products (imports: orders → alias "ord", entities: OrderItem)
 
 ```bash
 # Resolve a single model and its imports
-./dm resolve model-examples/multi-model-demo/orders.model.yaml
+./datalex resolve model-examples/multi-model-demo/orders.model.yaml
 
 # Resolve all models in the project
-./dm resolve-project model-examples/multi-model-demo
+./datalex resolve-project model-examples/multi-model-demo
 
 # Diff two project directories
-./dm diff-all model-examples/multi-model-demo model-examples/multi-model-demo
+./datalex diff-all model-examples/multi-model-demo model-examples/multi-model-demo
 
 # JSON output for CI integration
-./dm resolve model-examples/multi-model-demo/products.model.yaml --output-json
+./datalex resolve model-examples/multi-model-demo/products.model.yaml --output-json
 ```
 
 ## Entity Counts (after resolution)

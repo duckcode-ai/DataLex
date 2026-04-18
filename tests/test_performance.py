@@ -8,7 +8,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
-from dm_core import compile_model, semantic_diff
+from datalex_core import compile_model, semantic_diff
 
 
 def make_large_model(entity_count=250, field_count=8):

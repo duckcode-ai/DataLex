@@ -18,8 +18,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
-from dm_core.datalex import load_project
-from dm_core.dbt import emit_dbt, import_manifest, write_import_result
+from datalex_core.datalex import load_project
+from datalex_core.dbt import emit_dbt, import_manifest, write_import_result
 
 
 def _write(p: Path, body: str) -> None:

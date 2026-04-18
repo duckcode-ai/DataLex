@@ -14,12 +14,12 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "packages" / "core_engine" / "src"))
 
-from dm_core.canonical import compile_model
-from dm_core.diffing import semantic_diff
-from dm_core.generators import generate_sql_ddl
-from dm_core.loader import load_yaml_model
-from dm_core.schema import load_schema, schema_issues
-from dm_core.semantic import lint_issues
+from datalex_core.canonical import compile_model
+from datalex_core.diffing import semantic_diff
+from datalex_core.generators import generate_sql_ddl
+from datalex_core.loader import load_yaml_model
+from datalex_core.schema import load_schema, schema_issues
+from datalex_core.semantic import lint_issues
 
 SCHEMA_PATH = str(Path(__file__).resolve().parent.parent / "schemas" / "model.schema.json")
 DM_CLI = str(Path(__file__).resolve().parent.parent / "dm")

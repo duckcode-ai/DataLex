@@ -20,9 +20,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core.datalex import load_project
-import dm_core.dialects  # noqa: F401  — registers built-in dialects
-from dm_core.dialects.registry import get_dialect
+from datalex_core.datalex import load_project
+import datalex_core.dialects  # noqa: F401  — registers built-in dialects
+from datalex_core.dialects.registry import get_dialect
 
 
 REGEN = os.environ.get("DATALEX_REGEN_GOLDEN") == "1"

@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 # ---------------------------------------------------------------------------
 # Imports from core engine
 # ---------------------------------------------------------------------------
-from dm_core.policy import (
+from datalex_core.policy import (
     _naming_convention,
     _require_indexes,
     _require_owner,
@@ -42,8 +42,8 @@ from dm_core.policy import (
     load_policy_pack_with_inheritance,
     policy_issues,
 )
-from dm_core.schema import load_schema, schema_issues
-from dm_core.issues import Issue, has_errors
+from datalex_core.schema import load_schema, schema_issues
+from datalex_core.issues import Issue, has_errors
 
 
 # ---------------------------------------------------------------------------
@@ -861,16 +861,16 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "github-actions.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DuckCodeModeling", content)
-        self.assertIn("dm validate", content)
-        self.assertIn("dm policy-check", content)
-        self.assertIn("dm gate", content)
+        self.assertIn("DataLex", content)
+        self.assertIn("datalex validate", content)
+        self.assertIn("datalex policy-check", content)
+        self.assertIn("datalex gate", content)
 
     def test_gitlab_ci_template_exists(self):
         path = ROOT / "ci-templates" / "gitlab-ci.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DuckCodeModeling", content)
+        self.assertIn("DataLex", content)
         self.assertIn("validate-models", content)
         self.assertIn("policy-check", content)
 
@@ -878,7 +878,7 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "bitbucket-pipelines.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DuckCodeModeling", content)
+        self.assertIn("DataLex", content)
         self.assertIn("Validate Models", content)
         self.assertIn("Policy Check", content)
 
@@ -886,9 +886,9 @@ class TestCITemplates(unittest.TestCase):
         path = ROOT / "ci-templates" / "pr-comment-bot.yml"
         self.assertTrue(path.exists(), f"Missing: {path}")
         content = path.read_text()
-        self.assertIn("DuckCodeModeling", content)
+        self.assertIn("DataLex", content)
         self.assertIn("PR Comment", content)
-        self.assertIn("dm diff", content)
+        self.assertIn("datalex diff", content)
 
 
 # ===========================================================================
@@ -899,7 +899,7 @@ class TestCLIPolicyCheck(unittest.TestCase):
     """Tests for CLI policy-check command with new features."""
 
     def test_cli_parser_has_inherit_flag(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "policy-check",
@@ -909,7 +909,7 @@ class TestCLIPolicyCheck(unittest.TestCase):
         self.assertTrue(args.inherit)
 
     def test_cli_parser_default_no_inherit(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
         parser = build_parser()
         args = parser.parse_args([
             "policy-check",

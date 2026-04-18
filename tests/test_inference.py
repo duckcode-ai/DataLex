@@ -1,7 +1,7 @@
 """Tests for PK/FK inference engine in base connector."""
 
 import pytest
-from dm_core.connectors.base import infer_primary_keys, infer_relationships
+from datalex_core.connectors.base import infer_primary_keys, infer_relationships
 
 
 # ---------------------------------------------------------------------------

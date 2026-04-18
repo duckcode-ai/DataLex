@@ -107,7 +107,7 @@ class DbtSyncEndToEndTest(unittest.TestCase):
         return project
 
     def test_sync_enriches_columns_from_warehouse(self) -> None:
-        from dm_core.dbt.sync import sync_dbt_project
+        from datalex_core.dbt.sync import sync_dbt_project
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -155,7 +155,7 @@ class DbtSyncEndToEndTest(unittest.TestCase):
             self.assertEqual(mdl_cols["customer_id"]["type"], "bigint")
 
     def test_skip_warehouse_falls_back_to_manifest(self) -> None:
-        from dm_core.dbt.sync import sync_dbt_project
+        from datalex_core.dbt.sync import sync_dbt_project
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)
@@ -174,7 +174,7 @@ class DbtSyncEndToEndTest(unittest.TestCase):
             self.assertTrue((out_root / "sources" / "raw.yaml").exists())
 
     def test_resync_preserves_user_authored_fields(self) -> None:
-        from dm_core.dbt.sync import sync_dbt_project
+        from datalex_core.dbt.sync import sync_dbt_project
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp = Path(tmpdir)

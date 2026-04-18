@@ -1,13 +1,13 @@
-# DuckCodeModeling Model Quality — GitHub Actions
-# Copy this file to .github/workflows/duckcodemodeling-quality.yml in your repository.
+# DataLex Model Quality — GitHub Actions
+# Copy this file to .github/workflows/datalex-quality.yml in your repository.
 #
 # Prerequisites:
 #   - Python 3.9+ installed
-#   - DuckCodeModeling CLI available (pip install -r requirements.txt)
+#   - DataLex CLI available (pip install -r requirements.txt)
 #   - Model files in **/*.model.yaml
 #   - Policy pack in policies/default.policy.yaml
 
-name: DuckCodeModeling Model Quality
+name: DataLex Model Quality
 
 on:
   push:
@@ -29,19 +29,19 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install DuckCodeModeling
+      - name: Install DataLex
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install -r requirements.txt
 
       - name: Validate all models
-        run: ./dm validate-all --schema schemas/model.schema.json
+        run: ./datalex validate-all --schema schemas/model.schema.json
 
       - name: Run policy checks
         run: |
           for model in $(find . -name '*.model.yaml' -not -path '*/node_modules/*' -not -path '*/.git/*'); do
             echo "Policy check: ${model}"
-            ./dm policy-check "${model}" \
+            ./datalex policy-check "${model}" \
               --policy policies/default.policy.yaml \
               --schema schemas/model.schema.json
           done
@@ -66,14 +66,14 @@ jobs:
             if git cat-file -e "${BASE_REF}:${model_path}" 2>/dev/null; then
               git show "${BASE_REF}:${model_path}" > /tmp/base-model.yaml
               if [ -f "${model_path}" ]; then
-                ./dm gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
+                ./datalex gate /tmp/base-model.yaml "${model_path}" --schema schemas/model.schema.json
               else
                 echo "Deleted model file '${model_path}' is treated as breaking."
                 exit 2
               fi
             else
               if [ -f "${model_path}" ]; then
-                ./dm validate "${model_path}" --schema schemas/model.schema.json
+                ./datalex validate "${model_path}" --schema schemas/model.schema.json
               fi
             fi
           done

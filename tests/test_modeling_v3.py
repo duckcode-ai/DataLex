@@ -14,9 +14,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "packages" / "cli" / "src"))
 
-from dm_core.canonical import compile_model
-from dm_core.modeling import apply_standards_fixes, normalize_model, standards_issues, transform_model
-from dm_core.schema import load_schema, schema_issues
+from datalex_core.canonical import compile_model
+from datalex_core.modeling import apply_standards_fixes, normalize_model, standards_issues, transform_model
+from datalex_core.schema import load_schema, schema_issues
 
 SCHEMA_PATH = str(ROOT / "schemas" / "model.schema.json")
 DM_CLI = str(ROOT / "dm")
@@ -157,7 +157,7 @@ class TestModelingV3Standards(unittest.TestCase):
 
 class TestModelingV3CLI(unittest.TestCase):
     def test_parser_transform_command(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
 
         parser = build_parser()
         args = parser.parse_args(["transform", "logical-to-physical", "model.yaml", "--dialect", "snowflake"])
@@ -165,7 +165,7 @@ class TestModelingV3CLI(unittest.TestCase):
         self.assertEqual(args.dialect, "snowflake")
 
     def test_parser_standards_and_sync_commands(self):
-        from dm_cli.main import build_parser
+        from datalex_cli.main import build_parser
 
         parser = build_parser()
         standards_args = parser.parse_args(["standards", "check", "model.yaml"])

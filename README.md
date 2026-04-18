@@ -1,9 +1,9 @@
 <div align="center">
   <a href="https://duckcode.ai/" target="_blank" rel="noopener noreferrer">
-    <img src="Assets/DuckCodeModeling.png" alt="DuckCodeModeling by DuckCode AI Labs" width="220" />
+    <img src="Assets/DataLex.png" alt="DataLex by DuckCode AI Labs" width="220" />
   </a>
 
-# DuckCodeModeling
+# DataLex
 
 **Git-native data modeling for dbt users.**
 
@@ -11,14 +11,14 @@ Point us at your dbt project and warehouse — we produce versioned, reviewable 
 with contracts, lineage, ERDs, and clean round-trip back to dbt.
 
 <p align="center">
-  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=22c55e" alt="MIT License" />
+  <a href="https://github.com/duckcode-ai/DataLex/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/duckcode-ai/DataLex?style=for-the-badge&color=22c55e" alt="MIT License" />
   </a>
   <a href="https://discord.gg/Dnm6bUvk">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Community" />
   </a>
-  <a href="https://github.com/duckcode-ai/DuckCode-Modeling/stargazers">
-    <img src="https://img.shields.io/github/stars/duckcode-ai/DuckCode-Modeling?style=for-the-badge&color=f59e0b" alt="GitHub Stars" />
+  <a href="https://github.com/duckcode-ai/DataLex/stargazers">
+    <img src="https://img.shields.io/github/stars/duckcode-ai/DataLex?style=for-the-badge&color=f59e0b" alt="GitHub Stars" />
   </a>
 </p>
 </div>
@@ -26,19 +26,19 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 ## 60-second demo
 
 ```bash
-git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
-cd DuckCode-Modeling
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
 pip install -r requirements.txt
 
 # 1. Build a local DuckDB warehouse (no external credentials)
 python examples/jaffle_shop_demo/setup.py
 
 # 2. Sync the dbt project into DataLex YAML
-./dm datalex dbt sync examples/jaffle_shop_demo \
+./datalex datalex dbt sync examples/jaffle_shop_demo \
     --out-root examples/jaffle_shop_demo/datalex-out
 
 # 3. Emit dbt-parseable YAML back, with contracts enforced
-./dm datalex dbt emit examples/jaffle_shop_demo/datalex-out \
+./datalex datalex dbt emit examples/jaffle_shop_demo/datalex-out \
     --out-dir examples/jaffle_shop_demo/dbt-out
 ```
 
@@ -49,20 +49,20 @@ anything you've hand-authored.
 
 ## What it does
 
-DuckCodeModeling treats your data models as code. On top of a stricter YAML
+DataLex treats your data models as code. On top of a stricter YAML
 substrate (the **DataLex** layout — one file per entity, `kind:`-dispatched,
 streaming-safe for 10K+ entities), it gives you:
 
-- **`dm datalex dbt sync <project>`** — reads `target/manifest.json` + your
+- **`datalex datalex dbt sync <project>`** — reads `target/manifest.json` + your
   `profiles.yml`, introspects live column types, and merges them into
   DataLex YAML. Idempotent: user-authored `description:`, `tags:`,
   `sensitivity:`, and `tests:` survive re-sync.
-- **`dm datalex dbt emit`** — writes `sources.yml` and `schema.yml` with
+- **`datalex datalex dbt emit`** — writes `sources.yml` and `schema.yml` with
   `contract.enforced: true` and `data_type:` on every column. `dbt parse`
   succeeds out of the box.
-- **`dm datalex emit ddl --dialect ...`** — Postgres, Snowflake, BigQuery,
+- **`datalex datalex emit ddl --dialect ...`** — Postgres, Snowflake, BigQuery,
   Databricks, MySQL, SQL Server, Redshift. Same source, all dialects.
-- **`dm datalex diff`** — semantic diff with explicit rename tracking
+- **`datalex datalex diff`** — semantic diff with explicit rename tracking
   (`previous_name:`), breaking-change gate for CI.
 - **Cross-repo package imports** — pin `acme/warehouse-core@1.4.0` in
   `imports:`, lockfile + content hash drift detection, Git-or-path
@@ -90,8 +90,8 @@ per-dialect over time).
 ## Install
 
 ```bash
-git clone https://github.com/duckcode-ai/DuckCode-Modeling.git
-cd DuckCode-Modeling
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
 
 python3 -m venv .venv
 source .venv/bin/activate
@@ -107,10 +107,10 @@ Prereqs: Python 3.9+, Git. Node.js 18+ if you want the UI.
 ## Project layout
 
 ```text
-DuckCodeModeling/
+DataLex/
   packages/
     core_engine/           # Python: loader, dialects, dbt integration, packages
-    cli/                   # `dm` entry point
+    cli/                   # `datalex` entry point
     api-server/            # Node.js API (UI backend)
     web-app/               # React Flow studio
   schemas/datalex/         # JSON Schema per `kind:` (project, entity, source, ...)
@@ -137,13 +137,13 @@ files the CLI does — no database, no hosted service.
 
 ## CI / GitOps
 
-DuckCodeModeling is designed to live in your repo next to your dbt project.
+DataLex is designed to live in your repo next to your dbt project.
 A typical CI step:
 
 ```bash
-./dm datalex validate datalex/
-./dm datalex diff datalex-main/ datalex/ --exit-on-breaking
-./dm datalex dbt emit datalex/ --out-dir dbt/
+./datalex datalex validate datalex/
+./datalex datalex diff datalex-main/ datalex/ --exit-on-breaking
+./datalex datalex dbt emit datalex/ --out-dir dbt/
 dbt parse
 ```
 
@@ -153,7 +153,7 @@ dbt parse
   full jaffle_shop walkthrough with explanations.
 - **[DataLex layout reference](docs/datalex-layout.md)** — what each
   `kind:` file looks like and how the loader discovers them.
-- **[CLI cheat sheet](docs/cli.md)** — every `dm datalex …` subcommand on
+- **[CLI cheat sheet](docs/cli.md)** — every `datalex datalex …` subcommand on
   one page.
 - **[Architecture](docs/architecture.md)** — core engine modules and
   end-to-end data flow.
@@ -162,6 +162,6 @@ dbt parse
 ## Community
 
 - Discord: [![Join Discord](https://img.shields.io/badge/Discord-Join%20DuckCode%20AI-5865F2?logo=discord&logoColor=white)](https://discord.gg/Dnm6bUvk)
-- Issues: [![GitHub Issues](https://img.shields.io/badge/Issues-Report%20or%20Request-0ea5e9)](https://github.com/duckcode-ai/DuckCode-Modeling/issues)
+- Issues: [![GitHub Issues](https://img.shields.io/badge/Issues-Report%20or%20Request-0ea5e9)](https://github.com/duckcode-ai/DataLex/issues)
 - Contributing: `CONTRIBUTING.md`
 - License: [![MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)

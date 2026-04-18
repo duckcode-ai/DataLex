@@ -23,7 +23,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 sys.path.insert(0, str(ROOT / "tests" / "fixtures" / "large_synth"))
 
-from dm_core.datalex import load_project  # noqa: E402
+from datalex_core.datalex import load_project  # noqa: E402
 from generate import generate  # noqa: E402
 
 
