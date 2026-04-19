@@ -1659,6 +1659,25 @@ app.get("/api/connections", async (_req, res) => {
   }
 });
 
+// Delete a connector profile by id or fingerprint
+app.delete("/api/connections/:id", requireAdmin, async (req, res) => {
+  try {
+    const id = String(req.params.id || "");
+    if (!id) return res.status(400).json({ error: "Missing connection id" });
+    const connections = await loadConnections();
+    const next = connections.filter(
+      (c) => c.id !== id && c.fingerprint !== id
+    );
+    if (next.length === connections.length) {
+      return res.status(404).json({ error: "Connection not found" });
+    }
+    await saveConnections(next);
+    res.json({ ok: true, deleted: id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Manually save/update a connector profile
 app.post("/api/connections", requireAdmin, async (req, res) => {
   try {
