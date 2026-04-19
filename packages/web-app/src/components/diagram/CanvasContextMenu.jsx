@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutGrid } from "lucide-react";
+import { Edit3, Trash2, Copy, Crosshair, Plus, LayoutGrid, ListChecks, Waypoints, ClipboardCopy } from "lucide-react";
 
 export default function CanvasContextMenu({ menu, onClose, onAction }) {
   const ref = useRef(null);
@@ -26,6 +26,7 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
     ? [
         { id: "edit", label: "Edit entity", icon: Edit3 },
         { id: "duplicate", label: "Duplicate", icon: Copy },
+        { id: "copy-name", label: "Copy name", icon: ClipboardCopy },
         { id: "locate", label: "Locate in tree", icon: Crosshair },
         {
           id: "toggle-diagram",
@@ -46,6 +47,8 @@ export default function CanvasContextMenu({ menu, onClose, onAction }) {
       ]
     : [
         { id: "add-entity", label: "New entity…", icon: Plus },
+        { id: "add-enum", label: "New enum…", icon: ListChecks },
+        { id: "add-relationship", label: "New relationship…", icon: Waypoints },
         { id: "fit", label: "Fit diagram", icon: Crosshair },
       ];
 

@@ -558,6 +558,13 @@ function FlowCanvas() {
         window.dispatchEvent(new CustomEvent("dl:entity:duplicate", { detail: { name: menu.nodeId } }));
       } else if (actionId === "toggle-diagram") {
         diagram.toggleEntityInActiveDiagram?.(menu.nodeId);
+      } else if (actionId === "copy-name") {
+        try {
+          navigator.clipboard?.writeText?.(menu.nodeId);
+          ui.addToast?.({ type: "success", message: `Copied "${menu.nodeId}"` });
+        } catch {
+          /* clipboard may be unavailable */
+        }
       }
     } else if (menu.target === "enum") {
       const enumName = menu.nodeId?.startsWith("enum:") ? menu.nodeId.slice(5) : menu.nodeId;
@@ -578,7 +585,9 @@ function FlowCanvas() {
       }
     } else if (menu.target === "pane") {
       if (actionId === "fit") diagram.requestFitDiagram();
-      else if (actionId === "add-entity") ui.openModal?.("newEntity");
+      else if (actionId === "add-entity") ui.openModal?.("newEntity", { type: "table" });
+      else if (actionId === "add-enum") ui.openModal?.("newEntity", { type: "enum" });
+      else if (actionId === "add-relationship") ui.openModal?.("newRelationship");
     }
   }, []);
 
