@@ -27,6 +27,17 @@ export async function fetchConnections() {
   return data.connections || [];
 }
 
+export async function deleteConnection(id) {
+  return request(`/connections/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
+
+export async function testConnection(payload) {
+  return request("/connectors/test", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function addProject(name, path, createIfMissing = false, options = {}) {
   const { scaffoldRepo = false, initializeGit = false, createSubfolder = false } = options || {};
   const data = await request("/projects", {

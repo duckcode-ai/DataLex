@@ -1,15 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { X, Plug, RefreshCw, ArrowRight, AlertCircle } from "lucide-react";
+import { X, Plug, RefreshCw, ArrowRight, AlertCircle, Zap, Trash2, CheckCircle2, XCircle, Pencil } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
-import { fetchConnections } from "../../lib/api";
+import useAuthStore from "../../stores/authStore";
+import { fetchConnections, deleteConnection, testConnection } from "../../lib/api";
 import ConnectorLogo from "../icons/ConnectorLogo";
 
-/**
- * Central connections overview dialog. Reads the server-maintained
- * `.dm-connections.json` and shows every connection grouped by dialect. Add /
- * edit / test flows still live in the Connect activity — clicking a row jumps
- * there with the connector preselected.
- */
 const DIALECT_ORDER = [
   "postgres",
   "mysql",
@@ -40,9 +35,13 @@ const DIALECT_LABEL = {
 
 export default function ConnectionsManager() {
   const { closeModal, setActiveActivity, setPendingConnectorType, addToast } = useUiStore();
+  const { canEdit: canEditFn } = useAuthStore();
+  const canEdit = canEditFn();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [testState, setTestState] = useState({}); // { [id]: { status: "idle"|"running"|"ok"|"fail", message } }
+  const [busy, setBusy] = useState({}); // { [id]: true } for delete
 
   const load = async () => {
     setLoading(true);
@@ -70,16 +69,66 @@ export default function ConnectionsManager() {
     addToast?.({ type: "info", message: `Opening ${DIALECT_LABEL[dialect] || dialect} in Connect view.` });
   };
 
+  const handleTest = async (conn) => {
+    const id = conn.id || conn.fingerprint;
+    setTestState((s) => ({ ...s, [id]: { status: "running" } }));
+    try {
+      const payload = {
+        connector: conn.connector,
+        connection_id: conn.id,
+        connection_name: conn.name,
+        ...(conn.details || {}),
+        ...(conn.secrets || {}),
+      };
+      const result = await testConnection(payload);
+      if (result?.ok) {
+        setTestState((s) => ({ ...s, [id]: { status: "ok", message: result.message || "Connected" } }));
+        addToast?.({ type: "success", message: `${conn.name}: connection OK` });
+      } else {
+        setTestState((s) => ({ ...s, [id]: { status: "fail", message: result?.message || "Test failed" } }));
+        addToast?.({ type: "error", message: `${conn.name}: ${result?.message || "test failed"}` });
+      }
+    } catch (err) {
+      setTestState((s) => ({ ...s, [id]: { status: "fail", message: err.message } }));
+      addToast?.({ type: "error", message: err.message });
+    }
+  };
+
+  const handleDelete = async (conn) => {
+    const name = conn.name || conn.id;
+    if (!window.confirm(`Delete connection "${name}"? This can't be undone.`)) return;
+    const id = conn.id || conn.fingerprint;
+    setBusy((s) => ({ ...s, [id]: true }));
+    try {
+      await deleteConnection(id);
+      setConnections((prev) => prev.filter((c) => (c.id || c.fingerprint) !== id));
+      addToast?.({ type: "success", message: `Deleted ${name}` });
+    } catch (err) {
+      addToast?.({ type: "error", message: err.message });
+    } finally {
+      setBusy((s) => {
+        const next = { ...s };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  const handleEdit = (conn) => {
+    if (conn.connector) setPendingConnectorType(conn.connector);
+    setActiveActivity("connect");
+    closeModal();
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
       onClick={closeModal}
     >
       <div
-        className="w-[720px] max-w-[94vw] h-[540px] max-h-[90vh] rounded-xl border border-border-primary bg-bg-surface shadow-2xl flex flex-col overflow-hidden"
+        className="w-[760px] max-w-[94vw] h-[560px] max-h-[90vh] rounded-xl border border-border-primary bg-bg-surface shadow-2xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between px-4 h-12 border-b border-border-primary bg-bg-secondary shrink-0">
           <div className="flex items-center gap-2">
             <Plug size={16} className="text-text-secondary" />
@@ -104,7 +153,6 @@ export default function ConnectionsManager() {
           </div>
         </div>
 
-        {/* Body */}
         <div className="flex-1 overflow-y-auto px-4 py-3">
           {error && (
             <div className="flex items-center gap-2 px-3 py-2 mb-3 rounded-md border border-accent-red/30 bg-accent-red-soft text-accent-red">
@@ -129,12 +177,17 @@ export default function ConnectionsManager() {
               key={dialect}
               dialect={dialect}
               items={items}
-              onOpen={() => openInConnect(dialect)}
+              canEdit={canEdit}
+              testState={testState}
+              busy={busy}
+              onTest={handleTest}
+              onDelete={handleDelete}
+              onEdit={handleEdit}
+              onManage={() => openInConnect(dialect)}
             />
           ))}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between px-4 h-12 border-t border-border-primary bg-bg-secondary shrink-0">
           <span className="t-caption text-text-muted">
             {connections.length} {connections.length === 1 ? "connection" : "connections"}
@@ -142,6 +195,7 @@ export default function ConnectionsManager() {
           <button
             onClick={() => openInConnect(null)}
             className="dl-toolbar-btn dl-toolbar-btn--primary"
+            disabled={!canEdit}
           >
             Add connection
             <ArrowRight size={14} />
@@ -152,7 +206,7 @@ export default function ConnectionsManager() {
   );
 }
 
-function DialectSection({ dialect, items, onOpen }) {
+function DialectSection({ dialect, items, canEdit, testState, busy, onTest, onDelete, onEdit, onManage }) {
   return (
     <div className="mb-4 last:mb-0">
       <div className="flex items-center gap-2 px-1 py-1.5">
@@ -160,32 +214,57 @@ function DialectSection({ dialect, items, onOpen }) {
         <span className="t-label text-text-primary">{DIALECT_LABEL[dialect] || dialect}</span>
         <span className="t-caption text-text-muted">{items.length}</span>
         <button
-          onClick={onOpen}
+          onClick={onManage}
           className="ml-auto text-xs text-accent-blue hover:underline"
         >
-          Manage →
+          Add new →
         </button>
       </div>
       <div className="rounded-lg border border-border-primary overflow-hidden">
         {items.map((conn) => (
-          <ConnectionRow key={conn.id || conn.fingerprint} conn={conn} />
+          <ConnectionRow
+            key={conn.id || conn.fingerprint}
+            conn={conn}
+            canEdit={canEdit}
+            testStatus={testState[conn.id || conn.fingerprint]}
+            isBusy={!!busy[conn.id || conn.fingerprint]}
+            onTest={() => onTest(conn)}
+            onDelete={() => onDelete(conn)}
+            onEdit={() => onEdit(conn)}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function ConnectionRow({ conn }) {
-  const name = conn.connection_name || conn.name || conn.fingerprint || "Connection";
+function ConnectionRow({ conn, canEdit, testStatus, isBusy, onTest, onDelete, onEdit }) {
+  const name = conn.name || conn.connection_name || conn.fingerprint || "Connection";
   const updatedAt = conn.updatedAt || conn.lastConnectedAt || conn.createdAt || "";
-  const host = conn.params?.host || conn.params?.account || conn.params?.warehouse || "";
+  const details = conn.details || conn.params || {};
+  const host = details.host || details.account || details.project || details.catalog || details.database || "";
   const importCount = Array.isArray(conn.imports) ? conn.imports.length : 0;
+  const status = testStatus?.status;
+
   return (
     <div className="flex items-center gap-3 px-3 py-2 border-b border-border-primary/60 last:border-b-0 hover:bg-bg-hover transition-colors">
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="t-label text-text-primary truncate">{name}</span>
           {host && <span className="t-caption text-text-muted truncate">· {host}</span>}
+          {status === "ok" && (
+            <span className="flex items-center gap-1 text-accent-green text-[11px]">
+              <CheckCircle2 size={11} /> OK
+            </span>
+          )}
+          {status === "fail" && (
+            <span
+              className="flex items-center gap-1 text-status-error text-[11px]"
+              title={testStatus?.message}
+            >
+              <XCircle size={11} /> Failed
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-3 mt-0.5">
           {updatedAt && (
@@ -199,6 +278,39 @@ function ConnectionRow({ conn }) {
             </span>
           )}
         </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          onClick={onTest}
+          disabled={status === "running"}
+          className="dl-toolbar-btn dl-toolbar-btn--ghost-icon"
+          title="Test connection"
+        >
+          {status === "running" ? (
+            <RefreshCw size={13} className="animate-spin" />
+          ) : (
+            <Zap size={13} />
+          )}
+        </button>
+        {canEdit && (
+          <>
+            <button
+              onClick={onEdit}
+              className="dl-toolbar-btn dl-toolbar-btn--ghost-icon"
+              title="Edit in Connect view"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={onDelete}
+              disabled={isBusy}
+              className="p-1.5 rounded hover:bg-status-error/10 text-text-muted hover:text-status-error transition-colors disabled:opacity-40"
+              title="Delete connection"
+            >
+              <Trash2 size={13} />
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
