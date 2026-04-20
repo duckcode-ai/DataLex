@@ -33,4 +33,3 @@ workspaces/
 # local secrets
 .secrets/
 .dm-credentials.json
-.dm-users.json

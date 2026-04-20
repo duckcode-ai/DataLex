@@ -4,7 +4,6 @@ import Icon from "./icons";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
 import BellMenu from "./BellMenu";
-import UserMenu from "./UserMenu";
 
 /* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
    Shell inspects to decide whether to render the diagram, the table list,
@@ -46,9 +45,8 @@ function ViewSwitcher() {
 export function TopBar({
   onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave, onSaveAll,
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
-  onImport, onImportDbt, onSearch, onOpenShortcuts,
+  onImport, onImportDbt, onSearch,
   isDirty = false, canSave = true, canSaveAll = false,
-  userInitials = "DL", userName = "User",
 }) {
   const I = Icon;
   const [open, setOpen] = React.useState(false);
@@ -164,13 +162,6 @@ export function TopBar({
       </div>
 
       <BellMenu />
-      <UserMenu
-        userInitials={userInitials}
-        userName={userName}
-        theme={theme}
-        setTheme={setTheme}
-        onOpenShortcuts={onOpenShortcuts}
-      />
     </div>
   );
 }

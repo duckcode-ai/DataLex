@@ -1,84 +1,41 @@
+/* authStore — permissive no-op shim.
+ *
+ * DataLex is open-source and runs locally. There are no user accounts,
+ * no sessions, no login page, no role-based access control. This shim
+ * exists only so components that were written against the old store
+ * (inspectors, panels, toolbars using `canEdit()` / `isAdmin()` / `user`)
+ * keep importing without breakage.
+ *
+ * Every capability returns true; `user` is a constant identity used by
+ * UI chrome that likes to show "who am I" labels. A future cleanup can
+ * delete this shim and strip the `canEdit` / `isAdmin` call sites.
+ */
 import { create } from "zustand";
-import useWorkspaceStore from "./workspaceStore";
-import useDiagramStore from "./diagramStore";
 
-const API_BASE = "";
+const DEFAULT_USER = Object.freeze({
+  id: "local",
+  username: "local",
+  name: "Local user",
+  role: "admin",
+});
 
-const useAuthStore = create((set, get) => ({
-  user: null,
+const useAuthStore = create(() => ({
+  user: DEFAULT_USER,
   token: null,
-  isAuthenticated: false,
-  isLoading: true,
+  isAuthenticated: true,
+  isLoading: false,
 
-  restoreSession: async () => {
-    const token = localStorage.getItem("dm_token");
-    if (!token) {
-      set({ isLoading: false });
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: { "x-dm-token": token },
-      });
-      if (res.ok) {
-        const { user } = await res.json();
-        set({ user, token, isAuthenticated: true, isLoading: false });
-      } else {
-        localStorage.removeItem("dm_token");
-        set({ isLoading: false });
-      }
-    } catch (_) {
-      set({ isLoading: false });
-    }
+  // Legacy lifecycle hooks — all no-ops.
+  restoreSession: async () => {},
+  login: async () => {
+    throw new Error("DataLex is open-source; login is disabled.");
   },
+  logout: async () => {},
 
-  login: async (username, password) => {
-    const res = await fetch(`${API_BASE}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || "Login failed");
-    }
-    const { token, user } = await res.json();
-    localStorage.setItem("dm_token", token);
-    set({ user, token, isAuthenticated: true });
-  },
-
-  logout: async () => {
-    const token = get().token;
-    if (token) {
-      await fetch(`${API_BASE}/api/auth/logout`, {
-        method: "POST",
-        headers: { "x-dm-token": token },
-      }).catch(() => {});
-    }
-    localStorage.removeItem("dm_token");
-    // Reset workspace and diagram state so re-login gets a clean slate
-    useWorkspaceStore.setState({
-      projects: [],
-      activeProjectId: null,
-      projectFiles: [],
-      activeFile: null,
-      activeFileContent: "",
-      openTabs: [],
-      isDirty: false,
-      offlineMode: false,
-    });
-    useDiagramStore.setState({
-      model: null,
-      selectedEntityId: null,
-      selectedEntity: null,
-      centerEntityId: null,
-    });
-    set({ user: null, token: null, isAuthenticated: false });
-  },
-
-  isAdmin:  () => get().user?.role === "admin",
-  isViewer: () => get().user?.role === "viewer",
-  canEdit:  () => get().user?.role === "admin",
+  // Permission predicates — always permissive.
+  isAdmin: () => true,
+  isViewer: () => false,
+  canEdit: () => true,
 }));
 
 export default useAuthStore;

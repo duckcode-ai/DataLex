@@ -1,13 +1,8 @@
 const BASE = "/api";
 
-function getAuthHeaders() {
-  const token = localStorage.getItem("dm_token");
-  return token ? { "x-dm-token": token } : {};
-}
-
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    headers: { "Content-Type": "application/json" },
     ...options,
   });
   if (!res.ok) {

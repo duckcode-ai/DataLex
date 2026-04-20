@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSy
 import { execFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
-import { createHash, randomBytes } from "crypto";
+import { randomBytes } from "crypto";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
 
@@ -27,56 +27,13 @@ const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
 const CONNECTIONS_FILE = join(REPO_ROOT, ".dm-connections.json");
 const CREDENTIALS_FILE = join(REPO_ROOT, ".dm-credentials.json");
-const USERS_FILE = join(REPO_ROOT, ".dm-users.json");
+// DataLex is open-source and runs locally — no user accounts, no
+// sessions, no role gating. Middleware hooks below are intentional
+// no-ops so existing route registrations (`app.post(..., requireAdmin,
+// handler)`) keep working without a per-route edit sweep.
+function requireAuth(_req, _res, next) { next(); }
+function requireAdmin(_req, _res, next) { next(); }
 
-// In-memory session store: token -> { userId, username, name, role, exp }
-const SESSIONS = new Map();
-
-function hashPassword(password, salt) {
-  return createHash("sha256").update(salt + password).digest("hex");
-}
-function generateToken() {
-  return randomBytes(32).toString("hex");
-}
-async function loadUsers() {
-  try {
-    if (existsSync(USERS_FILE)) {
-      const raw = await readFile(USERS_FILE, "utf-8");
-      return JSON.parse(raw).users || [];
-    }
-  } catch (_) {}
-  return [];
-}
-async function saveUsers(users) {
-  await writeFile(USERS_FILE, JSON.stringify({ users }, null, 2), "utf-8");
-}
-async function ensureDefaultUsers() {
-  if (existsSync(USERS_FILE)) return;
-  const s1 = randomBytes(16).toString("hex");
-  const s2 = randomBytes(16).toString("hex");
-  await saveUsers([
-    { id: "u1", username: "admin",  salt: s1, passwordHash: hashPassword("admin123",  s1), role: "admin",  name: "Admin"  },
-    { id: "u2", username: "viewer", salt: s2, passwordHash: hashPassword("viewer123", s2), role: "viewer", name: "Viewer" },
-  ]);
-  console.log("[datalex] Default users created — admin/admin123 and viewer/viewer123");
-}
-function requireAuth(req, res, next) {
-  const token = req.headers["x-dm-token"];
-  const session = token && SESSIONS.get(token);
-  if (!session || session.exp < Date.now()) {
-    return res.status(401).json({ error: "Unauthorized — please log in" });
-  }
-  req.user = session;
-  next();
-}
-function requireAdmin(req, res, next) {
-  requireAuth(req, res, () => {
-    if (req.user.role !== "admin") {
-      return res.status(403).json({ error: "Admin access required" });
-    }
-    next();
-  });
-}
 const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
 
 // Use venv Python if available, otherwise fall back to system python3
@@ -3391,98 +3348,6 @@ if (existsSync(WEB_DIST)) {
     res.sendFile(join(WEB_DIST, "index.html"));
   });
 }
-
-// ── Auth routes ──────────────────────────────────────────────────────────────
-
-app.post("/api/auth/login", async (req, res) => {
-  try {
-    const { username, password } = req.body || {};
-    if (!username || !password) return res.status(400).json({ error: "username and password required" });
-    const users = await loadUsers();
-    const user = users.find((u) => u.username === String(username).trim());
-    if (!user || hashPassword(String(password), user.salt) !== user.passwordHash) {
-      return res.status(401).json({ error: "Invalid username or password" });
-    }
-    const token = generateToken();
-    SESSIONS.set(token, { userId: user.id, username: user.username, name: user.name, role: user.role, exp: Date.now() + 86400000 });
-    res.json({ token, user: { id: user.id, username: user.username, name: user.name, role: user.role } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/api/auth/me", requireAuth, (req, res) => {
-  res.json({ user: { id: req.user.userId, username: req.user.username, name: req.user.name, role: req.user.role } });
-});
-
-app.post("/api/auth/logout", requireAuth, (req, res) => {
-  SESSIONS.delete(req.headers["x-dm-token"]);
-  res.json({ ok: true });
-});
-
-app.get("/api/auth/users", requireAdmin, async (req, res) => {
-  try {
-    const users = await loadUsers();
-    res.json({ users: users.map((u) => ({ id: u.id, username: u.username, name: u.name, role: u.role })) });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/api/auth/users", requireAdmin, async (req, res) => {
-  try {
-    const { username, password, name, role } = req.body || {};
-    if (!username || !password || !["admin", "viewer"].includes(role)) {
-      return res.status(400).json({ error: "username, password, and role (admin|viewer) required" });
-    }
-    const users = await loadUsers();
-    if (users.find((u) => u.username === username)) {
-      return res.status(409).json({ error: "Username already exists" });
-    }
-    const salt = randomBytes(16).toString("hex");
-    const newUser = { id: `u${Date.now()}`, username, salt, passwordHash: hashPassword(password, salt), role, name: name || username };
-    users.push(newUser);
-    await saveUsers(users);
-    res.json({ user: { id: newUser.id, username: newUser.username, name: newUser.name, role: newUser.role } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.put("/api/auth/users/:id", requireAdmin, async (req, res) => {
-  try {
-    const { name, role, password } = req.body || {};
-    const users = await loadUsers();
-    const idx = users.findIndex((u) => u.id === req.params.id);
-    if (idx < 0) return res.status(404).json({ error: "User not found" });
-    if (name) users[idx].name = name;
-    if (role && ["admin", "viewer"].includes(role)) users[idx].role = role;
-    if (password) {
-      const salt = randomBytes(16).toString("hex");
-      users[idx].salt = salt;
-      users[idx].passwordHash = hashPassword(password, salt);
-    }
-    await saveUsers(users);
-    res.json({ user: { id: users[idx].id, username: users[idx].username, name: users[idx].name, role: users[idx].role } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.delete("/api/auth/users/:id", requireAdmin, async (req, res) => {
-  try {
-    let users = await loadUsers();
-    users = users.filter((u) => u.id !== req.params.id);
-    await saveUsers(users);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-
-ensureDefaultUsers().catch(console.error);
 
 app.listen(PORT, () => {
   console.log(`[datalex] Local file server running on http://localhost:${PORT}`);
