@@ -36,6 +36,8 @@ import SettingsDialog from "../components/dialogs/SettingsDialog";
 import ConnectionsManager from "../components/dialogs/ConnectionsManager";
 import CommitDialog from "../components/dialogs/CommitDialog";
 import LegacyCommandPalette from "../components/dialogs/CommandPalette";
+import ExportDdlDialog from "../components/dialogs/ExportDdlDialog";
+import PanelDialog from "../components/dialogs/PanelDialog";
 import {
   AddProjectModal,
   EditProjectModal,
@@ -226,9 +228,45 @@ export default function Shell() {
   const schema = adapted || DEMO_SCHEMA;
   const isDemo = !adapted;
 
-  /* ── Tables state (local copy so drag-move works visually) ─────── */
-  const [tables, setTables] = React.useState(schema.tables);
-  React.useEffect(() => { setTables(schema.tables); }, [schema]);
+  /* ── Layout persistence (localStorage; keyed per project+file) ─── */
+  const layoutKey = React.useMemo(() => {
+    if (!activeProjectId || !activeFile) return null;
+    const fp = activeFile.fullPath || activeFile.name || activeFile.id || "";
+    return `datalex.layout.${activeProjectId}.${fp}`;
+  }, [activeProjectId, activeFile]);
+
+  const loadStoredLayout = React.useCallback(() => {
+    if (!layoutKey) return {};
+    try {
+      const raw = localStorage.getItem(layoutKey);
+      return raw ? JSON.parse(raw) : {};
+    } catch (_e) { return {}; }
+  }, [layoutKey]);
+
+  /* ── Tables state (local copy so drag-move works + layout merge) ─ */
+  const [tables, setTables] = React.useState(() => {
+    const stored = layoutKey ? loadStoredLayout() : {};
+    return schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+  });
+  React.useEffect(() => {
+    const stored = loadStoredLayout();
+    setTables(schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t)));
+  }, [schema, loadStoredLayout]);
+
+  // Debounced write of positions back to localStorage whenever tables move.
+  const saveLayoutTimer = React.useRef(null);
+  React.useEffect(() => {
+    if (!layoutKey) return;
+    if (saveLayoutTimer.current) clearTimeout(saveLayoutTimer.current);
+    saveLayoutTimer.current = setTimeout(() => {
+      try {
+        const map = {};
+        tables.forEach((t) => { map[t.id] = { x: t.x, y: t.y }; });
+        localStorage.setItem(layoutKey, JSON.stringify(map));
+      } catch (_e) { /* quota or disabled storage — ignore */ }
+    }, 300);
+    return () => clearTimeout(saveLayoutTimer.current);
+  }, [tables, layoutKey]);
 
   /* ── Diagram selection (luna panel) ────────────────────────────── */
   const [selected, setSelected] = React.useState(() =>
@@ -351,7 +389,9 @@ export default function Shell() {
         onSettings={() => openModal("settings")}
         onConnections={() => openModal("connectionsManager")}
         onCommit={() => openModal("commit")}
-        onRunSql={() => setBottomPanelTab("diff")}
+        onRunSql={() => openModal("exportDdl")}
+        onImport={() => openModal("importDialog")}
+        onSearch={() => openModal("searchDialog")}
         isDirty={isDirty}
         canSave={!!activeFile}
         userInitials={userInitials}
@@ -458,6 +498,9 @@ export default function Shell() {
       {activeModal === "settings"           && <SettingsDialog />}
       {activeModal === "connectionsManager" && <ConnectionsManager />}
       {activeModal === "commit"             && <CommitDialog />}
+      {activeModal === "exportDdl"          && <ExportDdlDialog />}
+      {activeModal === "importDialog"       && <PanelDialog kind="import" />}
+      {activeModal === "searchDialog"       && <PanelDialog kind="search" />}
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 

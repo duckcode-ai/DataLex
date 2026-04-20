@@ -1,7 +1,11 @@
-/* Right inspector panel — supports table OR relationship selection. Ported from DataLex design prototype. */
+/* Right inspector panel — supports table OR relationship selection. Ported
+   from DataLex design prototype and extended with a YAML tab that edits
+   the active file directly via the workspace store. */
 import React from "react";
 import Icon from "./icons";
 import { NOTATION } from "./notation";
+import YamlEditor from "../components/editor/YamlEditor";
+import useWorkspaceStore from "../stores/workspaceStore";
 
 function renderSQL(t) {
   const kw = (s) => `<span class="sql-kw">${s}</span>`;
@@ -113,6 +117,32 @@ function RelInspector({ rel }) {
 export default function RightPanel({ table, rel, tables, selectedCol, setSelectedCol }) {
   const I = Icon;
   const [tab, setTab] = React.useState("COLUMNS");
+  const activeFile = useWorkspaceStore((s) => s.activeFile);
+
+  // YAML tab is always available (even with no table selected) because it
+  // edits the whole active file, not a single entity.
+  if (tab === "YAML") {
+    return (
+      <div className="right" style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+        <div className="insp-tabs" style={{ borderBottom: "1px solid var(--border-default)" }}>
+          {["COLUMNS", "RELATIONS", "INDEXES", "SQL", "YAML"].map((t) => (
+            <button key={t} className={`insp-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+              {t === "YAML" ? "YAML" : t[0] + t.slice(1).toLowerCase()}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflow: "hidden", background: "var(--bg-canvas)" }}>
+          {activeFile ? (
+            <YamlEditor />
+          ) : (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-tertiary)", fontSize: 12 }}>
+              Open a file to edit its YAML.
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (rel) return <RelInspector rel={rel} tables={tables} />;
 
@@ -156,9 +186,9 @@ export default function RightPanel({ table, rel, tables, selectedCol, setSelecte
       </div>
 
       <div className="insp-tabs">
-        {["COLUMNS", "RELATIONS", "INDEXES", "SQL"].map((t) => (
+        {["COLUMNS", "RELATIONS", "INDEXES", "SQL", "YAML"].map((t) => (
           <button key={t} className={`insp-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-            {t[0] + t.slice(1).toLowerCase()}
+            {t === "YAML" ? "YAML" : t[0] + t.slice(1).toLowerCase()}
           </button>
         ))}
       </div>

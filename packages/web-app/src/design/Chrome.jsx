@@ -6,6 +6,7 @@ import { THEMES } from "./notation";
 export function TopBar({
   onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave,
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
+  onImport, onSearch,
   isDirty = false, canSave = true,
   userInitials = "DL", userName = "User",
 }) {
@@ -30,6 +31,7 @@ export function TopBar({
         <div className="tool-group">
           <button className="tool-btn" title="New file" onClick={onNewFile}><I.Plus /></button>
           <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
+          <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
           <button className="tool-btn"
                   title={isDirty ? "Save (⌘S)" : "Nothing to save"}
                   onClick={onSave}
@@ -56,7 +58,7 @@ export function TopBar({
           <button className="tool-btn" title="Settings" onClick={onSettings}><I.Settings /></button>
         </div>
       </div>
-      <button className="search-launcher" onClick={onOpenCmd}>
+      <button className="search-launcher" onClick={onSearch || onOpenCmd}>
         <I.Search />
         <span>Search tables, columns, commands…</span>
         <span className="kbd">⌘K</span>
