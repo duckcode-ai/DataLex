@@ -1,0 +1,18 @@
+kind: model
+name: stg_order_items
+materialization: view
+database: jaffle_shop
+schema: main
+description: Individual food and drink items that make up our orders, one row per
+  item.
+depends_on:
+- source:
+    source: jaffle_shop
+    name: items
+columns:
+- name: order_item_id
+  description: The unique key for each order item.
+meta:
+  datalex:
+    dbt:
+      unique_id: model.jaffle_shop.stg_order_items

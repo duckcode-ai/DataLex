@@ -165,6 +165,51 @@ export function deleteField(yamlText, entityName, fieldName) {
   return dump(doc);
 }
 
+/* Write canvas-layout hints into an entity's `display:` sub-map. This is the
+   single new additive namespace PR B introduces — no existing fields move,
+   no dbt meta is touched. Any of `{x, y, width}` may be omitted; omitted
+   keys are preserved from the prior display block if present. Passing
+   `null` for a key removes it.
+
+   Example output:
+     - name: stg_customers
+       display:
+         x: 480
+         y: 120
+         width: 280
+       fields: [...]
+
+   Positions round to the nearest integer — canvas precision is a pixel,
+   and the extra precision bloats git diffs for no benefit. */
+export function setEntityDisplay(yamlText, entityName, { x, y, width } = {}) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+
+  const current = (entity.display && typeof entity.display === "object") ? entity.display : {};
+  const next = { ...current };
+
+  const applyNum = (key, value) => {
+    if (value === undefined) return;
+    if (value === null) { delete next[key]; return; }
+    const n = Number(value);
+    if (!Number.isFinite(n)) return;
+    next[key] = Math.round(n);
+  };
+  applyNum("x", x);
+  applyNum("y", y);
+  applyNum("width", width);
+
+  if (Object.keys(next).length === 0) {
+    delete entity.display;
+  } else {
+    entity.display = next;
+  }
+
+  return dump(doc);
+}
+
 /* Patch a relationship by name. `patch` may set any of:
      { name, from, to, cardinality, on_delete, on_update, identifying,
        optional, description }.

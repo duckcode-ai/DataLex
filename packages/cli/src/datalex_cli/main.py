@@ -1339,6 +1339,66 @@ def cmd_dbt_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dbt_import(args: argparse.Namespace) -> int:
+    """Import a dbt project's manifest.json + (optional) warehouse types into a DataLex tree.
+
+    Preserves the dbt model folder layout (models/staging/..., models/marts/...)
+    under --out so users can see exactly which dbt layer an entity comes from.
+    Writes sources to the same folder as their original schema.yml.
+
+    Progress lines `[dbt-import] ...` are emitted on stdout so callers (like the
+    api-server SSE bridge) can stream them to the UI.
+    """
+    from datalex_core.dbt.sync import sync_dbt_project, report_to_json
+
+    project_dir = Path(args.project_dir).resolve()
+    out_root = Path(args.out).resolve()
+
+    if not project_dir.is_dir():
+        print(f"ERROR: dbt project directory not found: {project_dir}", file=sys.stderr)
+        return 1
+
+    manifest_path = project_dir / "target" / "manifest.json"
+    if not manifest_path.exists() and not args.manifest:
+        print(
+            f"ERROR: manifest.json not found at {manifest_path}. "
+            f"Run `dbt parse` (or `dbt compile`) in the project first, "
+            f"or pass --manifest <path>.",
+            file=sys.stderr,
+        )
+        return 1
+
+    out_root.mkdir(parents=True, exist_ok=True)
+    print(f"[dbt-import] project={project_dir}", flush=True)
+    print(f"[dbt-import] out={out_root}", flush=True)
+
+    report = sync_dbt_project(
+        str(project_dir),
+        str(out_root),
+        profiles_dir=args.profiles_dir,
+        target_override=args.target,
+        skip_warehouse=args.skip_warehouse,
+        manifest_path=args.manifest,
+    )
+
+    for rec in report.tables:
+        tag = "wh" if rec.warehouse_reachable else "manifest"
+        print(
+            f"[dbt-import] {rec.kind}:{rec.database or ''}.{rec.schema or ''}."
+            f"{rec.table} ({tag}, {rec.columns_from_warehouse or rec.columns_from_manifest} cols)",
+            flush=True,
+        )
+
+    for f in report.files_written:
+        print(f"[dbt-import] wrote {f}", flush=True)
+
+    if args.json:
+        print(report_to_json(report))
+    else:
+        print(report.summary())
+    return 0
+
+
 def cmd_dbt_push(args: argparse.Namespace) -> int:
     """Push DataLex metadata into all schema.yml files found in a dbt project directory."""
     model = load_yaml_model(args.model)
@@ -2637,6 +2697,47 @@ def build_parser() -> argparse.ArgumentParser:
     dbt_push_parser.add_argument("model", help="Path to the DataLex .model.yaml file")
     dbt_push_parser.add_argument("--dbt-project", required=True, help="Root path of the dbt project to scan for schema.yml files")
     dbt_push_parser.set_defaults(func=cmd_dbt_push)
+
+    dbt_import_parser = dbt_sub.add_parser(
+        "import",
+        help="Import a full dbt project (manifest + live types) into a folder-preserving DataLex tree",
+    )
+    dbt_import_parser.add_argument(
+        "--project-dir",
+        required=True,
+        help="Path to the dbt project (the folder containing dbt_project.yml)",
+    )
+    dbt_import_parser.add_argument(
+        "--out",
+        required=True,
+        help="Destination directory for the DataLex YAML tree (mirrors dbt models/ layout)",
+    )
+    dbt_import_parser.add_argument(
+        "--manifest",
+        default=None,
+        help="Override path to manifest.json (default: <project-dir>/target/manifest.json)",
+    )
+    dbt_import_parser.add_argument(
+        "--profiles-dir",
+        default=None,
+        help="Override profiles.yml search directory (default: dbt's rules)",
+    )
+    dbt_import_parser.add_argument(
+        "--target",
+        default=None,
+        help="Pick a non-default target from the dbt profile",
+    )
+    dbt_import_parser.add_argument(
+        "--skip-warehouse",
+        action="store_true",
+        help="Skip live warehouse introspection (rely on manifest data_type)",
+    )
+    dbt_import_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the SyncReport as JSON instead of a human summary",
+    )
+    dbt_import_parser.set_defaults(func=cmd_dbt_import)
 
     pull_parser = sub.add_parser("pull", help="Pull schema from a live database into a DataLex model")
     pull_parser.add_argument("connector", help="Connector type (postgres, mysql, snowflake, bigquery, databricks, sqlserver, azure_sql, azure_fabric, redshift)")

@@ -21,7 +21,7 @@ import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml } from "./schemaAdapter";
-import { appendEntity, deleteEntity } from "./yamlPatch";
+import { appendEntity, deleteEntity, setEntityDisplay } from "./yamlPatch";
 
 import { fetchGitStatus } from "../lib/api";
 import {
@@ -50,6 +50,8 @@ const CommitDialog        = React.lazy(() => import("../components/dialogs/Commi
 const ExportDdlDialog     = React.lazy(() => import("../components/dialogs/ExportDdlDialog"));
 const PanelDialog         = React.lazy(() => import("../components/dialogs/PanelDialog"));
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
+const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
+const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
@@ -258,6 +260,21 @@ export default function Shell() {
       }
       if (meta && e.key === "k") { e.preventDefault(); setCommandPaletteOpen(true); return; }
       if (meta && e.key === "j") { e.preventDefault(); toggleBottomPanel(); return; }
+      // Undo / Redo. CodeMirror handles these when focused in the YAML
+      // editor itself; we only intercept outside input targets so editing
+      // text in the inspector keeps native undo behaviour.
+      if (meta && !isInput && !e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        const ok = useWorkspaceStore.getState().undo();
+        if (!ok) addToast({ type: "info", message: "Nothing to undo." });
+        return;
+      }
+      if (meta && !isInput && e.shiftKey && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        const ok = useWorkspaceStore.getState().redo();
+        if (!ok) addToast({ type: "info", message: "Nothing to redo." });
+        return;
+      }
       if (meta && e.shiftKey && (e.key === "t" || e.key === "T")) { e.preventDefault(); cycleTheme(); return; }
       if (meta && e.key === "Tab") {
         const { openProjects: op } = useWorkspaceStore.getState();
@@ -503,6 +520,28 @@ export default function Shell() {
     }
   }, [tables, schema.relationships, addToast]);
 
+  /* ── Persist moved node position to YAML `display:` ──────────────
+   * Called by Canvas after a table drag completes. We round-trip through
+   * `setEntityDisplay` → `updateContent`, which records the change in
+   * history and flushes to the offline doc store. Cheap enough to run
+   * synchronously on drag end; the mutate helper is ~microseconds on
+   * jaffle-scale YAML. */
+  const handleTableMoveEnd = React.useCallback((tableId) => {
+    const t = tables.find((x) => x.id === tableId);
+    if (!t) return;
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFileContent) return;
+    const next = setEntityDisplay(s.activeFileContent, t.id, { x: t.x, y: t.y });
+    if (next && next !== s.activeFileContent) {
+      s.updateContent(next);
+    }
+  }, [tables]);
+
+  /* ── Drag-to-connect handoff to NewRelationshipDialog ─────────── */
+  const handleCanvasConnect = React.useCallback((payload) => {
+    openModal("newRelationship", payload);
+  }, [openModal]);
+
   const activeBottomTabs = React.useMemo(
     () => ALL_BOTTOM_TABS.filter((t) => !t.adminOnly || (canEdit && canEdit())),
     [canEdit]
@@ -543,11 +582,35 @@ export default function Shell() {
           else if (s.lastAutoGenerateError) addToast({ type: "error", message: `DDL failed: ${s.lastAutoGenerateError}` });
           else addToast({ type: "success", message: "Saved." });
         }}
+        onSaveAll={async () => {
+          try {
+            const result = await useWorkspaceStore.getState().saveAllDirty();
+            if (!result || result.total === 0) {
+              addToast({ type: "info", message: "Nothing to save." });
+            } else if (result.ok) {
+              addToast({ type: "success", message: `Saved ${result.saved} file(s).` });
+            } else {
+              addToast({ type: "warning", message: `Saved ${result.saved}/${result.total}; some files failed.` });
+            }
+          } catch (err) {
+            addToast({ type: "error", message: `Save all failed: ${err?.message || err}` });
+          }
+        }}
+        canSaveAll={!!activeProjectId && !useWorkspaceStore.getState().offlineMode}
+        onUndo={() => {
+          const ok = useWorkspaceStore.getState().undo();
+          if (!ok) addToast({ type: "info", message: "Nothing to undo." });
+        }}
+        onRedo={() => {
+          const ok = useWorkspaceStore.getState().redo();
+          if (!ok) addToast({ type: "info", message: "Nothing to redo." });
+        }}
         onSettings={() => openModal("settings")}
         onConnections={() => openModal("connectionsManager")}
         onCommit={() => openModal("commit")}
         onRunSql={() => openModal("exportDdl")}
         onImport={() => openModal("importDialog")}
+        onImportDbt={() => openModal("importDbtRepo")}
         onSearch={() => setCommandPaletteOpen(true)}
         onOpenShortcuts={() => setShowShortcuts(true)}
         isDirty={isDirty}
@@ -590,6 +653,8 @@ export default function Shell() {
           areas={schema.subjectAreas || []}
           selected={selected}
           onSelect={handleSelect}
+          onMoveEnd={handleTableMoveEnd}
+          onConnect={handleCanvasConnect}
           title={schema.name}
           engine={schema.engine}
           legendOpen={legendOpen}
@@ -681,6 +746,8 @@ export default function Shell() {
           { id: "settings",   section: "Actions", label: "Settings…",              meta: "",    icon: <span style={{ fontSize: 12 }}>⚙</span>,  run: () => openModal("settings") },
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
+          { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
+          { id: "demo-jaffle",section: "Actions", label: "Load jaffle-shop demo",  meta: "",    icon: <span style={{ fontSize: 12 }}>✨</span>, run: () => openModal("importDbtRepo") },
         ]}
       />
 
@@ -694,6 +761,8 @@ export default function Shell() {
         {activeModal === "commit"             && <CommitDialog />}
         {activeModal === "exportDdl"          && <ExportDdlDialog />}
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
+        {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
+        {activeModal === "newRelationship"    && <NewRelationshipDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
       </React.Suspense>

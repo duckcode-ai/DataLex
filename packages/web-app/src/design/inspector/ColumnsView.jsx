@@ -11,12 +11,72 @@
      entityName   — the YAML entity name (used by patchField)
      onDirty()    — optional callback after a successful patch (for logging) */
 import React from "react";
-import { Key, Link2 } from "lucide-react";
+import { Key, Link2, AlertTriangle } from "lucide-react";
+import yaml from "js-yaml";
 import { PanelSection, StatusPill } from "../../components/panels/PanelFrame";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { patchField } from "../yamlPatch";
+import { lintEntity } from "../../lib/dbtLint";
+
+/* Parse the active YAML and run dbtLint for the currently-selected entity.
+ * Memoised in the hook caller — each keystroke reparses, which is cheap
+ * because the file is already in memory and js-yaml is lazy on large docs.
+ * Returns a Map<columnName, LintFinding[]> for O(1) per-row lookup. */
+function useEntityLintByColumn(entityName) {
+  const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
+  const activeFile = useWorkspaceStore((s) => s.activeFile);
+  return React.useMemo(() => {
+    if (!entityName || !activeFileContent) return new Map();
+    let doc;
+    try { doc = yaml.load(activeFileContent); }
+    catch (_err) { return new Map(); }
+    if (!doc || typeof doc !== "object") return new Map();
+
+    const entity = findEntityByName(doc, entityName);
+    if (!entity) return new Map();
+
+    const findings = lintEntity(entity, {
+      filePath: activeFile?.fullPath || activeFile?.name || "",
+    });
+    const byCol = new Map();
+    for (const f of findings) {
+      const key = f.field || "";
+      if (!key) continue;
+      if (!byCol.has(key)) byCol.set(key, []);
+      byCol.get(key).push(f);
+    }
+    return byCol;
+  }, [entityName, activeFileContent, activeFile]);
+}
+
+/* Look up an entity by name across the three shapes our YAML ingestor
+ * emits: DataLex (`entities[]`), dbt-shaped (`models[]` / `sources[].tables[]`),
+ * and DataLex per-file kind docs. Returns the raw entity object so lint
+ * rules see descriptions, tests, and types verbatim. */
+function findEntityByName(doc, name) {
+  if (!doc || !name) return null;
+  if (Array.isArray(doc.entities)) {
+    const hit = doc.entities.find((e) => e && e.name === name);
+    if (hit) return hit;
+  }
+  if (Array.isArray(doc.models)) {
+    const hit = doc.models.find((m) => m && m.name === name);
+    if (hit) return hit;
+  }
+  if (Array.isArray(doc.sources)) {
+    for (const src of doc.sources) {
+      const hit = (src.tables || []).find((t) => t && t.name === name);
+      if (hit) return hit;
+    }
+  }
+  if ((doc.kind === "model" || doc.kind === "source") && doc.name === name) return doc;
+  return null;
+}
 
 export default function ColumnsView({ table, col, setSelectedCol, entityName, onDirty }) {
+  const lintByColumn = useEntityLintByColumn(entityName);
+  const selectedFindings = (col?.name && lintByColumn.get(col.name)) || [];
+
   const applyPatch = React.useCallback((patch) => {
     const s = useWorkspaceStore.getState();
     const next = patchField(s.activeFileContent, entityName, col?.name, patch);
@@ -54,6 +114,34 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
 
   return (
     <>
+      {selectedFindings.length > 0 && (
+        <PanelSection title="dbt lint" count={selectedFindings.length}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "0 2px" }}>
+            {selectedFindings.map((f, i) => (
+              <div
+                key={`sel-lint-${i}`}
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  padding: "6px 8px",
+                  fontSize: 11,
+                  lineHeight: 1.45,
+                  color: "var(--text-secondary)",
+                  background: "var(--bg-2)",
+                  border: "1px solid var(--border-default)",
+                  borderLeft: "2px solid var(--cat-billing, #f5b544)",
+                  borderRadius: 4,
+                }}
+                title={f.code}
+              >
+                <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2, color: "var(--cat-billing, #f5b544)" }} />
+                <span>{f.message}</span>
+              </div>
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
       <PanelSection title="Selected column">
         <div className="inspector-inline-form">
           <label>Name</label>
@@ -137,6 +225,10 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
           <tbody>
             {table.columns.map((c) => {
               const active = c.name === col.name;
+              const rowFindings = lintByColumn.get(c.name) || [];
+              const findingSummary = rowFindings.length > 0
+                ? rowFindings.map((f) => f.message).join("\n")
+                : "";
               return (
                 <tr
                   key={c.name}
@@ -152,7 +244,20 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
                       : c.fk ? <Link2 size={11} color="var(--fk, #f59e0b)" />
                       : <span style={{ display: "inline-block", width: 4, height: 4, borderRadius: "50%", background: "var(--text-muted)" }} />}
                   </td>
-                  <td style={{ fontWeight: active ? 600 : 400 }}>{c.name}</td>
+                  <td style={{ fontWeight: active ? 600 : 400 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      {c.name}
+                      {rowFindings.length > 0 && (
+                        <span
+                          title={findingSummary}
+                          aria-label={`${rowFindings.length} dbt lint finding${rowFindings.length === 1 ? "" : "s"}`}
+                          style={{ display: "inline-flex", alignItems: "center", lineHeight: 0 }}
+                        >
+                          <AlertTriangle size={10} color="var(--cat-billing, #f5b544)" />
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td style={{ color: "var(--text-secondary)", fontFamily: "var(--font-mono)", fontSize: 11 }}>{c.type}</td>
                   <td style={{ textAlign: "right", color: "var(--text-tertiary)", fontSize: 10 }}>
                     {[c.pk && "PK", c.nn && "NN", c.unique && "UQ", c.fk && "FK"].filter(Boolean).join(" ") || "—"}

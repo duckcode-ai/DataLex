@@ -44,10 +44,10 @@ function ViewSwitcher() {
 }
 
 export function TopBar({
-  onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave,
+  onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave, onSaveAll,
   onUndo, onRedo, onRunSql, onSettings, onConnections, onCommit,
-  onImport, onSearch, onOpenShortcuts,
-  isDirty = false, canSave = true,
+  onImport, onImportDbt, onSearch, onOpenShortcuts,
+  isDirty = false, canSave = true, canSaveAll = false,
   userInitials = "DL", userName = "User",
 }) {
   const I = Icon;
@@ -72,6 +72,9 @@ export function TopBar({
           <button className="tool-btn" title="New file" onClick={onNewFile}><I.Plus /></button>
           <button className="tool-btn" title="Open project" onClick={onOpenFile}><I.Folder /></button>
           <button className="tool-btn" title="Import schema (dbt / SQL / DBML)" onClick={onImport}><I.Download style={{ transform: "rotate(180deg)" }} /></button>
+          {onImportDbt && (
+            <button className="tool-btn" title="Import dbt repo (folder / git / jaffle-shop demo)" onClick={onImportDbt}><I.Dep /></button>
+          )}
           <button className="tool-btn"
                   title={isDirty ? "Save (⌘S)" : "Nothing to save"}
                   onClick={onSave}
@@ -80,6 +83,16 @@ export function TopBar({
             <I.Download />
             {isDirty && <span style={{ width: 6, height: 6, borderRadius: 3, background: "var(--accent)", marginLeft: 4 }} />}
           </button>
+          {onSaveAll && (
+            <button className="tool-btn"
+                    title="Save project (flush all edits to disk)"
+                    onClick={onSaveAll}
+                    disabled={!canSaveAll}
+                    style={{ opacity: canSaveAll ? 1 : 0.4 }}>
+              <I.Download />
+              <span style={{ marginLeft: 4 }}>All</span>
+            </button>
+          )}
         </div>
         <div className="tool-group">
           <button className="tool-btn" onClick={onNewTable} title="Create a new table / entity"><I.Plus /><I.Table />Table</button>

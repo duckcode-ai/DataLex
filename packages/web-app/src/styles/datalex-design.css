@@ -1232,7 +1232,14 @@ input { font: inherit; color: inherit; }
 .tc-key {
   display: grid; place-items: center;
   width: 14px; height: 14px;
+  /* Drag-from-here affordance. Column keys are the start/end anchors for
+     new relationships — the crosshair cursor on hover tells users "pull a
+     line from this dot to another column to link them." */
+  cursor: crosshair;
+  border-radius: 3px;
+  transition: background 120ms var(--ease);
 }
+.tc-key:hover { background: var(--bg-3); }
 .tc-key svg { width: 11px; height: 11px; }
 .tc-key.pk { color: var(--pk); }
 .tc-key.fk { color: var(--fk); }

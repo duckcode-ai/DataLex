@@ -76,14 +76,25 @@ export function adaptDataLexYaml(yamlText) {
     const columns = columnsFromFields(e.fields);
     const row = Math.floor(i / GRID_COLS);
     const col = i % GRID_COLS;
+
+    // Prefer persisted layout from `display:` (PR B). Fall back to a simple
+    // grid layout so first-time files still render without an extra layout
+    // pass. The canvas's localStorage cache layers on top of this at the
+    // Shell level.
+    const display = (e.display && typeof e.display === "object") ? e.display : {};
+    const x = Number.isFinite(Number(display.x)) ? Number(display.x) : 60 + col * COL_W;
+    const y = Number.isFinite(Number(display.y)) ? Number(display.y) : 60 + row * ROW_H;
+    const width = Number.isFinite(Number(display.width)) ? Number(display.width) : undefined;
+
     return {
       id,
       name: id,
       schema: String(doc.model?.name || "public"),
       cat,
       subject: e.subject || cat,
-      x: 60 + col * COL_W,
-      y: 60 + row * ROW_H,
+      x,
+      y,
+      width,
       badges: kind === "ENUM" ? ["ENUM"] : ["BASE"],
       rowCount: e.row_count || "",
       kind: kind || undefined,

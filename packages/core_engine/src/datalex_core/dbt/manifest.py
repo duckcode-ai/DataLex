@@ -32,6 +32,14 @@ class ImportResult:
     sources: Dict[str, Dict[str, Any]] = field(default_factory=dict)  # name -> doc
     models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
+    # source_path: dbt's `original_file_path` per doc, so callers can mirror the
+    # dbt project's folder layout when writing. Keyed like the parent dict —
+    # source_paths["sources"][<name>] and source_paths["models"][<name>]. Always
+    # populated for new imports; absent-or-empty means "no known source path,
+    # fall back to flat layout."
+    source_paths: Dict[str, Dict[str, str]] = field(
+        default_factory=lambda: {"sources": {}, "models": {}}
+    )
 
 
 def import_manifest(
@@ -62,37 +70,109 @@ def import_manifest(
     for source_name, tables in sources_grouped.items():
         doc = _build_source_doc(source_name, tables, existing)
         result.sources[doc["name"]] = doc
+        src_path = _common_source_path(tables)
+        if src_path:
+            result.source_paths["sources"][doc["name"]] = src_path
 
     for uid, node in nodes.items():
         if node.get("resource_type") != "model":
             continue
         doc = _build_model_doc(node, existing)
         result.models[doc["name"]] = doc
+        model_path = node.get("original_file_path") or ""
+        if model_path:
+            # Record the dbt source path so writers can mirror the tree.
+            result.source_paths["models"][doc["name"]] = model_path
 
     return result
 
 
-def write_import_result(result: ImportResult, out_root: str) -> List[str]:
+def _common_source_path(tables: List[Dict[str, Any]]) -> str:
+    """Return a representative `original_file_path` for a group of source nodes.
+
+    All tables under a single source_name usually live in the same schema.yml
+    — use the first table's path. If paths diverge (rare), pick the shortest so
+    we write the source file at the most general dbt folder it covers.
+    """
+    paths = [str(t.get("original_file_path") or "") for t in tables]
+    paths = [p for p in paths if p]
+    if not paths:
+        return ""
+    return min(paths, key=len)
+
+
+def write_import_result(
+    result: ImportResult,
+    out_root: str,
+    *,
+    preserve_layout: bool = True,
+) -> List[str]:
     """Persist an ImportResult into a DataLex-style tree under out_root.
 
-    Writes:
+    When `preserve_layout` is True (the default) and the ImportResult carries
+    per-doc `source_path` entries, each DataLex file is written at the same
+    relative path as the original dbt file — so `models/staging/stg_customers.sql`
+    lands as `<out_root>/models/staging/stg_customers.yaml`. When no source_path
+    is recorded, falls back to the legacy flat layout:
       <out_root>/sources/<name>.yaml
       <out_root>/models/dbt/<name>.yaml
     """
     out = Path(out_root)
     written: List[str] = []
 
-    for doc in result.sources.values():
-        path = out / "sources" / f"{doc['name']}.yaml"
+    src_paths = result.source_paths if preserve_layout else {"sources": {}, "models": {}}
+
+    for name, doc in result.sources.items():
+        rel = src_paths.get("sources", {}).get(name) or ""
+        path = _resolve_source_out_path(out, name, rel)
         _write_yaml(path, doc)
         written.append(str(path))
 
-    for doc in result.models.values():
-        path = out / "models" / "dbt" / f"{doc['name']}.yaml"
+    for name, doc in result.models.items():
+        rel = src_paths.get("models", {}).get(name) or ""
+        path = _resolve_model_out_path(out, name, rel)
         _write_yaml(path, doc)
         written.append(str(path))
 
     return written
+
+
+def _resolve_source_out_path(out: Path, name: str, source_rel: str) -> Path:
+    """Decide where to write a source doc.
+
+    dbt source definitions live inside schema.yml / sources.yml (YAML, not SQL).
+    The original_file_path points at the source schema file itself, so several
+    source_names can share one file. To avoid collisions, we still write one
+    DataLex file per source_name — but we place it under the SAME FOLDER as the
+    original schema file. Falls back to `sources/<name>.yaml` when path unknown.
+    """
+    if source_rel:
+        parent = _safe_relative(Path(source_rel).parent)
+        return (out / parent / f"{name}.yaml").resolve(strict=False) if False else (out / parent / f"{name}.yaml")
+    return out / "sources" / f"{name}.yaml"
+
+
+def _resolve_model_out_path(out: Path, name: str, model_rel: str) -> Path:
+    """Decide where to write a model doc.
+
+    dbt model files are SQL — `models/staging/stg_customers.sql`. The DataLex
+    counterpart is a sibling YAML with the same stem: `.../stg_customers.yaml`.
+    Falls back to the legacy flat layout when path is unknown.
+    """
+    if model_rel:
+        p = _safe_relative(Path(model_rel))
+        return out / p.with_suffix(".yaml")
+    return out / "models" / "dbt" / f"{name}.yaml"
+
+
+def _safe_relative(p: Path) -> Path:
+    """Guard against absolute paths or `..` segments sneaking out of out_root.
+
+    dbt's `original_file_path` is already relative, but be defensive in case a
+    manifest has an unexpected shape (e.g. packages installed via dbt deps).
+    """
+    parts = [seg for seg in p.parts if seg not in ("", "..", "/", ".")]
+    return Path(*parts) if parts else Path(".")
 
 
 # ------------------------ builders ------------------------

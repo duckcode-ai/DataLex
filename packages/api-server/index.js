@@ -1648,6 +1648,232 @@ app.post("/api/projects/:id/move-file", requireAdmin, async (req, res) => {
   }
 });
 
+// --- Folder + file CRUD (PR C) -------------------------------------------------
+// All mutations resolve paths relative to the project's modelPath and reject
+// anything that escapes it via `isPathInside`. Path strings are POSIX-style
+// ("models/staging/stg_orders.yml") as sent from the UI.
+
+async function resolveProjectAndModelPath(projectId) {
+  const projects = await loadProjects();
+  const project = projects.find((p) => p.id === projectId);
+  if (!project) return { project: null, structure: null, error: { status: 404, msg: "Project not found" } };
+  const structure = await loadProjectStructure(project.path);
+  if (!existsSync(structure.modelPath)) {
+    await mkdir(structure.modelPath, { recursive: true });
+  }
+  return { project, structure, error: null };
+}
+
+function resolveInsideModelPath(modelPath, rawSubpath) {
+  const rel = toPosixPath(String(rawSubpath || "")).replace(/^\/+|\/+$/g, "");
+  if (!rel) return { ok: false, msg: "path is required" };
+  if (rel.includes("\0")) return { ok: false, msg: "invalid path" };
+  const full = resolve(modelPath, rel);
+  if (!isPathInside(modelPath, full)) {
+    return { ok: false, msg: "path must stay inside project model path" };
+  }
+  return { ok: true, full, rel };
+}
+
+// Create a folder (recursive mkdir — no-op if exists)
+app.post("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const { path: subpath } = req.body || {};
+    const resolved = resolveInsideModelPath(structure.modelPath, subpath);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
+    await mkdir(resolved.full, { recursive: true });
+    res.json({
+      ok: true,
+      path: resolved.rel,
+      fullPath: resolved.full,
+      name: basename(resolved.full),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rename / move a single file inside the project model path
+app.patch("/api/projects/:id/files", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const { fromPath, toPath } = req.body || {};
+    const from = resolveInsideModelPath(structure.modelPath, fromPath);
+    if (!from.ok) return res.status(400).json({ error: `fromPath: ${from.msg}` });
+    const to = resolveInsideModelPath(structure.modelPath, toPath);
+    if (!to.ok) return res.status(400).json({ error: `toPath: ${to.msg}` });
+    if (!existsSync(from.full)) return res.status(404).json({ error: "Source file not found" });
+    const srcStat = await stat(from.full);
+    if (!srcStat.isFile()) return res.status(400).json({ error: "Source is not a file" });
+    if (existsSync(to.full)) return res.status(409).json({ error: "Destination already exists" });
+    await mkdir(dirname(to.full), { recursive: true });
+    try {
+      await rename(from.full, to.full);
+    } catch (err) {
+      if (err?.code === "EXDEV") {
+        await copyFile(from.full, to.full);
+        await unlinkFile(from.full);
+      } else {
+        throw err;
+      }
+    }
+    const stats = await stat(to.full);
+    res.json({
+      ok: true,
+      fromPath: from.rel,
+      toPath: to.rel,
+      file: {
+        path: to.rel,
+        fullPath: to.full,
+        name: basename(to.full),
+        size: stats.size,
+        modifiedAt: stats.mtime.toISOString(),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Rename / move a folder inside the project model path
+app.patch("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const { fromPath, toPath } = req.body || {};
+    const from = resolveInsideModelPath(structure.modelPath, fromPath);
+    if (!from.ok) return res.status(400).json({ error: `fromPath: ${from.msg}` });
+    const to = resolveInsideModelPath(structure.modelPath, toPath);
+    if (!to.ok) return res.status(400).json({ error: `toPath: ${to.msg}` });
+    if (!existsSync(from.full)) return res.status(404).json({ error: "Source folder not found" });
+    const srcStat = await stat(from.full);
+    if (!srcStat.isDirectory()) return res.status(400).json({ error: "Source is not a directory" });
+    if (existsSync(to.full)) return res.status(409).json({ error: "Destination already exists" });
+    // Reject moving a folder into itself
+    const toRel = relative(from.full, to.full);
+    if (toRel === "" || (!toRel.startsWith("..") && !isAbsolute(toRel))) {
+      return res.status(400).json({ error: "Cannot move folder into itself" });
+    }
+    await mkdir(dirname(to.full), { recursive: true });
+    try {
+      await rename(from.full, to.full);
+    } catch (err) {
+      if (err?.code === "EXDEV") {
+        // cross-device fallback: copy tree then remove
+        await copyDirRecursive(from.full, to.full);
+        rmSync(from.full, { recursive: true, force: true });
+      } else {
+        throw err;
+      }
+    }
+    res.json({ ok: true, fromPath: from.rel, toPath: to.rel });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+async function copyDirRecursive(src, dst) {
+  await mkdir(dst, { recursive: true });
+  const entries = await readdir(src, { withFileTypes: true });
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const dstPath = join(dst, entry.name);
+    if (entry.isDirectory()) {
+      await copyDirRecursive(srcPath, dstPath);
+    } else if (entry.isFile()) {
+      await copyFile(srcPath, dstPath);
+    }
+  }
+}
+
+// Delete a single file
+app.delete("/api/projects/:id/files", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const subpath = req.body?.path || req.query?.path;
+    const resolved = resolveInsideModelPath(structure.modelPath, subpath);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
+    if (!existsSync(resolved.full)) return res.status(404).json({ error: "File not found" });
+    const st = await stat(resolved.full);
+    if (!st.isFile()) return res.status(400).json({ error: "Path is not a file" });
+    await unlinkFile(resolved.full);
+    res.json({ ok: true, path: resolved.rel });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete a folder (recursive)
+app.delete("/api/projects/:id/folders", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const subpath = req.body?.path || req.query?.path;
+    const resolved = resolveInsideModelPath(structure.modelPath, subpath);
+    if (!resolved.ok) return res.status(400).json({ error: resolved.msg });
+    if (resolve(resolved.full) === resolve(structure.modelPath)) {
+      return res.status(400).json({ error: "Refusing to delete project model root" });
+    }
+    if (!existsSync(resolved.full)) return res.status(404).json({ error: "Folder not found" });
+    const st = await stat(resolved.full);
+    if (!st.isDirectory()) return res.status(400).json({ error: "Path is not a folder" });
+    rmSync(resolved.full, { recursive: true, force: true });
+    res.json({ ok: true, path: resolved.rel });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Batch-save a set of files. Body: { files: [{ path, content }] }
+// Each path is relative to the project model path. All-or-nothing per item —
+// one failed write doesn't abort the whole batch, but the response reports
+// per-file status so the client can surface partial failure.
+app.post("/api/projects/:id/save-all", requireAdmin, async (req, res) => {
+  try {
+    const { project, structure, error } = await resolveProjectAndModelPath(req.params.id);
+    if (error) return res.status(error.status).json({ error: error.msg });
+    const files = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (!files.length) return res.status(400).json({ error: "files array is required" });
+
+    const results = [];
+    for (const item of files) {
+      const subpath = item?.path;
+      const content = item?.content;
+      if (typeof content !== "string") {
+        results.push({ path: subpath || "", ok: false, error: "content must be a string" });
+        continue;
+      }
+      const resolved = resolveInsideModelPath(structure.modelPath, subpath);
+      if (!resolved.ok) {
+        results.push({ path: subpath || "", ok: false, error: resolved.msg });
+        continue;
+      }
+      try {
+        await mkdir(dirname(resolved.full), { recursive: true });
+        await writeFile(resolved.full, content, "utf-8");
+        const stats = await stat(resolved.full);
+        results.push({
+          path: resolved.rel,
+          fullPath: resolved.full,
+          ok: true,
+          size: stats.size,
+          modifiedAt: stats.mtime.toISOString(),
+        });
+      } catch (err) {
+        results.push({ path: resolved.rel, ok: false, error: err.message });
+      }
+    }
+    const okCount = results.filter((r) => r.ok).length;
+    res.json({ ok: okCount === results.length, saved: okCount, total: results.length, results });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // List saved connector profiles and recent imports
 app.get("/api/connections", async (_req, res) => {
   try {
@@ -2245,6 +2471,171 @@ app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), 
     res.json({ success: true, updatedYaml, wroteBack: Boolean(dbt_schema_path && write_back) });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/* ------------------------------------------------------------------
+ * POST /api/dbt/import
+ *
+ * Full-repo dbt import: shells out to `dm dbt import --project-dir X --out Y`
+ * which wraps `sync_dbt_project` and preserves the dbt models/ folder layout
+ * in the DataLex output tree. Returns the entire produced YAML tree in-line
+ * so the web-app can load it without a second round-trip to disk.
+ *
+ * Body:
+ *   projectDir?: string         Local path to the dbt project (required unless gitUrl).
+ *   gitUrl?: string             Public git URL; cloned to a tmp dir first.
+ *   gitRef?: string             Branch / tag / commit (default: main).
+ *   out?: string                Override output dir (default: tmp dir returned in response).
+ *   skipWarehouse?: boolean     Pass --skip-warehouse (default: true for gitUrl imports).
+ *   target?: string             Pick a non-default dbt target.
+ *
+ * Response:
+ *   { success: true, tree: Array<{path,content}>, report: SyncReport, outDir }
+ * ------------------------------------------------------------------ */
+app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async (req, res) => {
+  try {
+    const {
+      projectDir,
+      gitUrl,
+      gitRef = "main",
+      out,
+      target,
+      skipWarehouse,
+      manifest,
+    } = req.body || {};
+
+    if (!projectDir && !gitUrl) {
+      return res.status(400).json({
+        error: "Provide either `projectDir` (local path) or `gitUrl` (public git URL).",
+      });
+    }
+
+    // Resolve the dbt project directory — either user-supplied or a fresh clone.
+    let resolvedProjectDir = "";
+    let cloneDir = "";
+    if (gitUrl) {
+      cloneDir = join(tmpdir(), `datalex-dbt-${Date.now()}-${randomBytes(4).toString("hex")}`);
+      mkdirSync(cloneDir, { recursive: true });
+      try {
+        execFileSync("git", ["clone", "--depth", "1", "--branch", gitRef, gitUrl, cloneDir], {
+          stdio: ["ignore", "pipe", "pipe"],
+          timeout: 60000,
+        });
+      } catch (err) {
+        // Branch/tag may not exist; retry without --branch so we at least get the default.
+        try {
+          execFileSync("git", ["clone", "--depth", "1", gitUrl, cloneDir], {
+            stdio: ["ignore", "pipe", "pipe"],
+            timeout: 60000,
+          });
+        } catch (err2) {
+          try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
+          return res.status(400).json({
+            error: `git clone failed: ${String(err2?.stderr || err2?.message || err2).slice(0, 400)}`,
+          });
+        }
+      }
+      resolvedProjectDir = cloneDir;
+    } else {
+      if (!existsSync(String(projectDir))) {
+        return res.status(400).json({ error: `projectDir not found: ${projectDir}` });
+      }
+      resolvedProjectDir = String(projectDir);
+    }
+
+    // Output dir: caller-specified or auto-provisioned tmp dir we return in the response.
+    const outDir = out
+      ? String(out)
+      : join(tmpdir(), `datalex-dbt-out-${Date.now()}-${randomBytes(4).toString("hex")}`);
+    mkdirSync(outDir, { recursive: true });
+
+    // Default: skip warehouse for git-clone imports (we almost never have warehouse creds
+    // for a random jaffle-shop clone) but honour explicit caller setting.
+    const skipWh =
+      typeof skipWarehouse === "boolean" ? skipWarehouse : Boolean(gitUrl);
+
+    const cliArgs = [
+      join(REPO_ROOT, "dm"),
+      "dbt",
+      "import",
+      "--project-dir",
+      resolvedProjectDir,
+      "--out",
+      outDir,
+      "--json",
+    ];
+    if (skipWh) cliArgs.push("--skip-warehouse");
+    if (target) cliArgs.push("--target", String(target));
+    if (manifest) cliArgs.push("--manifest", String(manifest));
+
+    let report = null;
+    let importError = null;
+    try {
+      const stdout = execFileSync(PYTHON, cliArgs, {
+        cwd: REPO_ROOT,
+        encoding: "utf-8",
+        timeout: 180000, // 3 min — git + dbt parse can be slow on first run
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      // Our CLI prints `[dbt-import] ...` progress lines plus a trailing JSON blob
+      // (with --json). Find the last line that parses as JSON to decode the report.
+      const lines = String(stdout || "").split(/\r?\n/).filter(Boolean);
+      for (let i = lines.length - 1; i >= 0; i -= 1) {
+        try {
+          const candidate = JSON.parse(lines[i]);
+          if (candidate && typeof candidate === "object" && "tables" in candidate) {
+            report = candidate;
+            break;
+          }
+        } catch (_) {
+          // keep scanning
+        }
+      }
+    } catch (err) {
+      importError = String(err?.stderr || err?.message || err).slice(0, 2000);
+    }
+
+    if (importError) {
+      if (cloneDir) {
+        try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
+      }
+      return res.status(500).json({ error: importError });
+    }
+
+    // Walk outDir and build an in-memory tree of produced YAML files. Keeping the
+    // response self-contained means the UI can ingest the result without any
+    // further disk access — important for the "Load jaffle-shop demo" flow where
+    // the user may not have chosen a project folder yet.
+    const tree = [];
+    const walk = (dir, rel = "") => {
+      let entries = [];
+      try {
+        entries = require("fs").readdirSync(dir, { withFileTypes: true });
+      } catch (_) {
+        return;
+      }
+      for (const ent of entries) {
+        const abs = join(dir, ent.name);
+        const childRel = rel ? `${rel}/${ent.name}` : ent.name;
+        if (ent.isDirectory()) {
+          walk(abs, childRel);
+        } else if (/\.ya?ml$/i.test(ent.name)) {
+          try {
+            tree.push({ path: childRel, content: readFileSync(abs, "utf-8") });
+          } catch (_) {}
+        }
+      }
+    };
+    walk(outDir);
+
+    if (cloneDir) {
+      try { rmSync(cloneDir, { recursive: true, force: true }); } catch (_) {}
+    }
+
+    res.json({ success: true, outDir, tree, report });
+  } catch (err) {
+    res.status(500).json({ error: err?.message || String(err) });
   }
 });
 

@@ -3,24 +3,43 @@ import React from "react";
 import Icon from "./icons";
 import { NOTATION, FK_COLOR_MAP } from "./notation";
 
-function TableCard({ table, selected, onSelect, onMove }) {
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
 
   const onMouseDown = (e) => {
+    // Dragging from a column's key dot starts a relationship draw instead
+    // of a table move. The row click-target is still the card; only the
+    // tc-key glyph triggers the connect gesture.
+    const keyEl = e.target.closest(".tc-key");
+    if (keyEl && onStartConnect) {
+      const row = keyEl.closest(".tc-row");
+      const colName = row?.getAttribute("data-col");
+      if (colName) {
+        e.preventDefault();
+        e.stopPropagation();
+        onStartConnect({ fromTable: table.id, fromColumn: colName }, e);
+        return;
+      }
+    }
     if (e.target.closest(".tc-badges, button, .tc-colflags")) return;
     const rect = cardRef.current.getBoundingClientRect();
-    drag.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top };
+    drag.current = { dx: e.clientX - rect.left, dy: e.clientY - rect.top, moved: false };
     onSelect({ type: "table", id: table.id });
     const onMove2 = (ev) => {
       const parent = cardRef.current.parentElement.getBoundingClientRect();
+      drag.current.moved = true;
       onMove(table.id, ev.clientX - parent.left - drag.current.dx, ev.clientY - parent.top - drag.current.dy);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove2);
       window.removeEventListener("mouseup", onUp);
+      const moved = !!drag.current?.moved;
       drag.current = null;
+      // Only fire drag-end persistence when we actually moved — pure clicks
+      // shouldn't rewrite YAML.
+      if (moved && onMoveEnd) onMoveEnd(table.id);
     };
     window.addEventListener("mousemove", onMove2);
     window.addEventListener("mouseup", onUp);
@@ -381,12 +400,70 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, title, engine, legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, title, engine, legendOpen, setLegendOpen }) {
   const I = Icon;
   const [hovered, setHovered] = React.useState(null);
+  const innerRef = React.useRef(null);
+
+  // Live connect-drag state: set on mousedown over a column key, cleared on
+  // mouseup. While active, we draw a temporary rubber-band line from the
+  // source column to the cursor. On release we sniff the element under the
+  // cursor for a `.tc-key` match and, if found, call `onConnect` with both
+  // endpoints. The Shell opens `NewRelationshipDialog` from there.
+  const [connectDrag, setConnectDrag] = React.useState(null);
+
   const onMoveTable = (id, x, y) => {
     setTables((ts) => ts.map((t) => (t.id === id ? { ...t, x: Math.max(0, x), y: Math.max(0, y) } : t)));
   };
+
+  const handleStartConnect = React.useCallback((seed, downEvent) => {
+    const inner = innerRef.current;
+    if (!inner) return;
+    const rect = inner.getBoundingClientRect();
+    // Start coords: the column's key dot, converted to canvas-inner space.
+    const keyEl = downEvent.target.closest(".tc-key");
+    const keyRect = keyEl?.getBoundingClientRect();
+    const startX = keyRect ? keyRect.left + keyRect.width / 2 - rect.left : downEvent.clientX - rect.left;
+    const startY = keyRect ? keyRect.top + keyRect.height / 2 - rect.top : downEvent.clientY - rect.top;
+
+    setConnectDrag({
+      ...seed,
+      startX, startY,
+      curX: startX, curY: startY,
+    });
+
+    const onMove = (ev) => {
+      const r = inner.getBoundingClientRect();
+      setConnectDrag((prev) => prev ? { ...prev, curX: ev.clientX - r.left, curY: ev.clientY - r.top } : prev);
+    };
+    const onUp = (ev) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      // Pick the element under the cursor and walk up for a .tc-key ancestor.
+      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+      const keyHit = hit?.closest?.(".tc-key");
+      const rowHit = keyHit?.closest?.(".tc-row");
+      const cardHit = keyHit?.closest?.(".table-card");
+      const toTableId = cardHit?.id?.replace(/^tc-/, "") || null;
+      const toColName = rowHit?.getAttribute("data-col") || null;
+      setConnectDrag(null);
+      if (
+        toTableId && toColName &&
+        (toTableId !== seed.fromTable || toColName !== seed.fromColumn) &&
+        onConnect
+      ) {
+        onConnect({
+          fromEntity: seed.fromTable,
+          fromColumn: seed.fromColumn,
+          toEntity: toTableId,
+          toColumn: toColName,
+        });
+      }
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [onConnect]);
+
   return (
     <div className="canvas-wrap">
       <div className="canvas-grid" />
@@ -410,7 +487,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       </div>
 
       <div className="canvas">
-        <div className="canvas-inner" onClick={(e) => {
+        <div className="canvas-inner" ref={innerRef} onClick={(e) => {
           if (e.target.classList.contains("canvas-inner")) onSelect(null);
         }}>
           <SubjectAreas areas={areas} />
@@ -421,8 +498,32 @@ export default function Canvas({ tables, setTables, relationships, areas, select
             <TableCard key={t.id} table={t}
                        selected={selected?.type === "table" && selected.id === t.id}
                        onSelect={onSelect}
-                       onMove={onMoveTable} />
+                       onMove={onMoveTable}
+                       onMoveEnd={onMoveEnd}
+                       onStartConnect={handleStartConnect} />
           ))}
+          {connectDrag && (
+            <svg
+              className="rel-svg"
+              width="2400"
+              height="1600"
+              style={{ pointerEvents: "none", position: "absolute", inset: 0 }}
+              aria-hidden="true"
+            >
+              <line
+                x1={connectDrag.startX}
+                y1={connectDrag.startY}
+                x2={connectDrag.curX}
+                y2={connectDrag.curY}
+                stroke="var(--accent)"
+                strokeWidth="1.6"
+                strokeDasharray="4 3"
+                strokeLinecap="round"
+              />
+              <circle cx={connectDrag.curX} cy={connectDrag.curY} r="3.5"
+                      fill="var(--accent)" stroke="var(--bg-canvas)" strokeWidth="1.5" />
+            </svg>
+          )}
         </div>
       </div>
 

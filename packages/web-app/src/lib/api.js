@@ -119,6 +119,52 @@ export async function moveProjectFile(targetProjectId, sourcePath, mode = "move"
   });
 }
 
+// --- Folder + file CRUD (PR C) -------------------------------------------------
+// `path`, `fromPath`, `toPath` are POSIX subpaths relative to the project's
+// model root — the same shape the Explorer tree uses for `path` on nodes.
+
+export async function createProjectFolder(projectId, path) {
+  return request(`/projects/${projectId}/folders`, {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function renameProjectFile(projectId, fromPath, toPath) {
+  return request(`/projects/${projectId}/files`, {
+    method: "PATCH",
+    body: JSON.stringify({ fromPath, toPath }),
+  });
+}
+
+export async function renameProjectFolder(projectId, fromPath, toPath) {
+  return request(`/projects/${projectId}/folders`, {
+    method: "PATCH",
+    body: JSON.stringify({ fromPath, toPath }),
+  });
+}
+
+export async function deleteProjectFile(projectId, path) {
+  return request(`/projects/${projectId}/files`, {
+    method: "DELETE",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function deleteProjectFolder(projectId, path) {
+  return request(`/projects/${projectId}/folders`, {
+    method: "DELETE",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function saveAllProjectFiles(projectId, files) {
+  return request(`/projects/${projectId}/save-all`, {
+    method: "POST",
+    body: JSON.stringify({ files }),
+  });
+}
+
 export async function importSchemaContent({ format, content, filename, modelName }) {
   return request("/import", {
     method: "POST",
@@ -227,6 +273,26 @@ export async function pullGitBranch(projectId, { remote = "origin", branch = "",
       branch: branch || undefined,
       ff_only: Boolean(ffOnly),
     }),
+  });
+}
+
+/**
+ * Import a full dbt project (local folder or git URL) into a folder-preserving
+ * DataLex YAML tree. Returns `{ tree: Array<{path, content}>, report, outDir }`.
+ *
+ * @param {object} body
+ * @param {string} [body.projectDir]      Local dbt project path (containing dbt_project.yml).
+ * @param {string} [body.gitUrl]          Public git URL to clone.
+ * @param {string} [body.gitRef]          Branch / tag / commit (default: main).
+ * @param {string} [body.out]             Override output directory.
+ * @param {boolean} [body.skipWarehouse]  Skip live warehouse introspection.
+ * @param {string}  [body.target]         Pick a non-default dbt target.
+ * @param {string}  [body.manifest]       Override manifest.json path.
+ */
+export async function importDbtProject(body) {
+  return request("/dbt/import", {
+    method: "POST",
+    body: JSON.stringify(body || {}),
   });
 }
 

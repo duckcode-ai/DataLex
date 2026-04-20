@@ -1,0 +1,9 @@
+kind: model
+name: metricflow_time_spine
+materialization: view
+database: jaffle_shop
+schema: main
+meta:
+  datalex:
+    dbt:
+      unique_id: model.jaffle_shop.metricflow_time_spine

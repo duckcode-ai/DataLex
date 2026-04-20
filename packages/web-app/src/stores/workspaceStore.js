@@ -12,9 +12,16 @@ import {
   moveProjectFile,
   importSchemaContent,
   generateForwardSql,
+  createProjectFolder,
+  renameProjectFile,
+  renameProjectFolder,
+  deleteProjectFile,
+  deleteProjectFolder,
+  saveAllProjectFiles,
 } from "../lib/api";
 import { SAMPLE_MODEL } from "../sampleModel";
 import { normalizeImportedModelFileName } from "../lib/importModelName";
+import useHistoryStore, { fileKeyOf } from "./historyStore";
 
 function parseYamlObjectSafe(text) {
   try {
@@ -348,6 +355,73 @@ const useWorkspaceStore = create((set, get) => ({
     localStorage.setItem("dm_offline_docs", JSON.stringify(localDocuments));
   },
 
+  /* Ingest a `POST /api/dbt/import` response into the workspace so the
+     Explorer shows the full folder tree and every file is openable.
+     Runs entirely in-memory — nothing touches disk until the user wires up
+     PR C (file/folder CRUD). Enters offline mode so subsequent save / open
+     calls stay local rather than racing against whatever real project was
+     previously active.
+
+     Shape of `tree` is Array<{path, content}> as returned by the api route.
+     `sourceLabel` is a human-readable label for the Explorer connection chip
+     ("jaffle-shop demo", "github.com/dbt-labs/jaffle-shop", etc). */
+  loadDbtImportTree: async (tree, { sourceLabel = "dbt import" } = {}) => {
+    if (!Array.isArray(tree) || tree.length === 0) {
+      throw new Error("loadDbtImportTree: empty tree — nothing to load.");
+    }
+
+    // Synthesise a file descriptor per entry. `id` lets offline `switchTab`
+    // look the doc up; `fullPath` + `path` power the Explorer tree.
+    const ts = Date.now();
+    const docs = tree.map((entry, i) => {
+      const rel = String(entry.path || entry.fullPath || "").replace(/^[/\\]+/, "");
+      const name = rel.split("/").pop() || `file-${i}.yaml`;
+      return {
+        id: `dbt-import-${ts}-${i}`,
+        name,
+        fullPath: rel,
+        path: rel,
+        content: String(entry.content || ""),
+      };
+    });
+
+    // Pick a sensible first-open: prefer staging models, then marts, then
+    // anything else. Gives the user something recognisable on first click.
+    const firstModel =
+      docs.find((d) => /models\/staging\/.*\.ya?ml$/i.test(d.fullPath)) ||
+      docs.find((d) => /models\/.*\.ya?ml$/i.test(d.fullPath)) ||
+      docs[0];
+
+    // Snapshot the outgoing active project (if any) so a later project
+    // switch still restores that workspace exactly as it was.
+    get()._snapshotActiveProject();
+
+    set({
+      offlineMode: true,
+      activeProjectId: null,
+      projectFiles: docs,
+      projectPath: sourceLabel,
+      projectModelPath: "",
+      projectConfig: null,
+      localDocuments: docs,
+      openTabs: firstModel ? [firstModel] : [],
+      activeFile: firstModel || null,
+      activeFileContent: firstModel?.content || "",
+      originalContent: firstModel?.content || "",
+      isDirty: false,
+      loading: false,
+      error: null,
+    });
+
+    // Keep the offline localStorage snapshot current so a page refresh
+    // replays the same import instead of resetting to the starter sample.
+    try {
+      localStorage.setItem("dm_offline_docs", JSON.stringify(docs));
+    } catch (_err) {
+      // Safari private mode etc. — don't fail the import on storage errors.
+    }
+  },
+
   addProjectFolder: async (name, path, createIfMissing = false, options = {}) => {
     set({ loading: true, error: null });
     try {
@@ -626,8 +700,18 @@ const useWorkspaceStore = create((set, get) => ({
     });
   },
 
-  updateContent: (content) => {
-    const { originalContent, offlineMode, activeFile, localDocuments } = get();
+  updateContent: (content, options = {}) => {
+    const { originalContent, offlineMode, activeFile, activeFileContent, localDocuments } = get();
+    const prev = activeFileContent;
+
+    // Every user-visible mutation passes through this setter; push a
+    // history entry unless the caller asked to skip (undo/redo themselves
+    // call `updateContent` and must not re-record the inverse operation).
+    if (!options.skipHistory && activeFile) {
+      const key = fileKeyOf(activeFile);
+      if (key) useHistoryStore.getState().push(key, prev, content);
+    }
+
     set({ activeFileContent: content, isDirty: content !== originalContent });
 
     if (offlineMode && activeFile) {
@@ -637,6 +721,26 @@ const useWorkspaceStore = create((set, get) => ({
       set({ localDocuments: updated });
       get().saveOfflineDocs();
     }
+  },
+
+  undo: () => {
+    const { activeFile } = get();
+    if (!activeFile) return false;
+    const key = fileKeyOf(activeFile);
+    const snapshot = useHistoryStore.getState().undo(key);
+    if (snapshot == null) return false;
+    get().updateContent(snapshot, { skipHistory: true });
+    return true;
+  },
+
+  redo: () => {
+    const { activeFile } = get();
+    if (!activeFile) return false;
+    const key = fileKeyOf(activeFile);
+    const snapshot = useHistoryStore.getState().redo(key);
+    if (snapshot == null) return false;
+    get().updateContent(snapshot, { skipHistory: true });
+    return true;
   },
 
   saveCurrentFile: async () => {
@@ -807,6 +911,216 @@ const useWorkspaceStore = create((set, get) => ({
       await get().selectProject(targetProjectId);
       if (result?.targetFile?.fullPath) {
         await get().openFile(result.targetFile);
+      }
+      set({ loading: false });
+      return result;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // --- PR C: folder + file CRUD -------------------------------------------
+  // These only operate in online mode against an active project. `path`
+  // values are POSIX subpaths relative to the project's model root —
+  // the same shape the Explorer tree uses for node.path.
+
+  createFolder: async (subpath) => {
+    const { activeProjectId, offlineMode } = get();
+    if (offlineMode) throw new Error("Folder creation requires API mode.");
+    if (!activeProjectId) throw new Error("No active project.");
+    if (!subpath) throw new Error("Folder path is required.");
+    set({ loading: true, error: null });
+    try {
+      await createProjectFolder(activeProjectId, subpath);
+      const data = await fetchProjectFiles(activeProjectId);
+      set({ projectFiles: data.files || [], loading: false });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // Rename OR move a file — server treats both the same (it's just a rename
+  // to a different subpath). If the file was open in a tab it's closed; if
+  // it was the active file we re-open it at its new location.
+  renameFile: async (fromPath, toPath) => {
+    const { activeProjectId, offlineMode, activeFile } = get();
+    if (offlineMode) throw new Error("Rename requires API mode.");
+    if (!activeProjectId) throw new Error("No active project.");
+    if (!fromPath || !toPath) throw new Error("fromPath and toPath are required.");
+    if (fromPath === toPath) return;
+    const wasActive = !!(activeFile && activeFile.path === fromPath);
+    set({ loading: true, error: null });
+    try {
+      const result = await renameProjectFile(activeProjectId, fromPath, toPath);
+      // Drop any tab pointing at the old path.
+      set((s) => ({
+        openTabs: s.openTabs.filter((t) => t.path !== fromPath),
+        activeFile: wasActive ? null : s.activeFile,
+        activeFileContent: wasActive ? "" : s.activeFileContent,
+        originalContent: wasActive ? "" : s.originalContent,
+        isDirty: wasActive ? false : s.isDirty,
+      }));
+      const data = await fetchProjectFiles(activeProjectId);
+      set({ projectFiles: data.files || [] });
+      if (wasActive && result?.file?.fullPath) {
+        const moved = (data.files || []).find((f) => f.fullPath === result.file.fullPath);
+        if (moved) await get().openFile(moved);
+      }
+      set({ loading: false });
+      return result;
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // Alias — semantically identical to rename.
+  moveFile: async (fromPath, toPath) => get().renameFile(fromPath, toPath),
+
+  // Rename / move a folder. Any open tabs under the old folder get their
+  // `path` / `fullPath` rewritten so users keep their scroll + cursor.
+  renameFolder: async (fromPath, toPath) => {
+    const { activeProjectId, offlineMode } = get();
+    if (offlineMode) throw new Error("Folder rename requires API mode.");
+    if (!activeProjectId) throw new Error("No active project.");
+    if (!fromPath || !toPath) throw new Error("fromPath and toPath are required.");
+    if (fromPath === toPath) return;
+    const normalize = (p) => String(p).replace(/\/+$/, "");
+    const fromNorm = normalize(fromPath);
+    const toNorm = normalize(toPath);
+    set({ loading: true, error: null });
+    try {
+      await renameProjectFolder(activeProjectId, fromNorm, toNorm);
+      const data = await fetchProjectFiles(activeProjectId);
+      const prefix = fromNorm + "/";
+      const rewritePath = (p) => (p === fromNorm || p?.startsWith?.(prefix)) ? toNorm + p.slice(fromNorm.length) : p;
+      set((s) => {
+        const newTabs = s.openTabs
+          .map((t) => {
+            if (!t.path || !t.path.startsWith(prefix)) return t;
+            const newRel = rewritePath(t.path);
+            const match = (data.files || []).find((f) => f.path === newRel);
+            return match ? { ...t, ...match, content: t.content } : t;
+          })
+          .filter((t) => !t.path || (data.files || []).some((f) => f.path === t.path));
+        const activeMoved = s.activeFile && s.activeFile.path && s.activeFile.path.startsWith(prefix);
+        let newActive = s.activeFile;
+        if (activeMoved) {
+          const newRel = rewritePath(s.activeFile.path);
+          newActive = (data.files || []).find((f) => f.path === newRel) || null;
+        }
+        return {
+          projectFiles: data.files || [],
+          openTabs: newTabs,
+          activeFile: newActive,
+          loading: false,
+        };
+      });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  deleteFile: async (subpath) => {
+    const { activeProjectId, offlineMode, activeFile } = get();
+    if (offlineMode) throw new Error("Delete requires API mode.");
+    if (!activeProjectId) throw new Error("No active project.");
+    if (!subpath) throw new Error("path is required.");
+    set({ loading: true, error: null });
+    try {
+      await deleteProjectFile(activeProjectId, subpath);
+      const data = await fetchProjectFiles(activeProjectId);
+      set((s) => {
+        const tabs = s.openTabs.filter((t) => t.path !== subpath);
+        const deletedActive = activeFile && activeFile.path === subpath;
+        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        if (deletedActive) {
+          const next = tabs[tabs.length - 1] || null;
+          newState.activeFile = next;
+          newState.activeFileContent = next?.content || "";
+          newState.originalContent = next?.content || "";
+          newState.isDirty = false;
+        }
+        return newState;
+      });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  deleteFolder: async (subpath) => {
+    const { activeProjectId, offlineMode, activeFile } = get();
+    if (offlineMode) throw new Error("Delete requires API mode.");
+    if (!activeProjectId) throw new Error("No active project.");
+    if (!subpath) throw new Error("path is required.");
+    const prefix = String(subpath).replace(/\/+$/, "") + "/";
+    set({ loading: true, error: null });
+    try {
+      await deleteProjectFolder(activeProjectId, subpath);
+      const data = await fetchProjectFiles(activeProjectId);
+      set((s) => {
+        const tabs = s.openTabs.filter((t) => !t.path || !t.path.startsWith(prefix));
+        const activeRemoved = activeFile && activeFile.path && activeFile.path.startsWith(prefix);
+        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        if (activeRemoved) {
+          const next = tabs[tabs.length - 1] || null;
+          newState.activeFile = next;
+          newState.activeFileContent = next?.content || "";
+          newState.originalContent = next?.content || "";
+          newState.isDirty = false;
+        }
+        return newState;
+      });
+    } catch (err) {
+      set({ error: err.message, loading: false });
+      throw err;
+    }
+  },
+
+  // Batch-save every dirty tab plus the active buffer. Useful when the
+  // user clicks "Save project" in the top bar. No-op in offline mode.
+  saveAllDirty: async () => {
+    const { activeProjectId, offlineMode, openTabs, activeFile, activeFileContent, originalContent } = get();
+    if (offlineMode) {
+      // Offline: persist all localDocuments to localStorage.
+      get().saveOfflineDocs();
+      set({ originalContent: activeFileContent, isDirty: false });
+      return { ok: true, saved: 0, total: 0, results: [] };
+    }
+    if (!activeProjectId) throw new Error("No active project.");
+    // Build a dedup'd list keyed by path. Always include the active buffer
+    // (so in-memory edits on the active file are included even if the tab
+    // wasn't independently flagged dirty).
+    const payload = [];
+    const seen = new Set();
+    const pushIf = (path, content) => {
+      if (!path || seen.has(path) || typeof content !== "string") return;
+      seen.add(path);
+      payload.push({ path, content });
+    };
+    if (activeFile && activeFileContent !== originalContent) {
+      pushIf(activeFile.path, activeFileContent);
+    }
+    for (const tab of openTabs) {
+      if (!tab?.path) continue;
+      // Only include tabs with content we're confident about — the active
+      // buffer is handled above; other tabs' .content is what was loaded.
+      if (activeFile && tab.path === activeFile.path) continue;
+      // We don't track per-tab dirty state; skip non-active tabs here.
+    }
+    if (payload.length === 0) return { ok: true, saved: 0, total: 0, results: [] };
+    set({ loading: true, error: null });
+    try {
+      const result = await saveAllProjectFiles(activeProjectId, payload);
+      // Refresh project file metadata (mtimes) + reset active dirty flag.
+      const data = await fetchProjectFiles(activeProjectId);
+      set({ projectFiles: data.files || [] });
+      if (activeFile) {
+        set({ originalContent: activeFileContent, isDirty: false });
       }
       set({ loading: false });
       return result;

@@ -1,0 +1,23 @@
+kind: model
+name: stg_supplies
+materialization: view
+database: jaffle_shop
+schema: main
+description: 'List of our supply expenses data with basic cleaning and transformation
+  applied.
+
+  One row per supply cost, not per supply. As supply costs fluctuate they receive
+  a new row with a new UUID. Thus there can be multiple rows per supply_id.
+
+  '
+depends_on:
+- source:
+    source: jaffle_shop
+    name: supplies
+columns:
+- name: supply_uuid
+  description: The unique key of our supplies per cost.
+meta:
+  datalex:
+    dbt:
+      unique_id: model.jaffle_shop.stg_supplies

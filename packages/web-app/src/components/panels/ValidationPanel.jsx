@@ -21,8 +21,10 @@ import {
   Gauge,
   Layers,
 } from "lucide-react";
+import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { runModelChecks } from "../../modelQuality";
+import { lintDoc as lintDbtDoc } from "../../lib/dbtLint";
 import {
   PanelFrame,
   PanelSection,
@@ -326,12 +328,31 @@ function IssueRow({ issue }) {
 /* Main panel                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 export default function ValidationPanel() {
-  const { activeFileContent } = useWorkspaceStore();
+  const { activeFileContent, activeFile } = useWorkspaceStore();
 
   const currentCheck = useMemo(() => {
     if (!activeFileContent) return null;
     return runModelChecks(activeFileContent);
   }, [activeFileContent]);
+
+  /* dbt-specific findings — runs in parallel with `runModelChecks` rather
+     than replacing it. Different rule set (dbt contract hygiene vs. DataLex
+     completeness), so users benefit from both. Findings are rendered in
+     their own PanelSection below so they don't confuse the existing
+     severity buckets. */
+  const dbtFindings = useMemo(() => {
+    if (!activeFileContent) return [];
+    try {
+      const doc = yaml.load(activeFileContent);
+      if (!doc || typeof doc !== "object") return [];
+      const filePath = activeFile?.fullPath || activeFile?.name || "";
+      return lintDbtDoc(doc, { filePath });
+    } catch (_err) {
+      // Bad YAML is already surfaced by runModelChecks as an error — don't
+      // double-report here.
+      return [];
+    }
+  }, [activeFileContent, activeFile]);
 
   const errors = currentCheck?.errors || [];
   const allNudges = (currentCheck?.warnings || []).filter((w) => NUDGE_CODES.has(w.code));
@@ -343,7 +364,8 @@ export default function ValidationPanel() {
   /* Summary cluster shown in the header's `actions` slot. One status
      pill per category; zero-count categories collapse to a single
      "No errors" success pill so the header never feels empty. */
-  const totalIssues = errors.length + warnings.length + dimensionalIssues.length + gaps.length;
+  const totalIssues =
+    errors.length + warnings.length + dimensionalIssues.length + gaps.length + dbtFindings.length;
   const headerStatus = activeFileContent ? (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
       {errors.length > 0 ? (
@@ -368,6 +390,11 @@ export default function ValidationPanel() {
       {gaps.length > 0 && (
         <StatusPill tone="accent" icon={<Gauge size={10} />}>
           {gaps.length} {gaps.length === 1 ? "gap" : "gaps"}
+        </StatusPill>
+      )}
+      {dbtFindings.length > 0 && (
+        <StatusPill tone="info" icon={<Info size={10} />}>
+          {dbtFindings.length} dbt
         </StatusPill>
       )}
     </div>
@@ -493,6 +520,22 @@ export default function ValidationPanel() {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {gaps.map((iss, idx) => (
               <IssueRow key={`gap-${idx}`} issue={iss} />
+            ))}
+          </div>
+        </PanelSection>
+      )}
+
+      {/* dbt metadata findings (separate from DataLex completeness) */}
+      {dbtFindings.length > 0 && (
+        <PanelSection
+          title="dbt Metadata"
+          count={dbtFindings.length}
+          icon={<Info size={11} style={{ color: "var(--cat-product)" }} />}
+          description="Missing descriptions, types, and test coverage — dbt contracts will fail without these."
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {dbtFindings.map((iss, idx) => (
+              <IssueRow key={`dbt-${idx}`} issue={iss} />
             ))}
           </div>
         </PanelSection>

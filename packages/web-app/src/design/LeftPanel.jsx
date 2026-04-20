@@ -1,7 +1,18 @@
-/* Left panel — Object List / Explorer / Themes. Ported from DataLex design prototype. */
+/* Left panel — Object List / Explorer / Themes. Ported from DataLex design prototype.
+ *
+ * The EXPLORER tab renders the active project's file tree. We build it on the
+ * fly with `buildFileTree` (pure, memo-friendly) so adding a file anywhere in
+ * the store is reflected on next render without tree-state bookkeeping here.
+ * Folder fold/unfold is local component state, keyed by slash-joined folder
+ * path — that key survives tree rebuilds because paths don't change when a
+ * sibling file is added or removed.
+ */
 import React from "react";
 import Icon from "./icons";
 import { THEMES } from "./notation";
+import { buildFileTree, countFiles } from "../lib/fileTree";
+import useWorkspaceStore from "../stores/workspaceStore";
+import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
 
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "prod-analytics-01", connectionDsn = "postgres://…5432/subscriptions", schemas = [], onAddEntity }) {
   const I = Icon;
@@ -9,6 +20,114 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const [query, setQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});
   const toggle = (k) => setCollapsed((s) => ({ ...s, [k]: !s[k] }));
+
+  /* Explorer: pull the file list + open-file action from the store directly.
+     LeftPanel already subscribes to the shell's theme / tables props, and the
+     explorer tree is self-contained — no need to thread two more props
+     through Shell.jsx just to reach the workspace. */
+  const projectFiles = useWorkspaceStore((s) => s.projectFiles);
+  const activeFullPath = useWorkspaceStore((s) => s.activeFile?.fullPath || "");
+  const offlineMode = useWorkspaceStore((s) => s.offlineMode);
+  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
+  // `switchTab` branches on offline vs api-backed mode internally — so a user
+  // who loaded the jaffle-shop demo (offline) and a user with a real project
+  // on disk both route through the same click handler.
+  const openFile = useWorkspaceStore((s) => s.switchTab);
+  const createFolderAction = useWorkspaceStore((s) => s.createFolder);
+  const renameFileAction = useWorkspaceStore((s) => s.renameFile);
+  const moveFileAction = useWorkspaceStore((s) => s.moveFile);
+  const renameFolderAction = useWorkspaceStore((s) => s.renameFolder);
+  const deleteFileAction = useWorkspaceStore((s) => s.deleteFile);
+  const deleteFolderAction = useWorkspaceStore((s) => s.deleteFolder);
+  const createNewFile = useWorkspaceStore((s) => s.createNewFile);
+  const fileTree = React.useMemo(() => buildFileTree(projectFiles || []), [projectFiles]);
+
+  const [folded, setFolded] = React.useState({});
+  const toggleFolder = (path) => setFolded((s) => ({ ...s, [path]: !s[path] }));
+
+  // Context menu + drag state. `ctxMenu` is `{x, y, target, path}` or null.
+  const [ctxMenu, setCtxMenu] = React.useState(null);
+  const explorerReady = !offlineMode && !!activeProjectId;
+
+  const openCtxMenu = React.useCallback((e, target, path) => {
+    if (!explorerReady) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setCtxMenu({ x: e.clientX, y: e.clientY, target, path: path || "" });
+  }, [explorerReady]);
+
+  const closeCtxMenu = React.useCallback(() => setCtxMenu(null), []);
+
+  // Combine a parent folder path with a child name into a POSIX subpath.
+  const joinChild = React.useCallback((parent, name) => {
+    const base = String(parent || "").replace(/\/+$/, "");
+    const clean = String(name || "").replace(/^\/+|\/+$/g, "");
+    return base ? `${base}/${clean}` : clean;
+  }, []);
+
+  const handleCtxAction = React.useCallback(async (actionId, menu) => {
+    try {
+      if (actionId === "new-file") {
+        const name = window.prompt("New file name (e.g. stg_orders.yml):", "new_model.yml");
+        if (!name) return;
+        const fullRel = joinChild(menu.target === "folder" ? menu.path : "", name);
+        // createNewFile treats `name` as a POSIX subpath relative to project model root.
+        await createNewFile(fullRel, "");
+      } else if (actionId === "new-folder") {
+        const name = window.prompt("New folder name:", "new_folder");
+        if (!name) return;
+        const fullRel = joinChild(menu.target === "folder" ? menu.path : "", name);
+        await createFolderAction(fullRel);
+      } else if (actionId === "rename") {
+        const current = menu.path || "";
+        const next = window.prompt("Rename to (full path from model root):", current);
+        if (!next || next === current) return;
+        if (menu.target === "folder") await renameFolderAction(current, next);
+        else await renameFileAction(current, next);
+      } else if (actionId === "move") {
+        const current = menu.path || "";
+        const next = window.prompt("Move to (full path from model root):", current);
+        if (!next || next === current) return;
+        await moveFileAction(current, next);
+      } else if (actionId === "delete") {
+        if (menu.target === "folder") {
+          const confirmed = window.confirm(
+            `Delete folder "${menu.path}" and everything inside it? This cannot be undone.`
+          );
+          if (!confirmed) return;
+          await deleteFolderAction(menu.path);
+        } else {
+          const confirmed = window.confirm(`Delete "${menu.path}"? This cannot be undone.`);
+          if (!confirmed) return;
+          await deleteFileAction(menu.path);
+        }
+      }
+    } catch (err) {
+      window.alert(`Action failed: ${err?.message || err}`);
+    }
+  }, [
+    joinChild,
+    createNewFile,
+    createFolderAction,
+    renameFileAction,
+    renameFolderAction,
+    moveFileAction,
+    deleteFileAction,
+    deleteFolderAction,
+  ]);
+
+  // Drag-and-drop: drop a file onto a folder to move it there.
+  const handleDropOnFolder = React.useCallback(async (sourcePath, folderPath) => {
+    if (!explorerReady || !sourcePath) return;
+    const name = sourcePath.split("/").pop();
+    const destPath = joinChild(folderPath, name);
+    if (destPath === sourcePath) return;
+    try {
+      await moveFileAction(sourcePath, destPath);
+    } catch (err) {
+      window.alert(`Move failed: ${err?.message || err}`);
+    }
+  }, [explorerReady, joinChild, moveFileAction]);
 
   const filteredTables = tables.filter((t) => !query || t.name.toLowerCase().includes(query.toLowerCase()));
 
@@ -94,23 +213,77 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
       )}
 
       {tab === "EXPLORER" && (
-        <div className="tree" style={{ padding: "14px 16px" }}>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>Connection</div>
+        <div
+          className="tree"
+          style={{ padding: "14px 16px" }}
+          onContextMenu={(e) => {
+            // Right-click on empty space in the Explorer falls through to the
+            // "root" menu. Nodes stopPropagation so they take precedence.
+            if (!explorerReady) return;
+            e.preventDefault();
+            setCtxMenu({ x: e.clientX, y: e.clientY, target: "root", path: "" });
+          }}
+        >
+          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>Workspace</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: "var(--bg-2)", border: "1px solid var(--border-default)", borderRadius: 6, marginBottom: 12 }}>
             <I.Db />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontFamily: "var(--font-mono)" }}>{connectionLabel}</div>
-              <div style={{ fontSize: 10, color: "var(--text-tertiary)" }}>{connectionDsn}</div>
+              <div style={{ fontSize: 12, fontFamily: "var(--font-mono)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionLabel}</div>
+              <div style={{ fontSize: 10, color: "var(--text-tertiary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{connectionDsn}</div>
             </div>
             <span className="dot" style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--status-success)" }} />
           </div>
-          <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>Schemas</div>
-          {schemaList.map((s, i) => (
-            <div key={s.name} className={`tree-item ${i === 0 ? "active" : ""}`}>
-              <I.Layers /><span>{s.name}</span>
-              <span className="badge">{s.count}</span>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Files</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              {explorerReady && (
+                <>
+                  <button
+                    className="icon-btn"
+                    title="New file"
+                    onClick={() => handleCtxAction("new-file", { target: "root", path: "" })}
+                    style={{ padding: 2 }}
+                  >
+                    <I.Plus />
+                  </button>
+                  <button
+                    className="icon-btn"
+                    title="New folder"
+                    onClick={() => handleCtxAction("new-folder", { target: "root", path: "" })}
+                    style={{ padding: 2 }}
+                  >
+                    <I.Folder />
+                  </button>
+                </>
+              )}
+              <div style={{ fontSize: 10, color: "var(--text-tertiary)", fontFamily: "var(--font-mono)" }}>{(projectFiles || []).length}</div>
             </div>
-          ))}
+          </div>
+
+          {(!projectFiles || projectFiles.length === 0) ? (
+            <div style={{ fontSize: 11, color: "var(--text-tertiary)", padding: "8px 2px", lineHeight: 1.5 }}>
+              No files yet. Open a project or import a dbt repo.
+            </div>
+          ) : (
+            <TreeRender
+              nodes={fileTree}
+              folded={folded}
+              toggleFolder={toggleFolder}
+              activeFullPath={activeFullPath}
+              onOpenFile={openFile}
+              I={I}
+              depth={0}
+              onContextMenu={explorerReady ? openCtxMenu : null}
+              onDropOnFolder={explorerReady ? handleDropOnFolder : null}
+            />
+          )}
+
+          <ExplorerContextMenu
+            menu={ctxMenu}
+            onClose={closeCtxMenu}
+            onAction={handleCtxAction}
+          />
         </div>
       )}
 
@@ -155,5 +328,127 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         </div>
       )}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Recursive file-tree renderer for the EXPLORER tab.
+ *
+ * A `TreeNode` is either a folder `{kind:"folder", name, path, children}` or
+ * a file `{kind:"file", name, path, file}`. Indentation is computed from
+ * `depth` so nested folders visually nest without an extra per-row style.
+ * Folder rows are fold/unfold triggers; file rows open the file in the
+ * workspace (same code path as the legacy flat list). Clicking the active
+ * file re-opens it — harmless but consistent with "click a row to focus".
+ * ------------------------------------------------------------------ */
+function TreeRender({
+  nodes,
+  folded,
+  toggleFolder,
+  activeFullPath,
+  onOpenFile,
+  I,
+  depth,
+  onContextMenu = null,
+  onDropOnFolder = null,
+}) {
+  if (!nodes || nodes.length === 0) return null;
+  // `dragOver` toggles a visual highlight on folder rows while a file is
+  // dragged over them. Keyed by folder path to keep the state local.
+  const [dragOverPath, setDragOverPath] = React.useState("");
+  return (
+    <>
+      {nodes.map((n) => {
+        const indent = 8 + depth * 12;
+        if (n.kind === "folder") {
+          const isFolded = !!folded[n.path];
+          const count = countFiles(n);
+          const isDragOver = dragOverPath === n.path;
+          return (
+            <div key={`f:${n.path}`}>
+              <div
+                className="tree-item"
+                onClick={() => toggleFolder(n.path)}
+                onContextMenu={onContextMenu ? (e) => onContextMenu(e, "folder", n.path) : undefined}
+                title={n.path}
+                style={{
+                  paddingLeft: indent,
+                  cursor: "pointer",
+                  background: isDragOver ? "var(--accent-dim, var(--bg-3))" : undefined,
+                  outline: isDragOver ? "1px solid var(--accent, var(--border-default))" : undefined,
+                  transition: "background 80ms var(--ease)",
+                }}
+                onDragOver={onDropOnFolder ? (e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (dragOverPath !== n.path) setDragOverPath(n.path);
+                } : undefined}
+                onDragLeave={onDropOnFolder ? () => {
+                  if (dragOverPath === n.path) setDragOverPath("");
+                } : undefined}
+                onDrop={onDropOnFolder ? (e) => {
+                  e.preventDefault();
+                  setDragOverPath("");
+                  const sourcePath = e.dataTransfer.getData("application/x-datalex-file-path");
+                  if (sourcePath) onDropOnFolder(sourcePath, n.path);
+                } : undefined}
+              >
+                <svg
+                  className="tree-caret"
+                  viewBox="0 0 10 10"
+                  style={{
+                    transform: isFolded ? "rotate(0deg)" : "rotate(90deg)",
+                    transition: "transform 120ms var(--ease)",
+                    flex: "0 0 10px",
+                  }}
+                >
+                  <path d="M3 2l4 3-4 3" fill="currentColor" />
+                </svg>
+                <I.Folder />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+                <span className="badge">{count}</span>
+              </div>
+              {!isFolded && (
+                <TreeRender
+                  nodes={n.children}
+                  folded={folded}
+                  toggleFolder={toggleFolder}
+                  activeFullPath={activeFullPath}
+                  onOpenFile={onOpenFile}
+                  I={I}
+                  depth={depth + 1}
+                  onContextMenu={onContextMenu}
+                  onDropOnFolder={onDropOnFolder}
+                />
+              )}
+            </div>
+          );
+        }
+
+        const fd = n.file || {};
+        const fullPath = fd.fullPath || fd.path || n.path;
+        const isActive = activeFullPath && fullPath === activeFullPath;
+        return (
+          <div
+            key={`l:${n.path}`}
+            className={`tree-item ${isActive ? "active" : ""}`}
+            onClick={() => onOpenFile && fd && onOpenFile(fd)}
+            onContextMenu={onContextMenu ? (e) => onContextMenu(e, "file", n.path) : undefined}
+            draggable={!!onDropOnFolder}
+            onDragStart={onDropOnFolder ? (e) => {
+              // Carry the source file's subpath through the drag payload.
+              // The drop target is a folder row that knows how to move it.
+              e.dataTransfer.setData("application/x-datalex-file-path", n.path);
+              e.dataTransfer.effectAllowed = "move";
+            } : undefined}
+            title={fullPath || n.path}
+            style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
+          >
+            <I.Table />
+            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+          </div>
+        );
+      })}
+    </>
   );
 }
