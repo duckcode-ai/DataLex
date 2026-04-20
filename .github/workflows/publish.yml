@@ -56,8 +56,11 @@ jobs:
           # Only ship the api-server entry point + its package.json; npm
           # deps are installed at wheel-build time in the next step so
           # node_modules is self-contained inside the wheel.
-          cp packages/api-server/index.js packages/api-server/package.json "$dest_core/_server/"
-          (cd "$dest_core/_server" && npm ci --omit=dev && rm -rf package-lock.json)
+          cp packages/api-server/index.js \
+             packages/api-server/package.json \
+             packages/api-server/package-lock.json \
+             "$dest_core/_server/"
+          (cd "$dest_core/_server" && npm ci --omit=dev && rm -f package-lock.json)
 
       - name: Install build tooling
         run: python -m pip install --upgrade build twine
