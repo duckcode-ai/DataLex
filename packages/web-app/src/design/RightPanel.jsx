@@ -6,6 +6,7 @@ import Icon from "./icons";
 import { NOTATION } from "./notation";
 import YamlEditor from "../components/editor/YamlEditor";
 import useWorkspaceStore from "../stores/workspaceStore";
+import { patchField } from "./yamlPatch";
 
 function renderSQL(t) {
   const kw = (s) => `<span class="sql-kw">${s}</span>`;
@@ -164,6 +165,21 @@ export default function RightPanel({ table, rel, tables, selectedCol, setSelecte
 
   const col = table.columns.find((c) => c.name === selectedCol) || table.columns[0];
 
+  // Column edit → patch YAML and push through workspaceStore.updateContent.
+  // Patches are best-effort: if the parse fails we silently skip (user's YAML
+  // is invalid; edits should go through the YAML tab).
+  const applyColPatch = (patch) => {
+    const s = useWorkspaceStore.getState();
+    const next = patchField(s.activeFileContent, table.name, col.name, patch);
+    if (next != null) s.updateContent(next);
+  };
+  const toggleFlag = (k) => {
+    if (k === "pk")  applyColPatch({ primary_key: !col.pk });
+    if (k === "nn")  applyColPatch({ nullable: col.nn ? undefined : false });
+    if (k === "uq")  applyColPatch({ unique: !col.unique });
+    if (k === "idx") { /* indexes are declared separately; no-op for now */ }
+  };
+
   return (
     <div className="right">
       <div className="insp-header">
@@ -200,35 +216,71 @@ export default function RightPanel({ table, rel, tables, selectedCol, setSelecte
               <div className="insp-section-title"><span>Selected column</span></div>
               <div className="field"><div className="field-row">
                 <span className="field-label">Name</span>
-                <input className="field-input" defaultValue={col?.name} />
+                <input
+                  key={`name-${col?.name}`}
+                  className="field-input"
+                  defaultValue={col?.name}
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== col.name) applyColPatch({ name: v });
+                  }}
+                />
               </div></div>
               <div className="field"><div className="field-row">
                 <span className="field-label">Type</span>
-                <select className="field-select" defaultValue={col?.type}>
-                  <option>{col?.type}</option>
-                  <option>integer</option><option>varchar(255)</option><option>text</option>
-                  <option>timestamptz</option><option>jsonb</option>
-                </select>
+                <input
+                  key={`type-${col?.name}`}
+                  className="field-input"
+                  defaultValue={col?.type}
+                  list="datalex-types"
+                  onBlur={(e) => {
+                    const v = e.target.value.trim();
+                    if (v && v !== col.type) applyColPatch({ type: v });
+                  }}
+                />
+                <datalist id="datalex-types">
+                  <option value="string" /><option value="integer" /><option value="bigint" />
+                  <option value="boolean" /><option value="float" /><option value="decimal" />
+                  <option value="date" /><option value="timestamp" /><option value="timestamptz" />
+                  <option value="json" /><option value="jsonb" /><option value="text" />
+                  <option value="uuid" /><option value="varchar(255)" />
+                </datalist>
               </div></div>
               <div className="field"><div className="field-row">
                 <span className="field-label">Default</span>
-                <input className="field-input" placeholder="NULL" defaultValue={col?.default || ""} />
+                <input
+                  key={`default-${col?.name}`}
+                  className="field-input"
+                  placeholder="NULL"
+                  defaultValue={col?.default || ""}
+                  onBlur={(e) => applyColPatch({ default: e.target.value })}
+                />
               </div></div>
               <div className="field"><div className="field-row">
                 <span className="field-label">Comment</span>
-                <input className="field-input" placeholder="—" />
+                <input
+                  key={`desc-${col?.name}`}
+                  className="field-input"
+                  placeholder="—"
+                  defaultValue={col?.description || ""}
+                  onBlur={(e) => applyColPatch({ description: e.target.value })}
+                />
               </div></div>
               <div className="field"><div className="field-row">
                 <span className="field-label">Flags</span>
                 <div className="field-flags">
                   {[
-                    { k: "pk",  l: "PK",       on: !!col?.pk },
-                    { k: "nn",  l: "NOT NULL", on: !!col?.nn },
-                    { k: "uq",  l: "UNIQUE",   on: !!col?.unique },
-                    { k: "fk",  l: "FK",       on: !!col?.fk },
-                    { k: "idx", l: "INDEX",    on: false },
+                    { k: "pk",  l: "PK",       on: !!col?.pk,     clickable: true },
+                    { k: "nn",  l: "NOT NULL", on: !!col?.nn,     clickable: true },
+                    { k: "uq",  l: "UNIQUE",   on: !!col?.unique, clickable: true },
+                    { k: "fk",  l: "FK",       on: !!col?.fk,     clickable: false },
+                    { k: "idx", l: "INDEX",    on: false,         clickable: false },
                   ].map((f) => (
-                    <div key={f.k} className={`flag ${f.on ? "on" : ""}`}>
+                    <div key={f.k}
+                         className={`flag ${f.on ? "on" : ""}`}
+                         onClick={f.clickable ? () => toggleFlag(f.k) : undefined}
+                         style={f.clickable ? { cursor: "pointer" } : {}}
+                         title={f.clickable ? `Toggle ${f.l}` : undefined}>
                       <div className="check">{f.on && <I.Check />}</div>
                       <span>{f.l}</span>
                     </div>

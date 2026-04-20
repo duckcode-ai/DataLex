@@ -38,6 +38,8 @@ import CommitDialog from "../components/dialogs/CommitDialog";
 import LegacyCommandPalette from "../components/dialogs/CommandPalette";
 import ExportDdlDialog from "../components/dialogs/ExportDdlDialog";
 import PanelDialog from "../components/dialogs/PanelDialog";
+import GitBranchDialog from "../components/dialogs/GitBranchDialog";
+import { fetchGitStatus } from "../lib/api";
 import {
   AddProjectModal,
   EditProjectModal,
@@ -211,6 +213,17 @@ export default function Shell() {
   useEffect(() => {
     if (selectedEntityId) setBottomPanelTab("properties");
   }, [selectedEntityId, setBottomPanelTab]);
+
+  /* ── Current git branch (displayed on project tabs bar) ───────── */
+  const [branch, setBranch] = useState("main");
+  useEffect(() => {
+    if (!activeProjectId) { setBranch("main"); return; }
+    let cancelled = false;
+    fetchGitStatus(activeProjectId)
+      .then((s) => { if (!cancelled && s?.branch) setBranch(s.branch); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [activeProjectId, activeModal /* refresh after branch dialog closes */]);
 
   /* ── Surface store errors as toasts ────────────────────────────── */
   useEffect(() => {
@@ -404,7 +417,8 @@ export default function Shell() {
         onSelect={(id) => selectProject(id)}
         onClose={handleCloseProject}
         onNew={handleNewProject}
-        branchName="main"
+        branchName={branch}
+        onBranchClick={() => activeProjectId && openModal("gitBranch")}
       />
 
       <LeftPanel
@@ -501,6 +515,7 @@ export default function Shell() {
       {activeModal === "exportDdl"          && <ExportDdlDialog />}
       {activeModal === "importDialog"       && <PanelDialog kind="import" />}
       {activeModal === "searchDialog"       && <PanelDialog kind="search" />}
+      {activeModal === "gitBranch"          && <GitBranchDialog />}
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}
 

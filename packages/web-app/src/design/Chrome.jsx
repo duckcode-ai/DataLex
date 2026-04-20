@@ -116,7 +116,7 @@ export function TopBar({
   );
 }
 
-export function ProjectTabs({ projects = [], activeId, onSelect, onClose, onNew, branchName = "main" }) {
+export function ProjectTabs({ projects = [], activeId, onSelect, onClose, onNew, branchName = "main", onBranchClick }) {
   const I = Icon;
   const fallback = projects.length ? projects : [
     { id: "demo", name: "Subscriptions.dlx", color: "#10b981" },
@@ -134,7 +134,9 @@ export function ProjectTabs({ projects = [], activeId, onSelect, onClose, onNew,
       ))}
       <div className="tabs-spacer" />
       <button className="tab-action" onClick={onNew}><I.Plus />New tab</button>
-      <button className="tab-action"><I.Branch />{branchName}</button>
+      <button className="tab-action" onClick={onBranchClick} title="Switch / create branch">
+        <I.Branch />{branchName}
+      </button>
     </div>
   );
 }
