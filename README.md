@@ -53,6 +53,21 @@ datalex serve --no-browser     # CI / headless
 > process. If `node` isn't on your PATH, install Node 20+ or run
 > `pip install "nodejs-bin>=20,<21"` and re-run `datalex serve`.
 
+### Pick a tutorial
+
+Once `datalex serve` is running, follow the path that matches what you
+have in hand:
+
+| You have...                                | Tutorial                                                           | Time  |
+|--------------------------------------------|--------------------------------------------------------------------|-------|
+| Nothing — just want the demo               | [Jaffle-shop one-click walkthrough](docs/tutorials/jaffle-shop-walkthrough.md) | 3 min |
+| An existing dbt project (folder or git)    | [Import an existing dbt project](docs/tutorials/import-existing-dbt.md)        | 5 min |
+| A live warehouse (Snowflake/Postgres/…)    | [Pull a warehouse schema](docs/tutorials/warehouse-pull.md)                    | 7 min |
+| CLI-only, no UI                            | [CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)                             | 5 min |
+
+New here? Start with **[docs/getting-started.md](docs/getting-started.md)** —
+it's the map across all four paths plus the mental model.
+
 ## 60-second demo (offline, no warehouse)
 
 <p align="center">
@@ -195,12 +210,28 @@ dbt parse
 
 ## Documentation
 
-- **[Tutorial: dbt sync in 5 minutes](docs/tutorial-dbt-sync.md)** — the
-  full jaffle_shop walkthrough with explanations.
+**Onboarding**
+
+- **[Getting started](docs/getting-started.md)** — the one-page map
+  covering install, the three GUI paths, and the mental model.
+- **[Jaffle-shop walkthrough](docs/tutorials/jaffle-shop-walkthrough.md)** —
+  3-minute offline demo of every UI feature.
+- **[Import an existing dbt project](docs/tutorials/import-existing-dbt.md)** —
+  5-minute bring-your-own-repo flow (local folder or git URL).
+- **[Pull a warehouse schema](docs/tutorials/warehouse-pull.md)** —
+  7-minute live-connection flow with inferred PKs/FKs and streaming
+  progress.
+- **[CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)** — original
+  CLI-only jaffle_shop walkthrough.
+
+**Reference**
+
 - **[DataLex layout reference](docs/datalex-layout.md)** — what each
   `kind:` file looks like and how the loader discovers them.
 - **[CLI cheat sheet](docs/cli.md)** — every `datalex datalex …` subcommand on
   one page.
+- **[API contracts](docs/api-contracts.md)** — HTTP API reference for
+  integrators.
 - **[Architecture](docs/architecture.md)** — core engine modules and
   end-to-end data flow.
 - Pre-DataLex specs have moved to [docs/archive/](docs/archive/).
