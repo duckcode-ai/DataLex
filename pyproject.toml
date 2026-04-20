@@ -29,6 +29,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Bundled Node runtime — `pip install datalex-cli[serve]` gives the user
+# a working `datalex serve` even on hosts without Node on PATH.
+serve = ["nodejs-bin>=20,<21"]
 duckdb = ["duckdb>=0.9"]
 postgres = ["psycopg2-binary"]
 mysql = ["mysql-connector-python"]
@@ -38,6 +41,7 @@ databricks = ["databricks-sql-connector"]
 sqlserver = ["pyodbc"]
 redshift = ["redshift-connector"]
 all = [
+  "nodejs-bin>=20,<21",
   "duckdb>=0.9",
   "psycopg2-binary",
   "mysql-connector-python",

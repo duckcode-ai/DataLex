@@ -1,111 +1,231 @@
 # Getting started with DataLex
 
-This page is the map. Pick the tutorial that matches what you have in
-hand right now — we assume nothing, and every path finishes with a
-reviewable YAML tree on disk plus a working ER diagram in the browser.
+Pick the path that matches what you have in hand. Every path finishes
+with a reviewable YAML tree on disk and a live ER diagram in the
+browser. No Docker, no second terminal, no config files to hand-edit.
 
-## Before you start
-
-You need one thing: Python 3.9+ with `pip`. Everything else — the
-Express API server, the web app, the built-in ER diagram, the dbt
-importers, the nine warehouse connectors — ships inside the wheel.
+## 60-second install
 
 ```bash
-pip install datalex-cli
-datalex serve
+pip install 'datalex-cli[serve]'     # CLI + bundled Node runtime
+datalex serve                        # opens http://localhost:3030
 ```
 
-That opens `http://localhost:3030` in your browser. If `node` isn't on
-your PATH, install Node 20+ (https://nodejs.org) or run
-`pip install "nodejs-bin>=20,<21"` and re-run `datalex serve`. The
-server binds one port — no CORS, no second terminal, no Docker.
+That's it. `[serve]` pulls a portable Node so you don't need to install
+Node separately. If you already have Node 20+ on your PATH, plain
+`pip install datalex-cli` works too.
+
+Want your own warehouse drivers? Add a connector extra:
+
+```bash
+pip install 'datalex-cli[serve,postgres]'        # or snowflake, bigquery, databricks, …
+pip install 'datalex-cli[serve,all]'             # every driver + Node
+```
+
+---
 
 ## Pick your path
 
-| You have...                                  | Start here                                             | Time   |
-|----------------------------------------------|--------------------------------------------------------|--------|
-| Nothing — just want to see DataLex work      | [Jaffle-shop one-click demo](tutorials/jaffle-shop-walkthrough.md)    | 3 min  |
-| An existing dbt project (local folder)       | [Import an existing dbt project](tutorials/import-existing-dbt.md)    | 5 min  |
-| A dbt git repo (public or private)           | [Import an existing dbt project](tutorials/import-existing-dbt.md#from-a-git-url)    | 5 min  |
-| A live warehouse (Snowflake/Postgres/etc.)   | [Pull a warehouse schema](tutorials/warehouse-pull.md)                | 7 min  |
-| Just dbt + DuckDB, no UI, CLI-only           | [CLI dbt-sync tutorial](tutorial-dbt-sync.md)                         | 5 min  |
+| You have...                                   | Start here                                                     | Time  |
+|-----------------------------------------------|----------------------------------------------------------------|-------|
+| Nothing — just want the demo                  | [Scenario 1 — jaffle-shop demo](#scenario-1--jaffle-shop-demo) | 3 min |
+| An existing dbt project on disk               | [Scenario 2 — your local dbt repo](#scenario-2--your-local-dbt-repo) | 5 min |
+| A dbt repo on GitHub you want to try          | [Scenario 3 — a git URL](#scenario-3--a-git-url)               | 4 min |
+| A live warehouse, no dbt yet                  | [Scenario 4 — warehouse pull](#scenario-4--live-warehouse-pull) | 7 min |
+| CLI only, no UI                               | [CLI dbt-sync tutorial](tutorial-dbt-sync.md)                   | 5 min |
 
-The three GUI tutorials are all built on the same underlying flow:
+---
 
-1. **Explorer** (left panel) renders your model as a file tree that
-   mirrors the on-disk layout.
-2. **Canvas** (centre) is an ER diagram — drag from one column to
-   another to create a foreign key. Positions persist in the YAML
-   under `display: { x, y, width }`.
-3. **Inspector** (right panel) edits one entity at a time: columns,
-   relationships, enums, indexes, tests.
+## Scenario 1 — Jaffle-shop demo
 
-Every action writes back to disk on save (⌘S or the header's "Save
-All" button), so your dbt project's git log sees real diffs — not
-opaque tool-proprietary state.
+The fastest way to see if DataLex fits how you think. No dbt repo
+needed, no warehouse, fully offline.
 
-## The mental model
-
-DataLex sits between your dbt repo and your warehouse.
-
-```
-  warehouse   <────pull────>  DataLex YAML tree   <────sync────>   dbt project
-   (live)                      (git-tracked)                       (models/*.yml)
+```bash
+pip install 'datalex-cli[serve]'
+datalex serve
 ```
 
-- **Pull** introspects a live database and writes a DataLex model tree.
-  Supported dialects: postgres, mysql, snowflake, bigquery, databricks,
-  sqlserver, azure_sql, azure_fabric, redshift.
-- **Sync** merges DataLex column metadata (description, data_type,
-  tests, contracts) into your existing `schema.yml` files
-  non-destructively. Anything you hand-authored in dbt stays.
-- **Emit** writes dbt-parseable YAML back from scratch (for greenfield
-  projects).
+Browser opens. Click **Import dbt repo → Load jaffle-shop demo**. The
+Explorer fills with `models/staging/`, `models/marts/`, the canvas
+shows an ER diagram with relationships, and the inspector renders
+every column.
 
-PRs A through E (v0.2.0) made all three flows work from one browser
-tab with live progress streaming, drag-to-relate modeling, and
-file/folder CRUD that round-trips through the filesystem.
+Nothing is written to disk. Close the tab and everything is gone.
+When you want the real workflow, go to Scenario 2.
+
+📖 **Full walkthrough:** [tutorials/jaffle-shop-walkthrough.md](tutorials/jaffle-shop-walkthrough.md)
+
+---
+
+## Scenario 2 — Your local dbt repo
+
+This is the main event. You point DataLex at your existing dbt folder;
+every UI edit round-trips back to the original `.yml` files on disk,
+so your git history sees real diffs.
+
+```bash
+cd ~/path/to/your-dbt-project     # folder containing dbt_project.yml
+datalex serve --project-dir .
+```
+
+**What you'll see in the startup log:**
+
+```
+[datalex]   registered project: your-dbt-project → /Users/…/your-dbt-project
+[datalex] Starting DataLex server on http://localhost:3030
+```
+
+The browser opens with your folder already registered as the active
+project — no "Import" click needed to see the tree.
+
+**Next, populate the diagram** by running the dbt importer once:
+
+1. Top bar → **Import dbt repo**
+2. Pick the **Local folder** tab
+3. Select your project root
+4. Leave **☑ Edit in place** checked (default ON)
+5. Click **Import**
+
+The importer shells out to `dm dbt import` in the background. For
+projects with 200+ models, expect a few seconds. When it's done, the
+canvas shows every model as an entity with inferred relationships.
+
+### Editing rules
+
+- **Every UI edit writes back to the original file.** Rename a column,
+  add a test, drag to create a foreign key — they all patch the `.yml`
+  at its original path (`meta.datalex.dbt.source_path`).
+- **No duplicate folders.** DataLex doesn't create a shadow tree. Your
+  `~/your-dbt-project/models/staging/stg_customers.yml` is the one
+  true source; we just read and patch it.
+- **Shape A works today** (one `.yml` per model). **Shape B** (shared
+  `schema.yml` covering many models) triggers a warning toast — the
+  merge-safe writer is tracked for a follow-up PR.
+- **Save All** flushes every dirty buffer to disk. Commit with plain
+  `git`.
+
+📖 **Full walkthrough:** [tutorials/import-existing-dbt.md](tutorials/import-existing-dbt.md)
+
+---
+
+## Scenario 3 — A git URL
+
+"Try this dbt repo before I clone it." Works for any public URL; use
+Scenario 2 for local round-trip.
+
+```bash
+datalex serve
+```
+
+In the UI: **Import dbt repo → Git URL tab** → paste
+`https://github.com/<org>/<repo>` (optional ref: branch/tag/SHA) →
+**Import**.
+
+The api-server clones to `$TMPDIR/datalex-dbt-<uuid>/`, runs the
+importer, and hands the tree to the workspace store. You can poke at
+the model, but saves land in the tmpdir and get cleaned up on next
+boot. For real round-trip, clone locally and go back to Scenario 2.
+
+---
+
+## Scenario 4 — Live warehouse pull
+
+Your warehouse exists, dbt doesn't (yet). DataLex introspects the
+database, lets you pick tables, writes a DataLex tree.
+
+```bash
+cd ~/path/to/new-or-existing-project
+datalex serve --project-dir .
+```
+
+Then in the UI:
+
+1. Left panel → **Connectors** → **New connection**
+2. Pick your dialect: postgres, mysql, snowflake, bigquery, databricks,
+   sqlserver, azure_sql, azure_fabric, redshift
+3. Fill credentials → **Test**. You should see a pill like
+   `pingMs: 12 · PostgreSQL 16.2`
+4. **Pull** → the warehouse table picker opens
+5. Tick the schemas/tables you want; toggle "Row counts" for a
+   `SELECT COUNT(*)` per table; preview inferred PKs + FKs
+6. **Commit** → SSE log streams `[pull] customers: 100 rows`, etc.
+
+**Output layout adapts to the project.** If the folder contains
+`dbt_project.yml`, pulls land at `sources/<db>__<schema>.yaml` +
+`models/staging/stg_<schema>__<table>.yml`. Otherwise flat.
+
+📖 **Full walkthrough:** [tutorials/warehouse-pull.md](tutorials/warehouse-pull.md)
+
+---
+
+## What stays in your project, what doesn't
+
+Two files DataLex writes into `--project-dir`:
+
+| File                    | What it is                                         | Commit it? |
+|-------------------------|----------------------------------------------------|------------|
+| `.dm-projects.json`     | Projects list the UI sees                          | Optional — safe to commit or gitignore |
+| `.dm-credentials.json`  | Warehouse credentials                              | **Never** — already in our gitignore template |
+| `dm`                    | Auto-written CLI shim for subprocess calls         | Gitignored |
+
+Everything else is your YAML. `git status` shows real diffs on every
+UI edit.
+
+---
 
 ## Troubleshooting install
 
-| Symptom                                          | Fix                                                                  |
-|--------------------------------------------------|----------------------------------------------------------------------|
-| `datalex: command not found`                     | Your pip bin dir isn't on PATH — try `python -m datalex_cli serve`. |
-| `ERROR: node was not found on PATH`              | `pip install "nodejs-bin>=20,<21"` or install Node 20+.             |
-| Port 3030 already in use                         | `datalex serve --port 4040`                                          |
-| "Web dist not found" in logs                     | You're on a source checkout without a build — `cd packages/web-app && npm install && npm run build`. |
-| API errors like `No such file 'dm'`              | First run writes a `dm` shim into your project dir; if you cleared it, just re-run `datalex serve`. |
-| Browser opens to blank page                      | Hard-reload (⌘⇧R). If it persists, check the server logs printed by `datalex serve`. |
+| Symptom                                       | Fix                                                                           |
+|-----------------------------------------------|-------------------------------------------------------------------------------|
+| `datalex: command not found`                  | Your pip bin dir isn't on PATH — `python -m datalex_cli serve` works too.     |
+| `ERROR: 'node' was not found on PATH`         | `pip install "datalex-cli[serve]"` or install Node 20+.                       |
+| `Port 3030 already in use`                    | Prior server still running. `lsof -ti:3030 \| xargs kill`, or `--port 4040`.   |
+| `ModuleNotFoundError: No module named 'datalex_cli'` in API logs | Fixed in 0.2+ via `DM_PYTHON`. Upgrade: `pip install -U datalex-cli`.        |
+| UI stuck on "model-examples" instead of my folder | Delete stale projects file: `rm .dm-projects.json && datalex serve --project-dir .` |
+| Web bundle auto-build fails                   | `cd packages/web-app && npm install && npm run build` (only matters for source checkouts) |
+| Blank page after refresh                      | Hard-refresh (⌘⇧R / Ctrl+F5) — old bundle cached in the browser.             |
 
-## Where docs live
+---
 
-- `docs/getting-started.md` — this page
-- `docs/tutorials/` — step-by-step walkthroughs
-- `docs/architecture.md` — system design, layering, why the schema
-  looks the way it does
-- `docs/cli.md` — full CLI reference (every subcommand, every flag)
-- `docs/api-contracts.md` — HTTP API reference for integrators
-- `docs/datalex-layout.md` — the on-disk YAML layout specification
-- `docs/tutorial-dbt-sync.md` — the original CLI-only dbt-sync demo
+## Mental model in 30 seconds
 
-## Next steps after a tutorial
-
-Once a tutorial writes a DataLex tree to disk, everything else is
-git-native:
-
-```bash
-git init                                  # if the folder isn't already a repo
-git add .
-git commit -m "chore(model): baseline import"
+```
+  warehouse   <──pull──>   DataLex YAML tree   <──sync──>   dbt project
+   (live)                    (git-tracked)                   (models/*.yml)
 ```
 
-From there you can review diffs on PR like any other code change. The
-`datalex` CLI gives you offline tooling for CI:
+- **Pull** introspects a live database → writes a DataLex model tree.
+- **Import dbt** reads your dbt `manifest.json` → populates the same
+  tree with columns/types/tests.
+- **Sync** merges DataLex metadata back into dbt's `schema.yml` files
+  non-destructively.
+- **Emit** writes dbt-parseable YAML from scratch (greenfield).
 
-- `datalex validate models/…/stg_customers.model.yaml` — schema check
-- `datalex lint models/…/stg_customers.model.yaml` — semantic rules
-- `datalex gate old new` — fail PRs on breaking schema changes
-- `datalex generate dbt models/ --out dbt-project/` — re-emit dbt YAML
-- `datalex policy-check models/ --policy policies/default.yaml` — enforce org rules
+All four are available from the CLI (`datalex --help`) and from the UI
+toolbar.
 
-See `docs/cli.md` for the full list.
+---
+
+## Where to go next
+
+- 📘 **[docs/tutorials/](tutorials/)** — the four end-to-end walkthroughs
+- 📗 **[docs/cli.md](cli.md)** — every CLI subcommand and flag
+- 📙 **[docs/architecture.md](architecture.md)** — how DataLex is wired
+- 📕 **[docs/api-contracts.md](api-contracts.md)** — HTTP API for integrators
+- 📓 **[docs/datalex-layout.md](datalex-layout.md)** — on-disk YAML spec
+
+Once you have a DataLex tree on disk, everything else is plain git:
+
+```bash
+git init && git add . && git commit -m "chore(model): baseline import"
+```
+
+From there, PRs review like any code change and these CLI commands
+give you CI hooks:
+
+- `datalex validate models/.../stg_customers.model.yaml` — schema check
+- `datalex lint models/.../stg_customers.model.yaml` — semantic rules
+- `datalex gate old.yml new.yml` — fail PRs on breaking changes
+- `datalex generate dbt models/ --out dbt-project/` — emit back to dbt
+- `datalex policy-check models/ --policy policies/default.yaml` — org rules

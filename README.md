@@ -33,25 +33,33 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
 ## Quickstart (recommended)
 
 ```bash
-pip install datalex-cli        # installs the CLI, core engine, and bundled server
-datalex serve                  # opens http://localhost:3030 in your browser
+pip install 'datalex-cli[serve]'       # CLI + bundled Node — one command, no prereqs
+datalex serve                          # opens http://localhost:3030
 ```
 
-From there, hit **Import dbt repo → Load jaffle-shop demo** to try the full
-flow offline. There is no Node install, no Docker, no second terminal —
-the Express api-server and the built web-app are both shipped inside
-the wheel.
+That's it. `[serve]` pulls a portable Node so you don't need to install
+Node separately — and yes, that's intentional. If you already have Node
+20+ on your PATH, plain `pip install datalex-cli` works too.
 
-Need a different port or a specific project directory?
+**Working with your own dbt project?**
 
 ```bash
-datalex serve --port 4040 --project-dir ~/my-dbt-project
-datalex serve --no-browser     # CI / headless
+cd ~/my-dbt-project                    # folder containing dbt_project.yml
+datalex serve --project-dir .
 ```
 
-> **What if I don't have Node installed?** The bundled server is a Node
-> process. If `node` isn't on your PATH, install Node 20+ or run
-> `pip install "nodejs-bin>=20,<21"` and re-run `datalex serve`.
+DataLex auto-registers the folder as a project on first launch, so the
+browser opens directly into your real tree — no "set up a workspace"
+click-through. Every UI edit writes back to the original `.yml` files
+on disk. See **[docs/getting-started.md](docs/getting-started.md)** for
+the full path matrix (demo → local dbt → git URL → live warehouse).
+
+**Want your warehouse drivers too?**
+
+```bash
+pip install 'datalex-cli[serve,postgres]'        # or snowflake, bigquery, databricks…
+pip install 'datalex-cli[serve,all]'             # every driver + Node
+```
 
 ### Pick a tutorial
 
