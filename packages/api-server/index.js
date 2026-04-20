@@ -36,9 +36,15 @@ function requireAdmin(_req, _res, next) { next(); }
 
 const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
 
-// Use venv Python if available, otherwise fall back to system python3
+// Python resolution order:
+//   1. `DM_PYTHON` env var — set by `datalex serve` to its own sys.executable so
+//      the subprocess always has the same datalex_cli package the user just ran.
+//   2. `<REPO_ROOT>/.venv/bin/python3` — dev-clone convention.
+//   3. `python3` on PATH — last-resort fallback; may not have datalex_cli.
 const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
-const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
+const PYTHON =
+  (process.env.DM_PYTHON && existsSync(process.env.DM_PYTHON) && process.env.DM_PYTHON) ||
+  (existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3");
 
 // Resolve the CLI entry point. `dm` at the repo root is the dev-clone
 // path; when the api-server is shipped in a pip wheel, that script

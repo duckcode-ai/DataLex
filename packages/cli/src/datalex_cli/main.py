@@ -1431,6 +1431,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
     # `.dm-projects.json` lives next to their data.
     project_dir = getattr(args, "project_dir", None) or os.getcwd()
     env["REPO_ROOT"] = project_dir
+    # Ensure the api-server's subprocess calls to `python3 dm ...` resolve to
+    # the same interpreter that has `datalex_cli` installed (the one running
+    # this `datalex serve`). Without this, a subprocess-level PATH that points
+    # at a different `python3` fails with ModuleNotFoundError: datalex_cli.
+    env["DM_PYTHON"] = sys.executable
 
     # The api-server resolves the CLI script via `join(REPO_ROOT, "dm")`
     # in ~20 call sites. In a repo clone that file exists; in a pip
