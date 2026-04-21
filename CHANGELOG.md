@@ -7,6 +7,36 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deleting an entity now cascades cleanly across the model.** Shell's
+  "Delete entity" action (and ViewsView's "Delete view") routed through
+  a minimal `deleteEntity` that stripped the entity row but left orphan
+  relationships, indexes, metrics, and `governance.classification` /
+  `governance.stewards` entries pointing at a nonexistent entity. The
+  replacement `deleteEntityDeep` purges every referring block — matching
+  both the string form (`from: "entity.field"`) and the diagram-level
+  object form (`{from: {entity, field}}`) of relationships — and returns
+  an impact report. The success toast now lists what came with the
+  delete: e.g. *“Deleted ‘customer’ (also removed 3 relationships, 1
+  index, 2 governance entries).”* Missing-entity no-ops surface a real
+  error toast instead of silently saving.
+- **Model Graph panel refreshes automatically after edits.** The
+  read-only graph panel only reloaded on project switch, so deletes /
+  renames / saves left it showing a stale model until the user clicked
+  Refresh. A new `modelGraphVersion` counter in `workspaceStore` bumps
+  on save, entity delete, file delete, folder delete, and file rename;
+  `ModelGraphPanel` subscribes to it and refetches.
+
+### Added
+
+- **`deleteEntityDeep(yamlText, entityName)`** in `yamlPatch.js`
+  returns `{yaml, impact}` with cascade counts. Legacy `deleteEntity`
+  is retained as a thin wrapper that returns only the YAML string for
+  older callers. 8 new regression tests cover the cascade path,
+  case-insensitive matching, the diagram-level object form, minimal
+  docs without optional blocks, and the wrapper's back-compat shape.
+
 ## [0.5.1] — 2026-04-21
 
 Patch release — the modeling loop had a silent data-loss bug in the

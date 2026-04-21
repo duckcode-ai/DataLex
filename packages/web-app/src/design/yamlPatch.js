@@ -133,23 +133,97 @@ export function appendEntity(yamlText, entitySpec) {
   return dump(doc);
 }
 
-/* Delete an entity and any relationships that reference it. */
+/* Delete an entity and every dependent reference. Legacy callers
+   expect a YAML string back, so that remains the return shape. Use
+   `deleteEntityDeep` when you need the cascade-impact counts (which
+   the UI surfaces in a toast so users know what got cleaned up).
+
+   Cascade covers:
+     • entities[]         — the target row
+     • relationships[]    — any edge with target on either end (handles
+                             the canonical `from: "entity.field"` string
+                             shape and the diagram-level `{from:{entity}}`
+                             object shape)
+     • indexes[]          — `index.entity === target`
+     • metrics[]          — `metric.entity === target`
+     • governance.classification — keys prefixed `<target>.<field>`
+     • governance.stewards        — same pattern
+*/
 export function deleteEntity(yamlText, entityName) {
+  const result = deleteEntityDeep(yamlText, entityName);
+  return result ? result.yaml : null;
+}
+
+export function deleteEntityDeep(yamlText, entityName) {
   const doc = loadDoc(yamlText);
   if (!doc) return null;
   const target = String(entityName || "").toLowerCase();
   if (!target) return null;
+
+  const impact = {
+    entity: false,
+    relationships: 0,
+    indexes: 0,
+    metrics: 0,
+    governance: 0,
+  };
+
+  const beforeEntities = Array.isArray(doc.entities) ? doc.entities.length : 0;
   doc.entities = (doc.entities || []).filter(
     (e) => String(e.name || "").toLowerCase() !== target
   );
+  impact.entity = doc.entities.length < beforeEntities;
+  if (!impact.entity) return null; // nothing to delete — signal no-op
+
   if (Array.isArray(doc.relationships)) {
+    const before = doc.relationships.length;
     doc.relationships = doc.relationships.filter((r) => {
-      const from = String(r.from || "").split(".")[0].toLowerCase();
-      const to = String(r.to || "").split(".")[0].toLowerCase();
+      // String form: "entity.field"
+      const fromStr = typeof r?.from === "string" ? r.from.split(".")[0].toLowerCase() : "";
+      const toStr = typeof r?.to === "string" ? r.to.split(".")[0].toLowerCase() : "";
+      // Object form: {entity, field} — used by diagram-level relationships
+      const fromObj = String(r?.from?.entity || r?.from?.table || "").toLowerCase();
+      const toObj = String(r?.to?.entity || r?.to?.table || "").toLowerCase();
+      const from = fromStr || fromObj;
+      const to = toStr || toObj;
       return from !== target && to !== target;
     });
+    impact.relationships = before - doc.relationships.length;
   }
-  return dump(doc);
+
+  if (Array.isArray(doc.indexes)) {
+    const before = doc.indexes.length;
+    doc.indexes = doc.indexes.filter(
+      (idx) => String(idx?.entity || "").toLowerCase() !== target
+    );
+    impact.indexes = before - doc.indexes.length;
+  }
+
+  if (Array.isArray(doc.metrics)) {
+    const before = doc.metrics.length;
+    doc.metrics = doc.metrics.filter(
+      (m) => String(m?.entity || "").toLowerCase() !== target
+    );
+    impact.metrics = before - doc.metrics.length;
+  }
+
+  // Governance cleanup — classification and stewards keys are
+  // "<entity>.<field>". Case-insensitive prefix match.
+  if (doc.governance && typeof doc.governance === "object") {
+    for (const bucket of ["classification", "stewards"]) {
+      const map = doc.governance[bucket];
+      if (!map || typeof map !== "object") continue;
+      const prefix = `${target}.`;
+      for (const key of Object.keys(map)) {
+        if (String(key).toLowerCase().startsWith(prefix)) {
+          delete map[key];
+          impact.governance += 1;
+        }
+      }
+    }
+  }
+
+  return { yaml: dump(doc), impact };
 }
 
 /* Delete a field from an entity. */

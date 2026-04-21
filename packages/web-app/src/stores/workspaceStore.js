@@ -161,6 +161,14 @@ const useWorkspaceStore = create((set, get) => ({
   // All open file tabs
   openTabs: [],
 
+  // Bumped any time a write happens that could affect the model graph
+  // (entity delete / rename, save, file delete). Read-only panels that
+  // fetch on demand (ModelGraphPanel, lineage overlays) subscribe to this
+  // counter so they refresh instead of going stale. Bump rather than
+  // push data: the graph endpoint is cheap and we don't want the store
+  // to mirror the model-graph payload.
+  modelGraphVersion: 0,
+
   // Loading states
   loading: false,
   error: null,
@@ -929,6 +937,14 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
+  // Bump the model-graph revision so subscribers (e.g. ModelGraphPanel)
+  // know the underlying YAML changed and can refetch. Callers: entity
+  // delete (Shell, ViewsView, EntityPanel), save, file delete — anywhere
+  // we mutate model shape and want the read-only graph to catch up.
+  bumpModelGraphVersion: () => {
+    set((s) => ({ modelGraphVersion: (s.modelGraphVersion || 0) + 1 }));
+  },
+
   undo: () => {
     const { activeFile } = get();
     if (!activeFile) return false;
@@ -1001,6 +1017,9 @@ const useWorkspaceStore = create((set, get) => ({
           isDirty: false,
           loading: false,
           openTabs,
+          // Save may have changed entity shape / relationships — invalidate
+          // the read-only graph panel so it reflects the new persisted state.
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
         };
       });
     } catch (err) {
@@ -1309,7 +1328,10 @@ const useWorkspaceStore = create((set, get) => ({
         isDirty: wasActive ? false : s.isDirty,
       }));
       const data = await fetchProjectFiles(activeProjectId);
-      set({ projectFiles: data.files || [] });
+      set((s) => ({
+        projectFiles: data.files || [],
+        modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+      }));
       if (wasActive && result?.file?.fullPath) {
         const moved = (data.files || []).find((f) => f.fullPath === result.file.fullPath);
         if (moved) await get().openFile(moved);
@@ -1382,7 +1404,12 @@ const useWorkspaceStore = create((set, get) => ({
       set((s) => {
         const tabs = s.openTabs.filter((t) => t.path !== subpath);
         const deletedActive = activeFile && activeFile.path === subpath;
-        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        const newState = {
+          projectFiles: data.files || [],
+          openTabs: tabs,
+          loading: false,
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        };
         if (deletedActive) {
           const next = tabs[tabs.length - 1] || null;
           newState.activeFile = next;
@@ -1411,7 +1438,12 @@ const useWorkspaceStore = create((set, get) => ({
       set((s) => {
         const tabs = s.openTabs.filter((t) => !t.path || !t.path.startsWith(prefix));
         const activeRemoved = activeFile && activeFile.path && activeFile.path.startsWith(prefix);
-        const newState = { projectFiles: data.files || [], openTabs: tabs, loading: false };
+        const newState = {
+          projectFiles: data.files || [],
+          openTabs: tabs,
+          loading: false,
+          modelGraphVersion: (s.modelGraphVersion || 0) + 1,
+        };
         if (activeRemoved) {
           const next = tabs[tabs.length - 1] || null;
           newState.activeFile = next;
