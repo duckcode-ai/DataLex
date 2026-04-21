@@ -2856,7 +2856,8 @@ app.post("/api/forward/dbt-sync", requireAdmin, express.json({ limit: "5mb" }), 
     let errorMsg = "";
 
     try {
-      execFileSync(PYTHON, [join(REPO_ROOT, "datalex"), "dbt", "sync", tmpModel, "--dbt-schema", tmpDbt, "--out", tmpOut], {
+      const { cmd, argv } = dmExec("dbt", "sync", tmpModel, "--dbt-schema", tmpDbt, "--out", tmpOut);
+      execFileSync(cmd, argv, {
         encoding: "utf-8",
         timeout: 30000,
         cwd: REPO_ROOT,
@@ -2981,8 +2982,7 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
     const skipWh =
       typeof skipWarehouse === "boolean" ? skipWarehouse : Boolean(gitUrl);
 
-    const cliArgs = [
-      join(REPO_ROOT, "datalex"),
+    const dbtImportArgs = [
       "dbt",
       "import",
       "--project-dir",
@@ -2991,14 +2991,15 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       outDir,
       "--json",
     ];
-    if (skipWh) cliArgs.push("--skip-warehouse");
-    if (target) cliArgs.push("--target", String(target));
-    if (manifest) cliArgs.push("--manifest", String(manifest));
+    if (skipWh) dbtImportArgs.push("--skip-warehouse");
+    if (target) dbtImportArgs.push("--target", String(target));
+    if (manifest) dbtImportArgs.push("--manifest", String(manifest));
 
     let report = null;
     let importError = null;
     try {
-      const stdout = execFileSync(PYTHON, cliArgs, {
+      const { cmd, argv: cliArgs } = dmExec(...dbtImportArgs);
+      const stdout = execFileSync(cmd, cliArgs, {
         cwd: REPO_ROOT,
         encoding: "utf-8",
         timeout: 180000, // 3 min — git + dbt parse can be slow on first run
@@ -3753,18 +3754,19 @@ app.post("/api/connectors/pull/stream", express.json(), async (req, res) => {
     return res.end();
   }
 
-  const args = [join(REPO_ROOT, "datalex"), "pull", connector, ...conn.args];
-  if (model_name) args.push("--model-name", model_name);
+  const pullArgs = ["pull", connector, ...conn.args];
+  if (model_name) pullArgs.push("--model-name", model_name);
   if (tables) {
     const list = typeof tables === "string"
       ? tables.split(",").map((t) => t.trim()).filter(Boolean)
       : tables;
-    if (list.length) args.push("--tables", ...list);
+    if (list.length) pullArgs.push("--tables", ...list);
   }
-  if (project_dir) args.push("--project-dir", project_dir, "--create-project-dir");
-  if (dbt_layout === false) args.push("--no-dbt-layout");
+  if (project_dir) pullArgs.push("--project-dir", project_dir, "--create-project-dir");
+  if (dbt_layout === false) pullArgs.push("--no-dbt-layout");
 
-  const child = spawn(PYTHON, args, { cwd: REPO_ROOT });
+  const { cmd, argv } = dmExec(...pullArgs);
+  const child = spawn(cmd, argv, { cwd: REPO_ROOT });
   let stdoutBuf = "";
   let stderrBuf = "";
 

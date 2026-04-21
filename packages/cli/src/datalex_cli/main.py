@@ -1465,28 +1465,31 @@ def cmd_serve(args: argparse.Namespace) -> int:
     env["DM_PYTHON"] = sys.executable
 
     # The api-server resolves the CLI script via `join(REPO_ROOT, "dm")`
-    # in ~20 call sites. In a repo clone that file exists; in a pip
-    # install it doesn't. Writing a small shim next to REPO_ROOT lets
-    # every existing callsite keep working without touching the
-    # api-server source. If the shim path is already present (dev
-    # clone), we leave it alone.
-    dm_shim = Path(project_dir) / "dm"
-    if not dm_shim.exists():
+    # (and, post-rename, `join(REPO_ROOT, "datalex")`) in ~20 call sites.
+    # In a repo clone those files exist; in a pip install they don't.
+    # Writing small shims next to REPO_ROOT lets every existing callsite
+    # keep working without touching the api-server source. If a shim
+    # path is already present (dev clone), we leave it alone.
+    shim_body = (
+        "#!{py}\n"
+        "import sys\n"
+        "from datalex_cli.main import main\n"
+        "raise SystemExit(main())\n".format(py=sys.executable)
+    )
+    for shim_name in ("dm", "datalex"):
+        shim_path = Path(project_dir) / shim_name
+        if shim_path.exists():
+            continue
         try:
-            dm_shim.write_text(
-                "#!{py}\n"
-                "import sys\n"
-                "from datalex_cli.main import main\n"
-                "raise SystemExit(main())\n".format(py=sys.executable)
-            )
+            shim_path.write_text(shim_body)
             try:
-                dm_shim.chmod(0o755)
+                shim_path.chmod(0o755)
             except Exception:
                 pass
         except Exception as err:
             # Read-only project dir is fine: we'll hit API errors for
             # subprocess-backed routes but the UI still loads.
-            print(f"[datalex] Note: could not write CLI shim at {dm_shim}: {err}")
+            print(f"[datalex] Note: could not write CLI shim at {shim_path}: {err}")
 
     # Auto-register the --project-dir folder as a DataLex project so the UI
     # opens directly into it instead of the "model-examples" default. We only
