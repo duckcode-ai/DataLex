@@ -296,7 +296,7 @@ function AboutPane() {
         <Row label="Frontend" value="React 18 · Vite · Tailwind 4" />
         <Row label="Canvas"   value="React Flow 12 · ELK.js" />
         <Row label="Editor"   value="CodeMirror 6" />
-        <Row label="License"  value="Apache 2.0" />
+        <Row label="License"  value="MIT" />
       </div>
     </div>
   );
