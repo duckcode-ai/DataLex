@@ -389,6 +389,57 @@ export function renameField(yamlText, entityName, oldFieldName, newFieldName) {
       });
     }
 
+    // v0.3.4 — cascade into FK pointers on *other* entities. Without this,
+    // renaming `users.id` would leave `orders.user_id.foreign_key.field:
+    // id` pointing at a column that no longer exists and the edge would
+    // orphan on next adapter pass.
+    (model.entities || []).forEach((otherEntity) => {
+      if (!Array.isArray(otherEntity.fields)) return;
+      otherEntity.fields.forEach((f) => {
+        if (!f || typeof f !== "object") return;
+        const fk = f.foreign_key;
+        if (!fk || typeof fk !== "object") return;
+        if (fk.entity !== entityName) return;
+        // Accept both `{entity, field}` and `{entity, column}` shapes so
+        // the cascade is future-proof against the latter creeping in.
+        if (fk.field === oldFieldName) fk.field = next;
+        if (fk.column === oldFieldName) fk.column = next;
+      });
+    });
+
+    // Candidate keys, business keys, grain, hash_diff_fields, partition_by,
+    // and cluster_by on the entity itself may all list the renamed column
+    // by name. Rewrite those too so referential intent survives.
+    const rewriteKeySet = (value) => {
+      if (!Array.isArray(value)) return value;
+      let changed = false;
+      const next2 = value.map((inner) => {
+        if (Array.isArray(inner)) {
+          let innerChanged = false;
+          const arr = inner.map((f) => {
+            if (f === oldFieldName) { innerChanged = true; return next; }
+            return f;
+          });
+          if (innerChanged) changed = true;
+          return innerChanged ? arr : inner;
+        }
+        if (inner === oldFieldName) { changed = true; return next; }
+        return inner;
+      });
+      return changed ? next2 : value;
+    };
+    entity.candidate_keys = rewriteKeySet(entity.candidate_keys);
+    entity.business_keys = rewriteKeySet(entity.business_keys);
+    entity.grain = rewriteKeySet(entity.grain);
+    entity.hash_diff_fields = rewriteKeySet(entity.hash_diff_fields);
+    entity.partition_by = rewriteKeySet(entity.partition_by);
+    entity.cluster_by = rewriteKeySet(entity.cluster_by);
+    if (entity.natural_key === oldFieldName) entity.natural_key = next;
+    if (entity.surrogate_key === oldFieldName) entity.surrogate_key = next;
+    if (entity.hash_key === oldFieldName) entity.hash_key = next;
+    if (entity.load_timestamp_field === oldFieldName) entity.load_timestamp_field = next;
+    if (entity.record_source_field === oldFieldName) entity.record_source_field = next;
+
     // Update indexes referencing this field
     if (Array.isArray(model.indexes)) {
       model.indexes = model.indexes.map((idx) => {

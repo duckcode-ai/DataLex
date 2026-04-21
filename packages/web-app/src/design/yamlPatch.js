@@ -324,6 +324,91 @@ export function addDiagramRelationship(yamlText, rel) {
   return dump(doc);
 }
 
+/* ─── Diagram sticky notes (v0.3.4) ─────────────────────────────
+ * Free-form annotations persisted in a `.diagram.yaml` under
+ * `notes: [{id, text, x, y, width?, height?, color?}]`. Dialog authored
+ * on the canvas; round-trips through these helpers so a refresh / git
+ * clone preserves the stickies next to the edges and entity refs.
+ */
+
+function roundInt(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+function buildNoteEntry({ id, text, x, y, width, height, color }) {
+  const entry = { id: String(id) };
+  if (typeof text === "string" && text.length > 0) entry.text = text;
+  const rx = roundInt(x); if (rx != null) entry.x = rx;
+  const ry = roundInt(y); if (ry != null) entry.y = ry;
+  const rw = roundInt(width); if (rw != null) entry.width = rw;
+  const rh = roundInt(height); if (rh != null) entry.height = rh;
+  if (Number.isInteger(color) && color >= 0) entry.color = color;
+  return entry;
+}
+
+/* Append a new sticky note. Caller supplies the id so the UI can
+ * optimistically render the same key before the YAML round-trips.
+ * Dedupes by id (same id => no-op). */
+export function addDiagramNote(yamlText, note) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const id = String(note?.id || "").trim();
+  if (!id) return null;
+  if (!Array.isArray(doc.notes)) doc.notes = [];
+  if (doc.notes.some((n) => String(n?.id || "") === id)) return yamlText;
+  doc.notes.push(buildNoteEntry(note));
+  return dump(doc);
+}
+
+/* Patch an existing note by id. Any of {text, x, y, width, height, color}
+ * may be updated; undefined keys are left untouched. Returns the input
+ * unchanged when the note isn't found, so UI callers can safely race a
+ * delete with a drag-end. */
+export function patchDiagramNote(yamlText, id, patch) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (!Array.isArray(doc.notes)) return yamlText;
+  const target = String(id || "");
+  const idx = doc.notes.findIndex((n) => String(n?.id || "") === target);
+  if (idx < 0) return yamlText;
+  const current = doc.notes[idx] || {};
+  const next = { ...current };
+  if (patch.text !== undefined) {
+    if (patch.text === "" || patch.text == null) delete next.text;
+    else next.text = String(patch.text);
+  }
+  const applyNum = (key) => {
+    if (patch[key] === undefined) return;
+    if (patch[key] === null) { delete next[key]; return; }
+    const r = roundInt(patch[key]);
+    if (r != null) next[key] = r;
+  };
+  applyNum("x");
+  applyNum("y");
+  applyNum("width");
+  applyNum("height");
+  if (patch.color !== undefined) {
+    if (patch.color === null) delete next.color;
+    else if (Number.isInteger(patch.color)) next.color = patch.color;
+  }
+  doc.notes[idx] = next;
+  return dump(doc);
+}
+
+/* Remove a note by id. No-op if the note isn't there. */
+export function deleteDiagramNote(yamlText, id) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  if (!Array.isArray(doc.notes)) return yamlText;
+  const target = String(id || "");
+  const before = doc.notes.length;
+  doc.notes = doc.notes.filter((n) => String(n?.id || "") !== target);
+  if (doc.notes.length === before) return yamlText;
+  if (doc.notes.length === 0) delete doc.notes;
+  return dump(doc);
+}
+
 /* Patch a relationship by name. `patch` may set any of:
      { name, from, to, cardinality, on_delete, on_update, identifying,
        optional, description }.

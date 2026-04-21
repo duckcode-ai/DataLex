@@ -83,6 +83,24 @@
         "edgeType": { "type": "string" }
       }
     },
+    "notes": {
+      "description": "Free-form sticky annotations authored on the canvas. Each note has an id, text body, position (`x`, `y`), and an optional color index selecting one of the stock annotation palettes. Notes are diagram-local — they are never injected into referenced model files.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "x": { "type": "number" },
+          "y": { "type": "number" },
+          "width": { "type": "number" },
+          "height": { "type": "number" },
+          "color": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
     "tags": {
       "type": "array",
       "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" }
