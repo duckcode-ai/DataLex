@@ -34,6 +34,29 @@ drag-and-drop diagram workflow. Fixing it was the whole point.
   - `packages/web-app/tests/yamlPatchDiagram.test.js` — regression
     suite covering explicit match, wildcard fallback, repeated moves,
     and the null-fallback path.
+- **Diagram relationships no longer vanish between actions.** Building
+  a relationship on a `.diagram.yaml` (drag-to-relate or "Add
+  Relationship" dialog) updates `activeFileContent` in memory, but the
+  per-tab `openTabs` content cache was never kept in sync. `switchTab`
+  unconditionally delegated to `openFile`, which refetched the file
+  from disk and overwrote the in-memory YAML — taking the new
+  relationship with it. Browser reload hit the same path. Fix:
+  - `updateContent` now mirrors the new content into the active file's
+    `openTabs` entry (and records the disk baseline as
+    `originalContent` the first time, so dirty state survives a tab
+    round-trip).
+  - `switchTab` short-circuits when the requested file is already
+    active, and otherwise rehydrates from the cached tab content
+    before falling through to `openFile`.
+  - `openFile` refuses to refetch when the requested file is already
+    active and dirty — prevents any re-entrant call path from
+    clobbering unsaved work.
+  - `saveCurrentFile` updates the tab cache's `originalContent` after
+    a successful write so post-save dirty checks on rehydrate are
+    accurate.
+  - `packages/web-app/tests/diagramRelationshipRoundTrip.test.js` —
+    new suite exercising the full write → adapt read-back loop for
+    cross-file diagram FKs, including the move-then-link combination.
 - **dbt import + every CLI shell-out works from a dev clone again.**
   Commit `2cac0cc` (Apr 18) renamed the launcher `dm → datalex` but 17
   call sites in `packages/api-server/index.js` still spawned
