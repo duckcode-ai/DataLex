@@ -7,6 +7,67 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.5] — 2026-04-21
+
+Patch release — closes the four gaps reported against v1.0.4. The fixes
+that v1.0.4 shipped landed on `components/diagram/DiagramCanvas.jsx`
+(ReactFlow), but the Shell still renders the legacy
+`design/Canvas.jsx` (SVG) plus `design/inspector/ColumnsView.jsx`, so
+none of it was visible in the actual product. v1.0.5 ports those
+affordances onto the rendered canvas and inspector, and fixes the
+Save All persistence bug that was dropping dirty tabs.
+
+### Fixed
+
+- **Save All now persists every dirty open tab, not just the active
+  one.** `saveAllDirty` previously iterated `openTabs` with a no-op
+  loop and only queued the `activeFile` path for writing — so edits
+  you made on a file, then switched away from before pressing Save
+  All, silently disappeared on reload. The loop now compares each
+  tab's cached `content` against its `originalContent` and pushes
+  every actually-dirty tab into the payload. On a successful write
+  the cached `originalContent` is bumped to match `content`, so the
+  dirty indicator collapses correctly.
+  - `packages/web-app/src/stores/workspaceStore.js` — `saveAllDirty`
+    loop + post-save tab reset.
+- **Fit / Auto-layout / Export buttons in the canvas header now do
+  something.** They were rendered without `onClick` wiring in
+  `design/Canvas.jsx` since the original prototype port. The toolbar
+  now calls a local `handleFit` that scrolls the `.canvas` viewport
+  to the top-left of the tables' bounding box, plus `onAutoLayout`
+  (ELK, respecting `manualPosition`) and `onExport` (opens the
+  existing `exportDdl` modal). The zoom-bar's small Fit button
+  shares the same handler.
+  - `packages/web-app/src/design/Canvas.jsx` — button `onClick`
+    handlers + `handleFit` implementation.
+  - `packages/web-app/src/design/Shell.jsx` — passes
+    `handleAutoLayout`, the export modal opener, and the new
+    delete handlers into `<Canvas>`.
+
+### Added
+
+- **Keyboard Delete on the rendered SVG canvas.** Pressing Backspace
+  or Delete with an entity or relationship selected now confirms and
+  routes through the same YAML cascade (`deleteEntityDeep` /
+  `deleteRelationship`) the command palette and Inspector already
+  use. Ignored while typing in `input` / `textarea` / contentEditable
+  so column-name edits in the inspector don't nuke the entity.
+  - `packages/web-app/src/design/Canvas.jsx` — `keydown` effect.
+  - `packages/web-app/src/design/Shell.jsx` —
+    `handleDeleteRelationship` (resolves canvas rel `id` back to the
+    YAML `name` before delegating to `yamlRoundTrip`).
+- **"Add column" and "Delete column" in the rendered Columns
+  inspector.** A `+ Add` action now sits in the "All columns"
+  section header (and as the primary action in the empty state), and
+  a red "Delete column" button joins "Rename across project…" in the
+  Refactor row. Both wrap the existing `appendField` / `deleteField`
+  helpers so the YAML write path is shared with the rest of the
+  inspector.
+  - `packages/web-app/src/design/inspector/ColumnsView.jsx` —
+    `handleAddColumn` (invents a non-colliding `new_column` name and
+    selects it after the write), `handleDeleteColumn` (confirm +
+    move selection to a sibling).
+
 ## [1.0.4] — 2026-04-21
 
 Patch release — closes two gaps reported against the v1.0.3 import flow:
