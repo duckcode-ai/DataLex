@@ -51,6 +51,7 @@ const PanelDialog         = React.lazy(() => import("../components/dialogs/Panel
 const GitBranchDialog     = React.lazy(() => import("../components/dialogs/GitBranchDialog"));
 const ImportDbtRepoDialog = React.lazy(() => import("../components/dialogs/ImportDbtRepoDialog"));
 const NewRelationshipDialog = React.lazy(() => import("../components/dialogs/NewRelationshipDialog"));
+const BulkRenameColumnDialog = React.lazy(() => import("../components/dialogs/BulkRenameColumnDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
@@ -930,6 +931,7 @@ export default function Shell() {
         {activeModal === "importDialog"       && <PanelDialog kind="import" />}
         {activeModal === "importDbtRepo"      && <ImportDbtRepoDialog />}
         {activeModal === "newRelationship"    && <NewRelationshipDialog />}
+        {activeModal === "bulkRenameColumn"   && <BulkRenameColumnDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
       </React.Suspense>

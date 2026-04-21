@@ -7,6 +7,58 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-20
+
+### Added
+
+- **Bulk column rename with project-wide preview & atomic apply.** First
+  landing of the v0.4+ "SQLDBM-parity refactor" roadmap. A new
+  `packages/web-app/src/lib/bulkRefactor.js` module plans a cross-file
+  rename by walking every YAML file in the workspace and rewriting
+  eight ref shapes in a single pass:
+  - entity field declarations (the primary rename)
+  - field-level FKs (`foreign_key` + `references`, both `field` and
+    `column` spellings)
+  - relationship strings (`"entity.field"` form)
+  - diagram-level object relationships (`{entity, field}` form)
+  - indexes (`{entity, fields[]}`)
+  - metrics (`entity`, `grain[]`, `dimensions[]`, `expression`,
+    `time_dimension`)
+  - governance maps keyed `"entity.field"`
+  - entity key-sets and partitions (`candidate_keys`, `business_keys`,
+    `grain`, `hash_diff_fields`, `partition_by`, `cluster_by`, and the
+    single-value keys from 0.3.4's cascade).
+  The planner is side-effect free — callers get an `{affected[], errors[],
+  declaringFile}` summary that feeds a diff preview. `applyBulkColumnRename`
+  writes in sequence with best-effort rollback on partial failure.
+- **`BulkRenameColumnDialog` with inline LCS diff preview.** New dialog
+  (`packages/web-app/src/components/dialogs/BulkRenameColumnDialog.jsx`)
+  renders the source column, a new-name input, a scan button, a per-file
+  list with ref-kind summary (`"5 refs across 3 files · 2 fk, 2
+  relationship, 1 index"`), and a per-file expandable unified-diff
+  preview. The diff is computed via an inline LCS DP (capped at 2k
+  lines per side, with a naive-alignment fallback for oversize YAMLs)
+  and trimmed to ±2 lines of context per hunk so the preview stays
+  readable. Collision detection flags cases where the destination name
+  already exists on the entity. Works in two modes: fully-specified
+  (`{entity, oldField}`) and column-picker (`{entity, columns[]}`).
+- **Three entry points.** The bulk-rename flow is reachable from:
+  - the **Columns Inspector** — a "Rename across project…" button
+    under the Flags row, prefilled with the selected column;
+  - the **entity context menu** on the canvas — "Rename column…"
+    opens the dialog in picker mode with every field of the
+    right-clicked entity;
+  - the **command palette** — "Rename column across project…" under a
+    new `Refactor` section, which opens picker mode when an entity is
+    selected and falls back to a guard card otherwise.
+
+### Changed
+
+- Workspace store now refreshes `fileContentCache` and the active file's
+  `originalContent`/`isDirty` directly when a bulk-rename apply lands,
+  so open editors and the canvas re-render without a round-trip to
+  `fetchProjectFiles`.
+
 ## [0.3.4] — 2026-04-20
 
 ### Added

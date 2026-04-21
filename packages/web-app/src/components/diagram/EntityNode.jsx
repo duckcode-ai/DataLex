@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
-import { Key, Fingerprint, ChevronDown, ChevronUp, ArrowRightLeft, Shield, Database, AlertTriangle, GitBranch } from "lucide-react";
+import { Key, Fingerprint, ChevronDown, ChevronUp, ArrowRightLeft, Shield, Database, AlertTriangle, GitBranch, Replace } from "lucide-react";
 import { getSchemaColor } from "../../lib/schemaColors";
 import useUiStore from "../../stores/uiStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -287,6 +287,18 @@ export default function EntityNode({ data }) {
     closeCtxMenu();
   };
 
+  const handleRenameColumnFromHere = () => {
+    // Open the bulk-rename dialog in column-picker mode — the user picks
+    // which column on this entity to rename, then the dialog scans the
+    // whole workspace for references.
+    const columns = (data.fields || []).map((f) => ({ name: f.name }));
+    openModal("bulkRenameColumn", {
+      entity: data.name,
+      columns,
+    });
+    closeCtxMenu();
+  };
+
   // Close the menu on any global click / escape. We install the listeners
   // only while the menu is open to keep idle nodes cheap.
   React.useEffect(() => {
@@ -442,6 +454,28 @@ export default function EntityNode({ data }) {
       >
         <GitBranch size={12} />
         <span>Add Relationship from here…</span>
+      </button>
+      <button
+        type="button"
+        onClick={handleRenameColumnFromHere}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          width: "100%",
+          padding: "6px 10px",
+          border: "none",
+          background: "transparent",
+          cursor: "pointer",
+          borderRadius: 4,
+          textAlign: "left",
+          color: "#1e293b",
+        }}
+        onMouseEnter={(e) => (e.currentTarget.style.background = "#f1f5f9")}
+        onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+      >
+        <Replace size={12} />
+        <span>Rename column…</span>
       </button>
     </div>
   ) : null;
