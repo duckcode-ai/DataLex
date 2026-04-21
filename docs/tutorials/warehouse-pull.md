@@ -186,7 +186,7 @@ Open `stg_public__customers.yml`. Its Inspector tabs show:
 
 The `sources/your_db__public.yaml` file is the dbt
 `sources:` block — DataLex keeps the two in sync so you can run
-`datalex generate dbt` and emit matching `sources.yml` /
+`datalex datalex dbt emit` and emit matching `sources.yml` /
 `schema.yml` files.
 
 ## Step 8 — Commit
@@ -245,9 +245,9 @@ pointed at a real dbt repo to switch layouts.
 
 ## What to do next
 
-- **Round-trip to dbt** — `datalex generate dbt models/ --out
-  ~/your-dbt-repo/` regenerates `schema.yml` files with the
-  DataLex column metadata merged in.
+- **Round-trip to dbt** — `datalex datalex dbt emit models/
+  --out-dir ~/your-dbt-repo/` regenerates `schema.yml` files with
+  the DataLex column metadata merged in.
 - **Gate PRs on breaking changes** — `datalex gate old.yaml
   new.yaml` (see `docs/cli.md`).
 - **Combine with a dbt import** — if you already have a dbt

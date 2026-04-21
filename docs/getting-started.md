@@ -91,16 +91,25 @@ The importer shells out to `dm dbt import` in the background. For
 projects with 200+ models, expect a few seconds. When it's done, the
 Explorer shows every model file at its real dbt path.
 
-**Then build your first ER diagram (v0.3+):**
+**Then build your first ER diagram:**
 
-1. In the Explorer, click the **New Diagram** icon (Layers icon next
-   to "New file" / "New folder"). A new file appears at
-   `datalex/diagrams/untitled.diagram.yaml` — rename it to something
-   meaningful like `customer_360.diagram.yaml`.
-2. Drag any `schema.yml` or `.model.yaml` from the Explorer onto the
-   canvas. Each referenced model renders as an entity. Foreign keys
-   from dbt `tests: - relationships: {to: "ref('…')"}` become dashed
-   edges automatically.
+1. Create a diagram. Two paths:
+   - **Explorer toolbar → New Diagram** (Layers icon). A new file
+     appears at `datalex/diagrams/untitled.diagram.yaml`.
+   - **Right-click any folder in the Explorer → New diagram here…**
+     to land it next to the models it describes. Rename it to
+     something meaningful like `customer_360.diagram.yaml`.
+2. Populate the canvas. Two paths, same result:
+   - **Canvas toolbar → Add Entities** (or pane right-click → Add
+     entities to diagram…). A picker opens with search, domain
+     filter, and multi-select over every entity resolved from the
+     model graph. Entities already on the diagram are disabled so you
+     can't double-add them. On confirm the canvas auto-lays-out the
+     additions via ELK (when `layoutMode: elk` is active).
+   - **Drag a `schema.yml` or `.model.yaml` from the Explorer onto
+     the canvas.** Each referenced model renders as an entity.
+   Foreign keys from dbt `tests: - relationships: {to: "ref('…')"}`
+   become dashed edges automatically.
 3. Drag nodes to reposition. **Save All** writes positions into the
    `.diagram.yaml` file — so `git commit` captures your layout, and
    moving a node in one diagram never leaks into another diagram of
@@ -118,11 +127,24 @@ prefer to keep them local.
 - **No duplicate folders.** DataLex doesn't create a shadow tree. Your
   `~/your-dbt-project/models/staging/stg_customers.yml` is the one
   true source; we just read and patch it.
-- **Shape A works today** (one `.yml` per model). **Shape B** (shared
-  `schema.yml` covering many models) triggers a warning toast — the
-  merge-safe writer is tracked for a follow-up PR.
-- **Save All** flushes every dirty buffer to disk. Commit with plain
-  `git`.
+- **Shared `schema.yml` is safe.** When several in-memory docs target
+  the same file, Save All routes through the core-engine
+  `merge_models_preserving_docs` helper — hand-authored tests, macros,
+  and `meta:` fields survive round-trips; sibling models aren't
+  clobbered.
+- **Save All** flushes every dirty buffer to disk. Writes return a
+  structured `{ code, message, details? }` envelope and a 207
+  Multi-Status response when some files fail, so the UI lists exactly
+  which paths didn't land instead of a generic "Action failed" toast.
+  Commit with plain `git`.
+- **Rename / delete previews.** Renaming or deleting a folder or file
+  from the Explorer shows an impact preview first — how many
+  diagrams, `imports:` blocks, and relationships will be rewritten —
+  before you confirm the cascade.
+- **Dangling relationships.** Open the Validation panel: any
+  `relationships:` entry pointing at a missing entity or column
+  renders as a red banner with a one-click **Remove dangling** action
+  that prunes the offending entries from the active file.
 
 📖 **Full walkthrough:** [tutorials/import-existing-dbt.md](tutorials/import-existing-dbt.md)
 
@@ -246,5 +268,5 @@ give you CI hooks:
 - `datalex validate models/.../stg_customers.model.yaml` — schema check
 - `datalex lint models/.../stg_customers.model.yaml` — semantic rules
 - `datalex gate old.yml new.yml` — fail PRs on breaking changes
-- `datalex generate dbt models/ --out dbt-project/` — emit back to dbt
+- `datalex datalex dbt emit models/ --out-dir dbt-project/` — emit back to dbt
 - `datalex policy-check models/ --policy policies/default.yaml` — org rules

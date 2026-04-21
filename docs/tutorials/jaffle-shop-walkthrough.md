@@ -68,20 +68,26 @@ call, no git clone. If you ever re-run `dm dbt sync` against the real
 `dbt-labs/jaffle-shop` repo you'll get the same tree (modulo the
 `meta.datalex.dbt.*` timestamps).
 
-## Step 3 — Build your first diagram (v0.3+)
+## Step 3 — Build your first diagram
 
 The Explorer tree is your source of truth; diagrams are how you pick
 which models to visualize together.
 
 1. In the Explorer toolbar, click **New Diagram** (the Layers icon).
    A new file `datalex/diagrams/untitled.diagram.yaml` is created and
-   opens on the canvas (empty).
-2. Drag `models/staging/stg_customers.yml` from the Explorer onto the
-   canvas. The customer entity appears.
-3. Drag `models/staging/stg_orders.yml` onto the canvas too. A dashed
-   FK edge between `stg_orders.customer_id` and `stg_customers.customer_id`
-   renders automatically — inferred from the dbt `tests: - relationships:`
-   on that column.
+   opens on the canvas (empty). You can also right-click any folder
+   in the Explorer → **New diagram here…** to seed the file next to
+   the models.
+2. On the canvas toolbar, click **Add Entities**. The picker lists
+   every entity resolved from the project, with a search box and a
+   domain filter. Tick `stg_customers` and `stg_orders`, then
+   **Add**. Both entities land on the canvas and auto-lay-out via
+   ELK; the dashed FK edge between `stg_orders.customer_id` and
+   `stg_customers.customer_id` renders automatically — inferred from
+   the dbt `tests: - relationships:` on that column.
+3. (Alternative) Drag `models/staging/stg_customers.yml` from the
+   Explorer onto the canvas. Each referenced model still renders as
+   an entity — the picker and drag-drop are interchangeable.
 4. Reposition nodes by dragging. The positions land in the diagram
    YAML's `entities[].x/y` — not in the model files — so you can have
    a second diagram with different coordinates for the same models.
@@ -115,7 +121,10 @@ right = source).
    `from: stg_orders.customer_id`, `to: stg_customers.customer_id`,
    cardinality `many_to_one`. Give it a name like
    `fk_orders_customers`, optionally mark it `identifying` or
-   `optional`, and hit **Create**.
+   `optional`, and hit **Create**. The dialog validates both
+   endpoints against the resolved model graph — if either column
+   doesn't exist, an inline error blocks submit (no silent write, no
+   toast).
 3. A new FK edge renders. The Diff panel shows a new
    `relationships:` block landed under `stg_orders`.
 
@@ -144,6 +153,12 @@ Click the **Validation** tab in the bottom panel. It aggregates every
 lint warning and error across the whole tree, grouped by file. For
 jaffle-shop you'll see a handful of "column missing description"
 warnings — useful guide for a real import.
+
+If the active file has relationships whose endpoints reference a
+missing entity or column, a red **Dangling relationships** banner
+appears at the top of the panel, one card per finding, with a
+**Remove dangling** button that rewrites the file and drops just the
+offending entries.
 
 ## Step 9 — Save the project to a real folder (optional)
 

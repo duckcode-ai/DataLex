@@ -80,26 +80,34 @@ Open any model. The right-panel inspector now has:
   haven't been built) show `—`.
 - **dbt metadata** — the raw dbt fields (`meta`, `tests`, `contract`)
   are preserved under `meta.datalex.dbt.*` in the DataLex YAML. You
-  can round-trip this back to dbt with `datalex generate dbt`.
+  can round-trip this back to dbt with `datalex datalex dbt emit`.
 
 ### 5. Build your first diagram
 
 The import gave you the raw file tree. To see the ER diagram — and to
 compose several models onto one canvas — create a `.diagram.yaml`:
 
-1. In the Explorer toolbar, click **New Diagram** (the Layers icon
-   next to "New file" and "New folder"). A new file appears under
-   `datalex/diagrams/untitled.diagram.yaml`. Rename it — e.g.,
-   `customer_360.diagram.yaml`.
-2. The canvas opens empty. Drag `models/staging/schema.yml` (or any
-   individual `.model.yaml`) from the Explorer onto the canvas.
-3. Each dbt model in the dropped file appears as an entity. Foreign
-   keys from `tests: - relationships:` render as dashed edges
+1. Create a diagram. Two paths:
+   - **Explorer toolbar → New Diagram** (Layers icon). Lands in
+     `datalex/diagrams/untitled.diagram.yaml`.
+   - **Right-click any folder in the Explorer → New diagram here…**
+     to seed the file alongside the models it describes (for example
+     inside `models/marts/finance/`). Rename it to something
+     meaningful like `customer_360.diagram.yaml`.
+2. Populate the canvas. Two interchangeable paths:
+   - **Canvas toolbar → Add Entities** (or pane right-click → Add
+     entities to diagram…). The picker lists every entity resolved
+     from the imported tree, with search, domain filter, and
+     multi-select. Entities already on the diagram are disabled.
+     Confirm → entities are appended and auto-lay-out via ELK (when
+     `layoutMode: elk` is active).
+   - **Drag `models/staging/schema.yml`** (or any individual
+     `.model.yaml`) from the Explorer onto the canvas. Each dbt model
+     in the dropped file appears as an entity; drops are deduped by
+     `(file, entity)`, so dropping the same file twice is idempotent.
+3. Foreign keys from `tests: - relationships:` render as dashed edges
    automatically — no manual wiring.
-4. Drop additional files to union more entities onto the same canvas.
-   Drops are deduped by `(file, entity)`, so dropping the same file
-   twice is idempotent.
-5. Drag entities to reposition. **Save All** persists positions into
+4. Drag entities to reposition. **Save All** persists positions into
    the diagram YAML (not into your model files), so the same model
    can live at different coordinates in different diagrams.
 
@@ -136,7 +144,12 @@ Two options:
 - **Edit in-place (live folder):** if you started with
   `--project-dir ~/my-dbt-repo`, DataLex uses that folder as the
   workspace root. Use **Save All** to flush every dirty file back to
-  the original paths. Your `git status` will show real diffs.
+  the original paths. Writes are merge-safe — when multiple in-memory
+  docs target the same shared `schema.yml`, the api-server routes
+  through the core-engine `merge_models_preserving_docs` helper
+  instead of overwriting siblings. If a subset of files fails, Save
+  All returns a 207 Multi-Status response and the UI lists the exact
+  paths that didn't land. Your `git status` will show real diffs.
 
 - **Save to a fresh folder:** File menu → New Project → pick a
   different folder → save. Useful for a side-by-side migration
@@ -180,11 +193,11 @@ automatically. To emit DataLex → dbt:
 
 ```bash
 # Re-emit schema.yml with DataLex column metadata merged non-destructively
-datalex generate dbt models/ --out ~/your-dbt-repo/
+datalex datalex dbt emit models/ --out-dir ~/your-dbt-repo/
 
-# Or merge into a specific schema.yml
-datalex datalex dbt sync models/staging/stg_customers.model.yaml \
-  --dbt-schema ~/your-dbt-repo/models/staging/schema.yml
+# Or re-sync (reads manifest.json + introspects the warehouse, merges
+# results back into DataLex YAML without clobbering hand edits)
+datalex datalex dbt sync ~/your-dbt-repo --out-root models/
 ```
 
 The `sync` form is non-destructive — anything you hand-authored
@@ -214,7 +227,9 @@ relative paths. There's no translation layer to get lost in.
 | Column `data_type` shows `—` everywhere         | dbt hasn't compiled the model's source columns. Run `dbt run` once.   |
 | Git clone fails with auth error                 | The api-server host needs credentials. Configure SSH/PAT there, not in the UI. |
 | "Import dbt repo" dialog hangs                  | Check the api-server logs (printed by `datalex serve`) — most often a Python dependency missing (`pip install dbt-core`). |
-| Folders appear but files inside are empty       | The dbt schema YAML was unparseable. Run `dbt parse` and look for errors. |
+| Folders appear but files inside are empty       | The dbt schema YAML was unparseable. The importer returns a structured `PARSE_FAILED` error with file path + line/column; open the dev-tools console or run `dbt parse` to see which file. |
+| Relationships panel flags "N dangling"          | Open the Validation tab — the red **Dangling relationships** banner lists every `relationships:` entry whose endpoints reference a missing entity or column. Click **Remove dangling** to prune only the offending entries from the active file. |
+| Renaming/deleting a folder feels risky          | Both actions show an impact preview first (how many diagrams, `imports:` blocks, and relationships will be rewritten or removed) and require explicit confirmation — nothing cascades silently. |
 
 ## What to do next
 
