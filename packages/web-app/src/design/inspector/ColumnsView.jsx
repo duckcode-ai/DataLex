@@ -11,10 +11,11 @@
      entityName   — the YAML entity name (used by patchField)
      onDirty()    — optional callback after a successful patch (for logging) */
 import React from "react";
-import { Key, Link2, AlertTriangle } from "lucide-react";
+import { Key, Link2, AlertTriangle, Replace } from "lucide-react";
 import yaml from "js-yaml";
 import { PanelSection, StatusPill } from "../../components/panels/PanelFrame";
 import useWorkspaceStore from "../../stores/workspaceStore";
+import useUiStore from "../../stores/uiStore";
 import { patchField } from "../yamlPatch";
 import { lintEntity } from "../../lib/dbtLint";
 
@@ -76,6 +77,12 @@ function findEntityByName(doc, name) {
 export default function ColumnsView({ table, col, setSelectedCol, entityName, onDirty }) {
   const lintByColumn = useEntityLintByColumn(entityName);
   const selectedFindings = (col?.name && lintByColumn.get(col.name)) || [];
+  const openModal = useUiStore((s) => s.openModal);
+
+  const handleBulkRename = React.useCallback(() => {
+    if (!entityName || !col?.name) return;
+    openModal("bulkRenameColumn", { entity: entityName, oldField: col.name });
+  }, [openModal, entityName, col?.name]);
 
   const applyPatch = React.useCallback((patch) => {
     const s = useWorkspaceStore.getState();
@@ -221,6 +228,20 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
             {flag("UNIQUE",   !!col.unique,   () => applyPatch({ unique: !col.unique }),            "info")}
             {flag("GENERATED",!!col.generated,() => applyPatch({ generated: !col.generated }),      "info")}
             {flag("FK",       !!col.fk,       undefined,                                            "success")}
+          </div>
+
+          <label>Refactor</label>
+          <div className="panel-btn-row" style={{ gap: 6, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="panel-btn"
+              onClick={handleBulkRename}
+              title="Rename this column across every YAML file in the workspace (FKs, relationships, indexes, metrics, keys)."
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+            >
+              <Replace size={11} />
+              Rename across project…
+            </button>
           </div>
         </div>
       </PanelSection>

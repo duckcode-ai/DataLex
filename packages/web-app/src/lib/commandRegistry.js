@@ -93,6 +93,25 @@ export function buildCommands() {
       run: () => ui.openModal("commit"),
     },
     {
+      id: "refactor.rename-column",
+      title: "Rename column across project…",
+      section: "Refactor",
+      keywords: "bulk rename column refactor fk",
+      run: () => {
+        // Prefer the currently-selected entity so the dialog opens in
+        // column-picker mode with a sensible prefill. Otherwise fall back
+        // to the dialog's guard screen, which tells the user to pick an
+        // entity on the canvas first.
+        const sel = diagram.selectedEntity;
+        if (sel && sel.name) {
+          const columns = (sel.fields || sel.columns || []).map((f) => ({ name: f.name }));
+          ui.openModal("bulkRenameColumn", { entity: sel.name, columns });
+        } else {
+          ui.openModal("bulkRenameColumn", {});
+        }
+      },
+    },
+    {
       id: "activity.model",
       title: "Go to Model",
       section: "Navigate",
