@@ -87,9 +87,15 @@ export function adaptDataLexYaml(yamlText) {
     // pass. The canvas's localStorage cache layers on top of this at the
     // Shell level.
     const display = (e.display && typeof e.display === "object") ? e.display : {};
-    const x = Number.isFinite(Number(display.x)) ? Number(display.x) : 60 + col * COL_W;
-    const y = Number.isFinite(Number(display.y)) ? Number(display.y) : 60 + row * ROW_H;
+    const hasManualX = Number.isFinite(Number(display.x));
+    const hasManualY = Number.isFinite(Number(display.y));
+    const x = hasManualX ? Number(display.x) : 60 + col * COL_W;
+    const y = hasManualY ? Number(display.y) : 60 + row * ROW_H;
     const width = Number.isFinite(Number(display.width)) ? Number(display.width) : undefined;
+    // Auto Layout (v0.3.4) respects this flag — entities the user has already
+    // placed by drag stay put while ELK repositions the rest. Both axes must
+    // come from the YAML `display:` block; a fallback-grid cell doesn't count.
+    const manualPosition = hasManualX && hasManualY;
 
     return {
       id,
@@ -100,6 +106,7 @@ export function adaptDataLexYaml(yamlText) {
       x,
       y,
       width,
+      manualPosition,
       badges: kind === "ENUM" ? ["ENUM"] : ["BASE"],
       rowCount: e.row_count || "",
       kind: kind || undefined,
@@ -405,12 +412,18 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     adapted.tables.forEach((t) => {
       if (!wantAll && t.id !== wantId) return;
       // Overlay diagram-provided position if present.
-      const x = Number.isFinite(Number(ref.x)) ? Number(ref.x) : t.x;
-      const y = Number.isFinite(Number(ref.y)) ? Number(ref.y) : t.y;
+      const diagramHasX = Number.isFinite(Number(ref.x));
+      const diagramHasY = Number.isFinite(Number(ref.y));
+      const x = diagramHasX ? Number(ref.x) : t.x;
+      const y = diagramHasY ? Number(ref.y) : t.y;
       const width = Number.isFinite(Number(ref.width)) ? Number(ref.width) : t.width;
+      // Entities placed explicitly by the diagram (drag commit) or by the
+      // model file's `display:` block count as manually positioned — Auto
+      // Layout leaves them alone.
+      const manualPosition = (diagramHasX && diagramHasY) || t.manualPosition === true;
       // Dedupe by entity id — last-wins on position (diagram overrides).
       const existingIdx = allTables.findIndex((x2) => x2.id === t.id);
-      const tagged = { ...t, x, y, width, _sourceFile: ref.file };
+      const tagged = { ...t, x, y, width, manualPosition, _sourceFile: ref.file };
       if (existingIdx >= 0) allTables[existingIdx] = tagged;
       else allTables.push(tagged);
     });
@@ -459,6 +472,27 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     (r) => onCanvas.has(r.from.table) && onCanvas.has(r.to.table)
   );
 
+  // v0.3.4 — sticky annotations / notes live on the diagram YAML under
+  // `notes: []`. Hand them through to the canvas surface so they
+  // survive reloads and git commits alongside the edges.
+  const rawNotes = Array.isArray(diagram.notes) ? diagram.notes : [];
+  const notes = rawNotes
+    .map((n) => {
+      if (!n || typeof n !== "object") return null;
+      const id = String(n.id || "").trim();
+      if (!id) return null;
+      return {
+        id,
+        text: typeof n.text === "string" ? n.text : "",
+        x: Number.isFinite(Number(n.x)) ? Number(n.x) : 60,
+        y: Number.isFinite(Number(n.y)) ? Number(n.y) : 60,
+        width: Number.isFinite(Number(n.width)) ? Number(n.width) : undefined,
+        height: Number.isFinite(Number(n.height)) ? Number(n.height) : undefined,
+        color: Number.isInteger(n.color) ? n.color : 0,
+      };
+    })
+    .filter(Boolean);
+
   return {
     name: String(diagram.title || diagram.name || "Diagram"),
     engine: "DataLex Diagram",
@@ -466,5 +500,6 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     tables: allTables,
     relationships: filteredRels,
     subjectAreas: [],
+    notes,
   };
 }

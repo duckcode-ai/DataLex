@@ -7,6 +7,47 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.3.4] — 2026-04-20
+
+### Added
+
+- **Auto Layout preserves manually placed entities.** Dragged tables
+  (tracked via a new `manualPosition` flag threaded through
+  `schemaAdapter` whenever the YAML `display:` block or a diagram ref
+  carries both `x` and `y`) are now left untouched when the user hits
+  the Auto Layout action. ELK only re-lays the unplaced subset and the
+  result is offset to sit next to the locked cluster. Previously a
+  full re-layout blew away any hand-positioning the user had committed
+  to disk.
+- **Column rename cascades to FK references, keys, and partitions.**
+  `renameField` in `yamlRoundTrip.js` now rewrites every `foreign_key`
+  on sibling entities that points at the renamed column, plus
+  `candidate_keys`, `business_keys`, `grain`, `hash_diff_fields`,
+  `partition_by`, `cluster_by`, and the single-value keys
+  (`natural_key`, `surrogate_key`, `hash_key`,
+  `load_timestamp_field`, `record_source_field`). Previously only
+  relationships/indexes/metrics/governance followed the rename,
+  leaving dangling FKs that disappeared on the next adapter pass.
+- **`C` keyboard shortcut recenters the canvas on the selected
+  entity.** Added to the shortcut help overlay and handled in Shell's
+  global keydown (guarded against inputs and `Cmd/Ctrl+C`). The
+  handler sniffs `.table-card.selected` so it stays safe against the
+  Shell's keydown effect being installed before the `selected` state
+  hook.
+- **Diagram-level sticky notes persist to `.diagram.yaml`.** Added a
+  `notes: []` block to `diagram.schema.json`, parsed it in
+  `adaptDiagramYaml` (surfaced as `schema.notes`), and shipped
+  `addDiagramNote`, `patchDiagramNote`, and `deleteDiagramNote`
+  helpers in `yamlPatch.js`. Canvas authoring UI lands next; the YAML
+  contract is stable and git-friendly (integer positions, color
+  index, dedupe by id).
+
+### Changed
+
+- Auto Layout status toast now reports how many entities were kept in
+  place (e.g. *"Auto-layout applied (3 manually placed entities
+  preserved)"*) so users understand why some didn't move.
+
 ## [0.3.3] — 2026-04-20
 
 ### Fixed

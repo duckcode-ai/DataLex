@@ -291,6 +291,28 @@ export default function Shell() {
       }
       if (!isInput && e.key === "?") { setShowShortcuts((v) => !v); return; }
       if (e.key === "Escape" && showShortcuts) { setShowShortcuts(false); return; }
+
+      // v0.3.4 — "c" recenters the canvas on the selected entity. No meta
+      // modifier (so Cmd+C / Ctrl+C stay for copy), no input target. We
+      // find the currently-selected table card by querying the DOM
+      // (`.table-card.selected`) rather than closing over a state
+      // variable — the keydown effect is installed early in render, well
+      // before the `selected` state hook is declared, so referencing it
+      // from here would hit JavaScript's temporal dead zone.
+      if (!isInput && !meta && (e.key === "c" || e.key === "C")) {
+        const card = document.querySelector(".table-card.selected");
+        if (!card) return;
+        e.preventDefault();
+        // scrollIntoView's "center" option positions the card in the
+        // middle of the nearest scrolling ancestor — that's `.canvas` in
+        // our layout. Behaviour:smooth keeps the jump easy on the eye.
+        try {
+          card.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        } catch {
+          card.scrollIntoView({ block: "center", inline: "center" });
+        }
+        return;
+      }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -540,7 +562,14 @@ export default function Shell() {
     addToast({ type: "success", message: `Deleted “${entityName}”.` });
   }, [addToast]);
 
-  /* ── ELK auto-layout (palette action) ──────────────────────────── */
+  /* ── ELK auto-layout (palette action) ──────────────────────────────
+   * v0.3.4: respects `manualPosition` — entities the user has already
+   * dragged (persisted to YAML `display.x/y` or diagram ref x/y) stay
+   * put. ELK is only asked to place tables that have no manual position
+   * yet, and we nudge the result so it doesn't overlap the locked set.
+   * A "locked" node is submitted to ELK in its existing coordinates so
+   * the layered algorithm routes around it when possible. If nothing is
+   * locked, behaviour is identical to pre-0.3.4 (full relayout). */
   const handleAutoLayout = React.useCallback(async () => {
     if (!tables.length) return;
     try {
@@ -549,19 +578,78 @@ export default function Shell() {
         id: t.id,
         type: "entityNode",
         position: { x: t.x || 0, y: t.y || 0 },
-        data: { fields: t.columns, subject_area: t.subject || t.cat },
+        data: {
+          fields: t.columns,
+          subject_area: t.subject || t.cat,
+          manualPosition: !!t.manualPosition,
+        },
       }));
       const rfEdges = (schema.relationships || []).map((r, i) => ({
         id: `e-${i}`,
         source: r.from?.table, target: r.to?.table,
       })).filter((e) => e.source && e.target);
-      const { nodes: laid } = await mod.layoutWithElk(rfNodes, rfEdges, { density: "normal", groupBySubjectArea: false });
-      const pos = new Map(laid.map((n) => [n.id, n.position]));
+
+      const lockedIds = new Set(tables.filter((t) => t.manualPosition).map((t) => t.id));
+      const lockedCount = lockedIds.size;
+
+      // Fast path: nothing locked → behave like before.
+      if (lockedCount === 0) {
+        const { nodes: laid } = await mod.layoutWithElk(rfNodes, rfEdges, { density: "normal", groupBySubjectArea: false });
+        const pos = new Map(laid.map((n) => [n.id, n.position]));
+        setTables((prev) => prev.map((t) => {
+          const p = pos.get(t.id);
+          return p ? { ...t, x: Math.round(p.x), y: Math.round(p.y) } : t;
+        }));
+        addToast({ type: "success", message: "Auto-layout applied." });
+        return;
+      }
+
+      // Split: layout only the non-locked subset. Edges are kept when at
+      // least one end is in the subset — those dangle into the locked
+      // region and help ELK's layered pass place children near parents.
+      const unlockedNodes = rfNodes.filter((n) => !lockedIds.has(n.id));
+      const allIds = new Set(rfNodes.map((n) => n.id));
+      const subsetIds = new Set(unlockedNodes.map((n) => n.id));
+      const subsetEdges = rfEdges.filter(
+        (e) => allIds.has(e.source) && allIds.has(e.target) && (subsetIds.has(e.source) || subsetIds.has(e.target))
+      );
+
+      // If every entity is locked there's nothing to do.
+      if (unlockedNodes.length === 0) {
+        addToast({ type: "info", message: "All entities are manually placed — nothing to auto-layout." });
+        return;
+      }
+
+      const { nodes: laid } = await mod.layoutWithElk(unlockedNodes, subsetEdges, {
+        density: "normal",
+        groupBySubjectArea: false,
+      });
+
+      // ELK lays out relative to its own origin; offset the result so the
+      // freshly-placed block sits to the right of the locked cluster and
+      // doesn't stomp on it.
+      let offsetX = 0;
+      let offsetY = 0;
+      const lockedTables = tables.filter((t) => t.manualPosition);
+      if (lockedTables.length > 0) {
+        const lockedMaxX = Math.max(...lockedTables.map((t) => (t.x || 0) + (t.width || 280)));
+        const lockedMinY = Math.min(...lockedTables.map((t) => t.y || 0));
+        offsetX = Math.round(lockedMaxX + 80);
+        offsetY = Math.round(lockedMinY);
+      }
+
+      const pos = new Map(
+        laid.map((n) => [n.id, { x: n.position.x + offsetX, y: n.position.y + offsetY }])
+      );
       setTables((prev) => prev.map((t) => {
+        if (t.manualPosition) return t; // locked — don't touch
         const p = pos.get(t.id);
         return p ? { ...t, x: Math.round(p.x), y: Math.round(p.y) } : t;
       }));
-      addToast({ type: "success", message: "Auto-layout applied." });
+      addToast({
+        type: "success",
+        message: `Auto-layout applied (${lockedCount} manually placed ${lockedCount === 1 ? "entity" : "entities"} preserved).`,
+      });
     } catch (err) {
       addToast({ type: "error", message: `Auto-layout failed: ${err.message || err}` });
     }
