@@ -7,6 +7,31 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-04-21
+
+Patch release — fixes a launch-day regression where dbt project import
+and connector pulls failed on any PyPI install because three api-server
+subprocess sites bypassed the `dmExec` helper and hardcoded a path
+(`<REPO_ROOT>/datalex`) that the CLI shim-writer never created.
+
+### Fixed
+
+- **dbt import / dbt sync / connector pull now work on pip-installed
+  setups.** `/api/dbt/import`, `/api/forward/dbt-sync`, and
+  `/api/connectors/pull/stream` now use the shared `dmExec()` resolver
+  (which correctly falls back through `datalex` → `dm` → PATH) instead
+  of `execFileSync(PYTHON, [join(REPO_ROOT, "datalex"), …])`. Symptom
+  users saw: `python: can't open file '<project-dir>/datalex': [Errno 2]
+  No such file or directory` when importing a jaffle-shop or any dbt
+  folder from the UI.
+  - `packages/api-server/index.js` — three call sites switched to
+    `dmExec()`.
+- **CLI writes both `dm` and `datalex` shims** next to the project
+  directory on `datalex serve`, so older/cached api-server versions
+  hitting the hardcoded path are also rescued.
+  - `packages/cli/src/datalex_cli/main.py` — shim-writer loops over
+    both names.
+
 ## [1.0.0] — 2026-04-21
 
 First stable release. The modeling loop — import a dbt repo, lay out
