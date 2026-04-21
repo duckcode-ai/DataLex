@@ -242,6 +242,98 @@ export function adaptDbtSchemaYaml(yamlText) {
 }
 
 /* ------------------------------------------------------------------ *
+ * DataLex `kind: model` / `kind: source` adapter — the shape the dbt
+ * importer writes to disk (`kind: model`, top-level `columns:`). The
+ * canonical `adaptDataLexYaml` expects top-level `entities:`, so these
+ * docs would otherwise render as empty / "string"-typed on the canvas.
+ * We normalize them into the entities[] shape and round-trip through
+ * the canonical adapter for one-source-of-truth column/FK inference.
+ * ------------------------------------------------------------------ */
+function dataLexColumnToField(c) {
+  if (!c || typeof c !== "object") return null;
+  const name = String(c.name || "").trim();
+  if (!name) return null;
+  const out = { name };
+  // Column type can live under `type:` (DataLex canonical) or `data_type:`
+  // (dbt passthrough when the manifest column is untyped). Preserve "—"
+  // on truly missing types so the UI can show an explicit unknown.
+  const t = c.type ?? c.data_type;
+  if (t != null && String(t).trim() !== "") out.type = String(t);
+  if (c.primary_key || c.pk) out.primary_key = true;
+  if (c.nullable === false) out.nullable = false;
+  if (c.unique) out.unique = true;
+  if (c.default != null) out.default = c.default;
+  if (c.description) out.description = String(c.description);
+  if (c.foreign_key && typeof c.foreign_key === "object") out.foreign_key = c.foreign_key;
+  else if (typeof c.fk === "string") out.fk = c.fk;
+  // Fold dbt-style `tests: [{relationships: {to, field}}]` into a synthetic
+  // foreign_key so FK edges render for imported models without us needing
+  // to touch the raw file.
+  const tests = Array.isArray(c.tests) ? c.tests : [];
+  if (!out.foreign_key && !out.fk) {
+    for (const tst of tests) {
+      const target = dbtRelationshipsTarget(tst);
+      if (target) { out.foreign_key = target; break; }
+    }
+  }
+  if (tests.some((t2) => t2 === "not_null" || t2?.not_null) && out.nullable === undefined) {
+    out.nullable = false;
+  }
+  if (tests.some((t2) => t2 === "unique" || t2?.unique)) {
+    out.unique = true;
+  }
+  return out;
+}
+
+function dataLexModelDocToEntity(doc) {
+  const name = String(doc?.name || "").trim();
+  if (!name) return null;
+  const cols = Array.isArray(doc?.columns) ? doc.columns : [];
+  const fields = cols.map(dataLexColumnToField).filter(Boolean);
+  const entity = {
+    name,
+    type: "table",
+    description: doc?.description ? String(doc.description) : "",
+    fields,
+  };
+  if (doc?.display && typeof doc.display === "object") entity.display = doc.display;
+  if (Array.isArray(doc?.tags)) entity.tags = doc.tags;
+  if (doc?.subject) entity.subject = doc.subject;
+  return entity;
+}
+
+/* Public adapter: parses a DataLex `kind: model` / `kind: source` doc
+   and emits the same shape as `adaptDataLexYaml`. Returns null when the
+   doc is not a recognised model/source so callers can chain adapters. */
+export function adaptDataLexModelYaml(yamlText) {
+  let doc;
+  try { doc = yaml.load(yamlText); } catch (_e) { return null; }
+  if (!doc || typeof doc !== "object") return null;
+  const kind = String(doc.kind || "").toLowerCase();
+  const isModel = kind === "model" || kind === "entity";
+  const isSource = kind === "source";
+  if (!isModel && !isSource) return null;
+  // An entity with explicit `fields:` is already in canonical shape — let
+  // adaptDataLexYaml handle it via the `entities:` wrapper below.
+  const entities = [];
+  if (isSource && Array.isArray(doc.tables)) {
+    doc.tables.forEach((t) => {
+      const e = dataLexModelDocToEntity(t);
+      if (e) entities.push(e);
+    });
+  } else {
+    const e = dataLexModelDocToEntity(doc);
+    if (e) entities.push(e);
+  }
+  if (entities.length === 0) return null;
+  const synthetic = yaml.dump(
+    { model: { name: String(doc.schema || doc.database || doc.name || "dbt_schema") }, entities },
+    { lineWidth: 120 },
+  );
+  return adaptDataLexYaml(synthetic);
+}
+
+/* ------------------------------------------------------------------ *
  * Diagram adapter — reads a .diagram.yaml and unions entities from N
  * referenced files. `fileLookup` is a map-like `{fullPath → content}`.
  * ------------------------------------------------------------------ */
@@ -289,9 +381,15 @@ export function adaptDiagramYaml(yamlText, projectFiles) {
     const file = byPath.get(ref.file);
     if (!file || typeof file.content !== "string") return;
     const content = file.content;
+    // Adapter dispatch: try dbt schema.yml first (has explicit `models:` /
+    // `sources:` markers), then DataLex canonical (`entities:`), then the
+    // `kind: model` / `kind: source` shape the dbt importer writes. The
+    // final fallback is what makes dropping an imported stg_*.yml onto a
+    // diagram actually render — without it the adapter returns null and
+    // the table silently disappears.
     const adapted = isDbtSchemaLike(content)
       ? adaptDbtSchemaYaml(content)
-      : adaptDataLexYaml(content);
+      : (adaptDataLexYaml(content) || adaptDataLexModelYaml(content));
     if (!adapted) return;
 
     const wantAll = !ref.entity || ref.entity === "*";

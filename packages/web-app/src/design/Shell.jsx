@@ -20,7 +20,7 @@ import CommandPalette from "./CommandPalette";
 import BottomDrawer from "./BottomDrawer";
 import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
-import { adaptDataLexYaml, adaptDiagramYaml } from "./schemaAdapter";
+import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDiagramYaml } from "./schemaAdapter";
 import { appendEntity, deleteEntity, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
 
 import { fetchGitStatus } from "../lib/api";
@@ -366,7 +366,10 @@ export default function Shell() {
 
   const adapted = React.useMemo(() => {
     if (isDiagramFile) return adaptDiagramYaml(activeFileContent, filesForDiagram);
-    return adaptDataLexYaml(activeFileContent);
+    // Try canonical DataLex (entities:) first, then the dbt-importer shape
+    // (kind: model / kind: source with top-level columns:). Without the
+    // second pass, opening an imported stg_*.yml directly renders nothing.
+    return adaptDataLexYaml(activeFileContent) || adaptDataLexModelYaml(activeFileContent);
   }, [activeFileContent, isDiagramFile, filesForDiagram]);
   const isDemo = useWorkspaceStore((s) => s.offlineMode && !s.activeProjectId);
   const emptySchema = React.useMemo(

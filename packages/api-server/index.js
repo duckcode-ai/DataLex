@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync, realpathSync } from "fs";
 import { execFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
@@ -106,28 +106,61 @@ const DATALEX_DEFAULT_STRUCTURE = {
   },
 };
 
+// Canonical path for dedupe: follows symlinks and normalizes
+// case-insensitive filesystems (macOS APFS/HFS+, Windows NTFS) so
+// `~/Jaffle-Shop` and `~/jaffle-shop` collapse to a single registration.
+// Falls back to the resolved absolute path when the target does not
+// exist on disk (e.g. orphan entry from a deleted folder).
+function canonicalProjectPath(p) {
+  if (!p) return "";
+  try {
+    return realpathSync.native(resolve(p));
+  } catch (_) {
+    try { return realpathSync(resolve(p)); } catch (_) { return resolve(p); }
+  }
+}
+
+// Drop duplicate entries (same canonical path) and drop phantom entries
+// whose folder no longer exists on disk. Keeps the first occurrence so
+// user-chosen names win over auto-registered ones.
+function cleanProjectList(projects) {
+  const seen = new Set();
+  const out = [];
+  for (const p of Array.isArray(projects) ? projects : []) {
+    if (!p || !p.path) continue;
+    if (!existsSync(p.path)) continue;              // phantom — folder gone
+    const key = canonicalProjectPath(p.path);
+    if (seen.has(key)) continue;                    // duplicate by canonical path
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
+
 async function loadProjects() {
   try {
     if (existsSync(PROJECTS_FILE)) {
       const raw = await readFile(PROJECTS_FILE, "utf-8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      const cleaned = cleanProjectList(parsed);
+      // Self-heal on load: if the file had dupes/phantoms, persist the
+      // cleaned list so the UI stops seeing them.
+      if (cleaned.length !== (Array.isArray(parsed) ? parsed.length : 0)) {
+        try { await writeFile(PROJECTS_FILE, JSON.stringify(cleaned, null, 2), "utf-8"); } catch (_) {}
+      }
+      return cleaned;
     }
   } catch (_err) {
     // ignore
   }
-  // Default: include model-examples as a starter project
-  const defaultProjects = [
-    {
-      id: "default",
-      name: "model-examples",
-      path: join(REPO_ROOT, "model-examples"),
-    },
-  ];
-  return defaultProjects;
+  // No projects file yet — return an empty list. The legacy hardcoded
+  // "model-examples" starter was removed because the folder often does
+  // not exist on user installs, leaving a broken dropdown entry.
+  return [];
 }
 
 async function saveProjects(projects) {
-  await writeFile(PROJECTS_FILE, JSON.stringify(projects, null, 2), "utf-8");
+  await writeFile(PROJECTS_FILE, JSON.stringify(cleanProjectList(projects), null, 2), "utf-8");
 }
 
 // Credentials store — kept in a separate file, never committed
@@ -731,6 +764,13 @@ app.post("/api/projects", requireAdmin, async (req, res) => {
     }
 
     const projects = await loadProjects();
+    // Canonical dedupe: reuse existing registration if the user points
+    // at the same folder (case-insensitive on macOS/Windows, symlink-safe).
+    const canonAbs = canonicalProjectPath(absoluteFolderPath);
+    const existing = projects.find((p) => canonicalProjectPath(p.path) === canonAbs);
+    if (existing) {
+      return res.json({ project: existing });
+    }
     const id = `proj_${Date.now()}`;
     const project = { id, name, path: absoluteFolderPath };
     projects.push(project);
@@ -1151,7 +1191,8 @@ app.post("/api/git/clone", requireAdmin, async (req, res) => {
 
     // Register as a project (create or update) — store clean URL, not auth URL
     const projects = await loadProjects();
-    const existingIdx = projects.findIndex((p) => p.path === clonePath);
+    const canonClone = canonicalProjectPath(clonePath);
+    const existingIdx = projects.findIndex((p) => canonicalProjectPath(p.path) === canonClone);
     let project;
     if (existingIdx >= 0) {
       project = { ...projects[existingIdx], name: safeName, githubRepo: url, defaultBranch: branch };
@@ -2663,6 +2704,21 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
           console.error(`[datalex] editInPlace write failed for ${destRel}: ${err.message}`);
         }
       }
+      // Seed `datalex/diagrams/` so the Explorer shows the conventional
+      // diagrams location immediately after import — users can then click
+      // "New Diagram" and land a file in a folder that already exists.
+      // `.gitkeep` is used because empty dirs don't round-trip through git
+      // and we don't want a stray untracked file on clean checkouts.
+      try {
+        const diagramsDir = join(resolvedProjectDir, "datalex", "diagrams");
+        if (!existsSync(diagramsDir)) {
+          mkdirSync(diagramsDir, { recursive: true });
+          const keepFile = join(diagramsDir, ".gitkeep");
+          if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
+        }
+      } catch (err) {
+        console.error(`[datalex] diagrams-folder seed failed: ${err.message}`);
+      }
     }
 
     // Register the user's dbt folder as a DataLex project so Save All + the
@@ -2673,7 +2729,13 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
       try {
         const projects = await loadProjects();
         const absolute = resolve(resolvedProjectDir);
-        const existing = projects.find((p) => resolve(p.path) === absolute);
+        // Canonical compare: collapses case-insensitive filesystems
+        // (macOS APFS, Windows) and symlinks so the same folder
+        // imported twice — or imported after typo-renaming the
+        // project — reuses the existing registration instead of
+        // creating a second "Jaffle-shop" entry alongside "jaffle-shop".
+        const canonAbs = canonicalProjectPath(absolute);
+        const existing = projects.find((p) => canonicalProjectPath(p.path) === canonAbs);
         if (existing) {
           projectRecord = existing;
         } else {

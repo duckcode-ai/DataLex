@@ -84,12 +84,14 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   display: flex;
   align-items: stretch;
   overflow-x: auto;
-  scrollbar-width: thin;
-  /* Soft fade at the edges so overflow is visible without a scrollbar flash. */
-  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
-          mask-image: linear-gradient(to right, transparent 0, #000 12px, #000 calc(100% - 12px), transparent 100%);
+  /* Hide the horizontal scrollbar in all engines (Firefox showed a thin
+     grey slider below the tab row that looked like a stray control). Users
+     can still scroll with trackpad/wheel; we keep the tabs themselves
+     horizontally scrollable so long labels overflow gracefully. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
-.bottom-drawer-tabs-scroller::-webkit-scrollbar { height: 0; }
+.bottom-drawer-tabs-scroller::-webkit-scrollbar { width: 0; height: 0; }
 .bottom-drawer-tab {
   display: inline-flex;
   align-items: center;

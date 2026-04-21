@@ -7,6 +7,47 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-04-20
+
+### Fixed
+
+- **Imported dbt models now render on the canvas.** The schema adapter
+  previously only understood DataLex's canonical `entities:[]` shape,
+  so dropping an imported `stg_*.yml` (which is `kind: model` with
+  top-level `columns:`) onto a diagram silently did nothing, and
+  columns shown elsewhere fell back to the `"string"` default type.
+  Added `adaptDataLexModelYaml` for `kind: model` and `kind: source`
+  docs, wired into both the diagram adapter's file-dispatch chain and
+  `Shell.jsx`'s direct-open path. `not_null` / `unique` / `relationships`
+  tests on columns now fold into nullability + unique flags + FK edges
+  automatically. Covered by 7 new unit tests in
+  `packages/web-app/tests/schemaAdapter.test.js`.
+- **Duplicate project entries (e.g. three "jaffle-shop" rows).**
+  Project dedupe now uses `fs.realpathSync` for canonical comparison,
+  so `~/Jaffle-Shop` and `~/jaffle-shop` collapse to one registration
+  on macOS/Windows' case-insensitive filesystems. Applies to both
+  `editInPlace` dbt imports and the `POST /api/projects` register
+  route.
+- **Phantom `model-examples` starter entry.** `loadProjects` no longer
+  hardcodes a starter project pointing at `model-examples/` — users
+  hit an empty dropdown item when the folder didn't exist. It also
+  self-heals on load: existing `.dm-projects.json` entries whose
+  folder no longer exists are removed and the file rewritten.
+- **Bottom-panel scrollbar artifact.** The thin grey slider visible
+  below the Modeler / Properties / Libraries tab row was Firefox's
+  native horizontal scrollbar showing through a `scrollbar-width:
+  thin` rule. Switched to `scrollbar-width: none` with an
+  `-ms-overflow-style: none` fallback so the tabs still scroll via
+  trackpad/wheel but render without a visible slider.
+
+### Added
+
+- **`datalex/diagrams/` folder is seeded on dbt import.** When
+  `editInPlace` import succeeds, the api-server creates
+  `<project>/datalex/diagrams/` with a `.gitkeep` so the Explorer
+  shows the conventional diagrams location immediately — clicking
+  "New Diagram" lands in a folder that already exists.
+
 ## [0.3.1] — 2026-04-20
 
 ### Added
