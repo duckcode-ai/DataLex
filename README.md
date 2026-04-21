@@ -52,15 +52,23 @@ The folder auto-registers as your active project; the browser opens
 straight into your real file tree. Every UI edit writes back to the
 original `.yml` files — `git status` shows real diffs.
 
-**Build your first ER diagram (v0.3+):**
+**Build your first ER diagram:**
 
 1. Click **Import dbt repo → Local folder** → pick your project root
-2. Click **New Diagram** in the Explorer — creates
-   `datalex/diagrams/untitled.diagram.yaml`
-3. Drag any `schema.yml` or `.model.yaml` from the Explorer onto the
-   canvas — entities render with auto-inferred FK edges
+2. In the Explorer, right-click any folder → **New diagram here…**
+   (or use the Explorer toolbar's **New Diagram** button for the
+   default `datalex/diagrams/` location)
+3. Open the new `.diagram.yaml` and click **Add Entities** on the
+   canvas toolbar — multi-select with search + domain filter, then
+   confirm. Entities auto-layout via ELK on add. You can also drag
+   any `schema.yml` / `.model.yaml` from the Explorer onto the canvas
+   as an alternative — FK edges from `tests: - relationships:` render
+   automatically.
 4. Drag to reposition → **Save All** → positions persist in the
-   diagram file; `git commit` picks them up
+   diagram file; `git commit` picks them up. Save All is merge-safe:
+   multiple in-memory docs targeting the same `schema.yml` are merged
+   through the core-engine `merge_models_preserving_docs` helper
+   instead of clobbering siblings.
 
 See **[docs/getting-started.md](docs/getting-started.md)** for the full
 path matrix (demo → local dbt → git URL → live warehouse).
