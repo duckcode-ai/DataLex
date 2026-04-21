@@ -11,12 +11,12 @@
      entityName   — the YAML entity name (used by patchField)
      onDirty()    — optional callback after a successful patch (for logging) */
 import React from "react";
-import { Key, Link2, AlertTriangle, Replace } from "lucide-react";
+import { Key, Link2, AlertTriangle, Replace, Plus, Trash2 } from "lucide-react";
 import yaml from "js-yaml";
 import { PanelSection, StatusPill } from "../../components/panels/PanelFrame";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useUiStore from "../../stores/uiStore";
-import { patchField } from "../yamlPatch";
+import { patchField, appendField, deleteField } from "../yamlPatch";
 import { lintEntity } from "../../lib/dbtLint";
 
 /* Parse the active YAML and run dbtLint for the currently-selected entity.
@@ -93,10 +93,65 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
     }
   }, [col?.name, entityName, onDirty]);
 
+  /* Add a new column. We invent a non-colliding placeholder name
+   * ("new_column", "new_column_2", …) so the user lands on an editable row
+   * immediately and can rename via the Name input. Type defaults to
+   * "string" — the importer treats "unknown" as a warning, so seeding a
+   * real type avoids inheriting that yellow-border state. */
+  const handleAddColumn = React.useCallback(() => {
+    if (!entityName) return;
+    const existing = new Set(
+      (table?.columns || []).map((c) => String(c.name || "").toLowerCase())
+    );
+    let base = "new_column";
+    let name = base;
+    let n = 2;
+    while (existing.has(name.toLowerCase())) {
+      name = `${base}_${n++}`;
+    }
+    const s = useWorkspaceStore.getState();
+    const next = appendField(s.activeFileContent, entityName, { name, type: "string" });
+    if (next != null) {
+      s.updateContent(next);
+      if (setSelectedCol) setSelectedCol(name);
+      if (onDirty) onDirty();
+    }
+  }, [entityName, table?.columns, setSelectedCol, onDirty]);
+
+  /* Delete the currently-selected column, with confirmation. After the
+   * write lands we move selection to a sibling so the panel doesn't flash
+   * the empty state unless this was the last column. */
+  const handleDeleteColumn = React.useCallback(() => {
+    if (!entityName || !col?.name) return;
+    if (!window.confirm(`Delete column “${col.name}” from “${entityName}”?`)) return;
+    const s = useWorkspaceStore.getState();
+    const next = deleteField(s.activeFileContent, entityName, col.name);
+    if (next != null) {
+      s.updateContent(next);
+      if (setSelectedCol) {
+        const siblings = (table?.columns || []).filter((c) => c.name !== col.name);
+        setSelectedCol(siblings[0]?.name || null);
+      }
+      if (onDirty) onDirty();
+    }
+  }, [entityName, col?.name, table?.columns, setSelectedCol, onDirty]);
+
   if (!col) {
     return (
       <div style={{ padding: 16, fontSize: 12, color: "var(--text-tertiary)" }}>
-        This table has no columns yet.
+        <div style={{ marginBottom: 10 }}>This table has no columns yet.</div>
+        {entityName && (
+          <button
+            type="button"
+            className="panel-btn"
+            onClick={handleAddColumn}
+            title="Append a new column to this entity"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+          >
+            <Plus size={11} />
+            Add column
+          </button>
+        )}
       </div>
     );
   }
@@ -242,11 +297,36 @@ export default function ColumnsView({ table, col, setSelectedCol, entityName, on
               <Replace size={11} />
               Rename across project…
             </button>
+            <button
+              type="button"
+              className="panel-btn danger"
+              onClick={handleDeleteColumn}
+              title={`Delete column “${col.name}” from this entity.`}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+            >
+              <Trash2 size={11} />
+              Delete column
+            </button>
           </div>
         </div>
       </PanelSection>
 
-      <PanelSection title="All columns" count={table.columns.length}>
+      <PanelSection
+        title="All columns"
+        count={table.columns.length}
+        action={
+          <button
+            type="button"
+            className="panel-btn"
+            onClick={handleAddColumn}
+            title="Append a new column to this entity"
+            style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11 }}
+          >
+            <Plus size={11} />
+            Add
+          </button>
+        }
+      >
         <table className="panel-table" role="grid" aria-label="Columns">
           <thead>
             <tr>

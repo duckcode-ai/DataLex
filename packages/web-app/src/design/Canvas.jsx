@@ -433,7 +433,7 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, title, engine, legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, legendOpen, setLegendOpen }) {
   // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
   // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
   // Canvas level (not individual TableCards) so every card reads the same
@@ -502,6 +502,53 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     window.addEventListener("mouseup", onUp);
   }, [onConnect]);
 
+  // Fit: scroll the .canvas viewport so the bounding box of all tables is in
+  // view. We use the prop-provided onFit if the host wants to do something
+  // smarter (e.g., zoom), otherwise we approximate by scrolling to the
+  // top-left of the bounding box with a 32px padding.
+  const handleFit = React.useCallback(() => {
+    if (onFit) { onFit(); return; }
+    const inner = innerRef.current;
+    if (!inner || !tables.length) return;
+    const viewport = inner.parentElement; // .canvas scroll container
+    if (!viewport) return;
+    let minX = Infinity, minY = Infinity;
+    for (const t of tables) {
+      if (typeof t.x === "number" && t.x < minX) minX = t.x;
+      if (typeof t.y === "number" && t.y < minY) minY = t.y;
+    }
+    if (!Number.isFinite(minX) || !Number.isFinite(minY)) return;
+    viewport.scrollTo({
+      left: Math.max(0, minX - 32),
+      top: Math.max(0, minY - 32),
+      behavior: "smooth",
+    });
+  }, [onFit, tables]);
+
+  // Keyboard Delete / Backspace → delete the currently selected entity or
+  // relationship. Ignored while the user is typing in an input/textarea or a
+  // contentEditable region so column-name edits in the inspector don't nuke
+  // the whole table.
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const tgt = e.target;
+      const tag = (tgt?.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select") return;
+      if (tgt?.isContentEditable) return;
+      if (!selected) return;
+      if (selected.type === "table" && onDeleteEntity) {
+        e.preventDefault();
+        onDeleteEntity(selected.id);
+      } else if (selected.type === "rel" && onDeleteRelationship) {
+        e.preventDefault();
+        onDeleteRelationship(selected.id);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selected, onDeleteEntity, onDeleteRelationship]);
+
   return (
     <div className="canvas-wrap">
       <div className="canvas-grid" />
@@ -517,10 +564,10 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           </p>
         </div>
         <div className="canvas-actions">
-          <button className="canvas-btn"><I.Fit />Fit</button>
-          <button className="canvas-btn"><I.Grid />Auto-layout</button>
-          <button className="canvas-btn"><I.Download />Export</button>
-          <button className="canvas-btn primary"><I.Sparkle />Generate SQL</button>
+          <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
+          <button className="canvas-btn" onClick={() => onAutoLayout && onAutoLayout()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
+          <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>
+          <button className="canvas-btn primary" onClick={() => onExport && onExport()}><I.Sparkle />Generate SQL</button>
         </div>
       </div>
 
@@ -615,7 +662,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
         <button className="zoom-btn"><I.Minus /></button>
         <div className="zoom-level">100%</div>
         <button className="zoom-btn"><I.Plus /></button>
-        <button className="zoom-btn" title="Fit"><I.Fit /></button>
+        <button className="zoom-btn" title="Fit" onClick={() => handleFit()}><I.Fit /></button>
       </div>
     </div>
   );

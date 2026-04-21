@@ -1963,12 +1963,25 @@ const useWorkspaceStore = create((set, get) => ({
     if (activeFile && activeFileContent !== originalContent) {
       pushIf(activeFile.path, activeFileContent);
     }
+    // Include every other open tab whose cached content diverges from its
+    // disk baseline. `updateContent` keeps `tab.content` and
+    // `tab.originalContent` in sync per tab — see the openTabs mutation
+    // block there. Before v1.0.5 this loop was a no-op ("skip non-active
+    // tabs"), which meant Save All only persisted the currently-focused
+    // file; e.g. dragging entities on a `.diagram.yaml` then switching to
+    // another tab before Save All silently dropped the diagram edits.
     for (const tab of openTabs) {
       if (!tab?.path) continue;
-      // Only include tabs with content we're confident about — the active
-      // buffer is handled above; other tabs' .content is what was loaded.
       if (activeFile && tab.path === activeFile.path) continue;
-      // We don't track per-tab dirty state; skip non-active tabs here.
+      const content = tab.content;
+      if (typeof content !== "string") continue;
+      // A tab is "dirty" when we recorded a disk baseline for it and the
+      // cached content has drifted. If we never recorded a baseline
+      // (openTabs entry came from a cold load without an edit yet), there's
+      // nothing to save — skip it.
+      if (tab.originalContent == null) continue;
+      if (content === tab.originalContent) continue;
+      pushIf(tab.path, content);
     }
     if (payload.length === 0) return { ok: true, saved: 0, total: 0, results: [] };
     set({ loading: true, error: null });
@@ -1977,6 +1990,24 @@ const useWorkspaceStore = create((set, get) => ({
       // Refresh project file metadata (mtimes) + reset active dirty flag.
       const data = await fetchProjectFiles(activeProjectId);
       set({ projectFiles: data.files || [] });
+      // Reset the disk baseline on every tab that was successfully saved,
+      // so `isDirty` collapses to false across the whole workspace — not
+      // only the currently-focused tab. Without this the other dirty tabs
+      // stay visually dirty and a re-click on Save All would re-send them.
+      const savedPaths = new Set(
+        (result?.results || [])
+          .filter((r) => r && r.ok && typeof r.path === "string")
+          .map((r) => r.path),
+      );
+      if (savedPaths.size > 0) {
+        set((s) => {
+          const openTabs = (s.openTabs || []).map((t) => {
+            if (!t || !t.path || !savedPaths.has(t.path)) return t;
+            return { ...t, originalContent: t.content };
+          });
+          return { openTabs };
+        });
+      }
       if (activeFile) {
         set({ originalContent: activeFileContent, isDirty: false });
       }

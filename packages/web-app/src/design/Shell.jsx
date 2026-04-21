@@ -22,6 +22,7 @@ import { DEMO_SCHEMA } from "./demoSchema";
 import { THEMES } from "./notation";
 import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDiagramYaml } from "./schemaAdapter";
 import { appendEntity, deleteEntityDeep, setEntityDisplay, setDiagramEntityDisplay } from "./yamlPatch";
+import { deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
 import { shouldShowFirstRun } from "../lib/onboardingTour";
 
 import { fetchGitStatus } from "../lib/api";
@@ -641,6 +642,32 @@ export default function Shell() {
     s.bumpModelGraphVersion?.();
   }, [addToast]);
 
+  /* Delete relationship by its in-canvas id. Canvas relationships come from
+   * schemaAdapter with ids like `r1`, `r2`, … for explicit entries and
+   * `rfk-{table}-{col}` for inferred FK-column rels. We resolve id → name
+   * against the active `relationships` list and delegate to the
+   * yamlRoundTrip helper, which knows how to drop the `relationships[]`
+   * entry and any matching `tests:` block. Inferred FK rels (`rfk-…`) have
+   * no explicit YAML entry — for those we fall back to deleting the FK on
+   * the column via deleteField. Keyboard-Delete uses this. */
+  const handleDeleteRelationship = React.useCallback((relId) => {
+    if (!relId) return;
+    const rel = (schema.relationships || []).find((r) => r.id === relId);
+    if (!rel) return;
+    const s = useWorkspaceStore.getState();
+    if (!s.activeFile) return;
+    if (!window.confirm(`Delete relationship “${rel.name}”?`)) return;
+    const res = deleteRelationshipYaml(s.activeFileContent, rel.name);
+    if (!res || res.error || !res.yaml) {
+      addToast({ type: "error", message: `Could not delete relationship — ${res?.error || "not found in active YAML"}.` });
+      return;
+    }
+    s.updateContent(res.yaml);
+    setSelected(null);
+    addToast({ type: "success", message: `Deleted relationship “${rel.name}”.` });
+    s.bumpModelGraphVersion?.();
+  }, [schema.relationships, addToast]);
+
   /* ── ELK auto-layout (palette action) ──────────────────────────────
    * v0.3.4: respects `manualPosition` — entities the user has already
    * dragged (persisted to YAML `display.x/y` or diagram ref x/y) stay
@@ -896,6 +923,10 @@ export default function Shell() {
           onMoveEnd={handleTableMoveEnd}
           onConnect={handleCanvasConnect}
           onDropYamlSource={handleCanvasDropYamlSource}
+          onDeleteEntity={handleDeleteEntity}
+          onDeleteRelationship={handleDeleteRelationship}
+          onAutoLayout={handleAutoLayout}
+          onExport={() => openModal("exportDdl")}
           title={schema.name}
           engine={schema.engine}
           legendOpen={legendOpen}
