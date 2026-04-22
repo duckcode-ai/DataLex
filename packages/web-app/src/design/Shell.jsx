@@ -1050,7 +1050,6 @@ export default function Shell() {
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },
           { id: "import-dbt", section: "Actions", label: "Import dbt repo…",       meta: "",    icon: <span style={{ fontSize: 12 }}>⤓</span>,  run: () => openModal("importDbtRepo") },
-          { id: "demo-jaffle",section: "Actions", label: "Load jaffle-shop demo",  meta: "",    icon: <span style={{ fontSize: 12 }}>✨</span>, run: () => openModal("importDbtRepo") },
           { id: "apply-ddl",  section: "Actions", label: "Apply to warehouse…",    meta: "",    icon: <span style={{ fontSize: 12 }}>☁</span>,  run: () => openModal("applyDdl") },
           // v0.5.0 — stakeholder-share + snapshot flows. Share opens the
           // HTML bundle dialog prefilled from the currently-adapted schema;

@@ -3245,8 +3245,8 @@ app.post("/api/dbt/import", requireAdmin, express.json({ limit: "2mb" }), async 
 
     // Walk outDir and build an in-memory tree of produced YAML files. Keeping the
     // response self-contained means the UI can ingest the result without any
-    // further disk access — important for the "Load jaffle-shop demo" flow where
-    // the user may not have chosen a project folder yet.
+    // further disk access — important for the git-URL import flow where the
+    // user may not have chosen a project folder yet.
     const tree = [];
     const walk = (dir, rel = "") => {
       let entries = [];

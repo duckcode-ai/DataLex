@@ -8,6 +8,9 @@ dist/
 # Node
 node_modules/
 packages/web-app/dist/
+packages/web-app/test-results/
+packages/web-app/playwright-report/
+packages/web-app/playwright/.cache/
 
 # Virtual environment
 .venv/
