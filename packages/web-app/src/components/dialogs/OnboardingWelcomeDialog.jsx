@@ -135,7 +135,7 @@ export default function OnboardingWelcomeDialog({ onClose }) {
           }}
         >
           {[
-            "Import your dbt repo (folder / git URL / jaffle-shop demo)",
+            "Import your dbt repo (local folder or public git URL)",
             "Build your first diagram with auto-layout",
             "Wire relationships with inline endpoint validation",
             "Save All — merge-safe, git-diff-ready",

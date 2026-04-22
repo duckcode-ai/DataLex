@@ -87,7 +87,7 @@ have in hand:
 
 | You have...                                | Tutorial                                                           | Time  |
 |--------------------------------------------|--------------------------------------------------------------------|-------|
-| Nothing — just want the demo               | [Jaffle-shop one-click walkthrough](docs/tutorials/jaffle-shop-walkthrough.md) | 3 min |
+| Nothing — want to try with a known-good dbt repo | [Walk through jaffle-shop end-to-end](docs/tutorials/jaffle-shop-walkthrough.md) | 5 min |
 | An existing dbt project (folder or git)    | [Import an existing dbt project](docs/tutorials/import-existing-dbt.md)        | 5 min |
 | A live warehouse (Snowflake/Postgres/…)    | [Pull a warehouse schema](docs/tutorials/warehouse-pull.md)                    | 7 min |
 | CLI-only, no UI                            | [CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)                             | 5 min |
@@ -242,7 +242,8 @@ dbt parse
 - **[Getting started](docs/getting-started.md)** — the one-page map
   covering install, the three GUI paths, and the mental model.
 - **[Jaffle-shop walkthrough](docs/tutorials/jaffle-shop-walkthrough.md)** —
-  3-minute offline demo of every UI feature.
+  end-to-end demo: clone the real jaffle-shop repo, import it, rename an
+  entity, commit back to git.
 - **[Import an existing dbt project](docs/tutorials/import-existing-dbt.md)** —
   5-minute bring-your-own-repo flow (local folder or git URL).
 - **[Pull a warehouse schema](docs/tutorials/warehouse-pull.md)** —

@@ -1,9 +1,8 @@
-# Jaffle-shop: the three-minute demo
+# Jaffle-shop end-to-end walkthrough
 
-The fastest way to see every DataLex feature without connecting a
-warehouse or cloning a dbt repo. The jaffle-shop fixture is a trimmed
-version of `dbt-labs/jaffle-shop` checked into the wheel, so this
-entire flow works offline.
+The fastest way to see every DataLex feature with a real, canonical
+dbt project: clone `dbt-labs/jaffle-shop` from GitHub and drive the
+full round-trip — import → diagram → edit → autosave → git.
 
 You'll end with:
 
@@ -11,10 +10,11 @@ You'll end with:
   as both a file tree and an ER diagram
 - Inline lint warnings for every column missing `description`,
   `data_type`, or primary-key tests
-- A feel for drag-to-relate, position persistence, and the
-  diff/history panels — the same UX you'll use for your real project
+- A real `.git` history of your edits — DataLex writes back into the
+  cloned repo, so `git log` / `git diff` show normal dbt changes
 
-**Time:** 3 minutes. **Prerequisites:** Python 3.9+ with pip.
+**Time:** 5 minutes. **Prerequisites:** Python 3.9+, Git, and network
+access to `github.com`.
 
 ---
 
@@ -37,36 +37,62 @@ The first `datalex serve` call prints something like:
 A browser tab opens on `http://localhost:3030`. If it doesn't, open
 that URL manually or re-run with `--no-browser` and copy the link.
 
-## Step 2 — Load the jaffle-shop demo
+## Step 2 — Import jaffle-shop from GitHub
 
-1. In the top bar, click **Import dbt repo** (the folder icon with
-   "Dep" label, next to **Open project**).
-2. The **Import dbt repository** dialog opens. At the top there's a
-   **Load jaffle-shop demo** button — click it.
-3. The dialog closes and the Explorer (left panel) populates with the
-   full tree:
-   ```
-   models/
-     staging/
-       stg_customers.yml
-       stg_orders.yml
-       stg_order_items.yml
-       stg_products.yml
-       stg_stores.yml
-       stg_supplies.yml
-     marts/
-       customers.yml
-       orders.yml
-       order_items.yml
-       products.yml
-     sources/
-       jaffle_shop_raw.yml
-   ```
+Two equivalent paths — pick whichever fits your workflow.
 
-The fixture is bundled as YAML files inside the wheel — no network
-call, no git clone. If you ever re-run `dm dbt sync` against the real
-`dbt-labs/jaffle-shop` repo you'll get the same tree (modulo the
-`meta.datalex.dbt.*` timestamps).
+### Option A — Let DataLex do the clone for you
+
+1. In the top bar, click **Import dbt repo** (the folder-with-arrow
+   icon). The **Import dbt repository** dialog opens on the **Git URL**
+   tab by default.
+2. Paste `https://github.com/dbt-labs/jaffle-shop` into the **Git URL**
+   field. Leave the branch as `main`. Keep **Skip live warehouse
+   introspection** checked (we don't have warehouse creds yet).
+3. Click **Import**. DataLex shells out to `git clone` on the API
+   server, runs `datalex dbt import` against the checkout, and shows
+   the **Import Results** panel.
+4. Skim the report: how many models imported, the manifest-only banner
+   (no warehouse creds was fine), any columns with `type: unknown`,
+   and any unresolved relationships. Click **Open project**.
+
+This path is read-only by design — the import tree lives in memory so
+you can explore without mutating anything on disk. Save All is
+disabled. If you want edits to persist, use Option B.
+
+### Option B — Clone yourself, then open as a project
+
+```bash
+git clone https://github.com/dbt-labs/jaffle-shop ~/src/jaffle-shop
+```
+
+1. Back in the UI, open **Import dbt repo** → **Local folder** tab.
+2. Paste the absolute path, e.g. `/Users/you/src/jaffle-shop`.
+3. Leave **Edit in place** checked (the default). This registers the
+   folder as a DataLex project: Save All writes edits back into each
+   model's original `.yml`, and `git diff` in the clone shows normal
+   dbt changes.
+4. Click **Import**, review the Results panel, then **Open project**.
+
+Whichever path you pick, the Explorer (left panel) populates with the
+full jaffle-shop tree:
+
+```
+models/
+  staging/
+    stg_customers.yml
+    stg_orders.yml
+    stg_order_items.yml
+    stg_products.yml
+    stg_supplies.yml
+    stg_locations.yml
+  marts/
+    customers.yml
+    orders.yml
+    order_items.yml
+    products.yml
+    locations.yml
+```
 
 ## Step 3 — Build your first diagram
 
@@ -86,8 +112,8 @@ which models to visualize together.
    `stg_customers.customer_id` renders automatically — inferred from
    the dbt `tests: - relationships:` on that column.
 3. (Alternative) Drag `models/staging/stg_customers.yml` from the
-   Explorer onto the canvas. Each referenced model still renders as
-   an entity — the picker and drag-drop are interchangeable.
+   Explorer onto the canvas. Each model still renders as an entity —
+   the picker and drag-drop are interchangeable.
 4. Reposition nodes by dragging. The positions land in the diagram
    YAML's `entities[].x/y` — not in the model files — so you can have
    a second diagram with different coordinates for the same models.
@@ -102,80 +128,66 @@ Click `models/staging/stg_customers.yml` in the Explorer.
 - **Right panel** shows the Inspector: tabs for Columns, Relationships,
   Indexes, Enums, Tests.
 - **Columns tab** lists each column. Any column missing a
-  `description` or `data_type` shows a warning pill — that's the PR A
-  lint rule (`packages/web-app/src/lib/dbtLint.js`) running client-side
+  `description` or `data_type` shows a warning pill — that's the lint
+  rule (`packages/web-app/src/lib/dbtLint.js`) running client-side
   with no save-cost.
 
 Try renaming a column description: click the description cell, type
-something, hit Enter. The YAML updates in-memory; the **Diff** panel
-at the bottom shows the pending change as a red/green patch.
+something, blur. The YAML updates in-memory and **autosave** flushes
+the change to disk ~800ms later — you'll see the **Diff** panel at
+the bottom transition from pending to clean.
 
-## Step 5 — Drag to create a relationship
+## Step 5 — Rename an entity and watch the cascade
 
-On the canvas, each column has two tiny handles (left = target,
-right = source).
+1. In the Explorer, right-click `stg_customers.yml` → **Rename
+   entity…**
+2. Change the entity name from `stg_customers` to `stg_customer`.
+3. Preview the rename. DataLex scans the whole project and lists
+   every file that will be rewritten — `stg_orders.yml`,
+   `customers.yml`, the diagram, and so on — each FK and relationship
+   ref updated atomically.
+4. Click **Rename**. The server snapshots every target file, applies
+   the rewrites in a single transaction, and only then moves the file.
+   If any write fails, the whole thing rolls back.
 
-1. Drag from `stg_orders.customer_id` (right handle) to
-   `stg_customers.customer_id` (left handle).
-2. A **New relationship** dialog opens, pre-filled with
-   `from: stg_orders.customer_id`, `to: stg_customers.customer_id`,
-   cardinality `many_to_one`. Give it a name like
-   `fk_orders_customers`, optionally mark it `identifying` or
-   `optional`, and hit **Create**. The dialog validates both
-   endpoints against the resolved model graph — if either column
-   doesn't exist, an inline error blocks submit (no silent write, no
-   toast).
-3. A new FK edge renders. The Diff panel shows a new
-   `relationships:` block landed under `stg_orders`.
+On Option B (edit-in-place), run `git diff` in the jaffle-shop clone —
+you'll see the refactor as a coherent commit-sized change across
+multiple files.
 
-## Step 6 — Move a node; confirm it sticks
+## Step 6 — Turn on auto-commit (optional)
 
-Drag `stg_customers` 300 px to the right. Reload the tab
-(`⌘R` / `Ctrl+R`). The node stays where you put it because the canvas
-wrote the new `x/y` into your active `.diagram.yaml`'s `entities[]`
-list on `onNodeDragStop`. (When no diagram is active, positions fall
-back to a `display:` block on the entity YAML itself.)
+1. Open the Commit dialog (`⌘⇧G` or the branch icon in the Chrome
+   header).
+2. Enable **Auto-commit on save**.
+3. Back in the inspector, change three field descriptions in quick
+   succession. Auto-commit debounces bursty saves: within ~3s you'll
+   see **exactly one** new commit in `git log`.
 
-## Step 7 — Try undo / redo
+Failure mode: if the commit fails (e.g. missing `user.email`), the
+save itself still succeeds — the auto-commit error surfaces as a
+toast so you can fix the config and retry manually.
 
-Every mutating action (column edit, relationship add, position change)
-pushes to a per-file history stack capped at 50 entries.
+## Step 7 — Apply DDL to a warehouse (optional)
 
-- `⌘Z` reverts the last change
-- `⌘⇧Z` re-applies
+1. In an open `.model.yaml`, press `⌘K` → **Apply to warehouse…**
+2. Pick a dialect (DuckDB for a throwaway local run, Snowflake / BQ /
+   Databricks if you have a connector profile saved).
+3. Click **Generate DDL** — the preview shows the forward-engineered
+   SQL.
+4. Pick a connector profile. Leave **Dry run** checked for the first
+   pass; hit **Dry run**. The server compiles and validates against
+   the target without executing.
+5. Uncheck **Dry run** → **Apply** when you're ready.
 
-The Chrome header's Undo and Redo buttons drive the same store —
-they're live now, no longer decorative.
+The endpoint is gated by `DM_ENABLE_DIRECT_APPLY` on the server. When
+disabled (the GitOps default), the dialog instead instructs you to
+commit the generated SQL and deploy via CI/CD.
 
-## Step 8 — Validate + aggregate lint
+## Step 8 — Export a PNG of the diagram
 
-Click the **Validation** tab in the bottom panel. It aggregates every
-lint warning and error across the whole tree, grouped by file. For
-jaffle-shop you'll see a handful of "column missing description"
-warnings — useful guide for a real import.
-
-If the active file has relationships whose endpoints reference a
-missing entity or column, a red **Dangling relationships** banner
-appears at the top of the panel, one card per finding, with a
-**Remove dangling** button that rewrites the file and drops just the
-offending entries.
-
-## Step 9 — Save the project to a real folder (optional)
-
-The jaffle-shop demo lives in-memory. If you want to write it to disk
-for real git tracking:
-
-1. Click the **Save All** button in the top bar (the "All" download
-   icon — only enabled when you have a real project open).
-2. Or use the File menu → New Project, pick a folder, then re-trigger
-   the import; the tree writes to your chosen directory.
-
-Once on disk:
-
-```bash
-cd ~/my-jaffle-clone
-git init && git add . && git commit -m "chore: jaffle-shop baseline"
-```
+With any diagram open, press `⌘⇧E`. A PNG of the current canvas
+downloads. That same action lives in the diagram toolbar overflow
+menu for discoverability.
 
 ## What to do next
 
@@ -188,7 +200,8 @@ git init && git add . && git commit -m "chore: jaffle-shop baseline"
 
 | Symptom                                     | Fix                                                                |
 |---------------------------------------------|--------------------------------------------------------------------|
-| "Load jaffle-shop demo" button does nothing | Open devtools console. If you see a `glob()` error, the fixture wasn't bundled — reinstall with a recent wheel. |
-| Explorer looks flat, no folders             | You hit the single-file fallback — check the browser console for a `buildFileTree` error. |
-| Node positions reset on reload              | The YAML didn't save. Check for a red Save indicator in the header; save explicitly. |
+| Git-URL import fails with a network error   | Check that the API server has GitHub access (firewalls, proxies). Re-try with Option B: clone locally, then use the **Local folder** tab. |
+| Import Results banner says "manifest-only"  | Expected — jaffle-shop doesn't ship a `profiles.yml` wired to your machine. Column `data_type`s show `unknown` until you add warehouse creds. |
+| Rename cascade complains about a file       | The atomic endpoint rolls the whole rename back on any write failure. Fix the reported file (permissions, locks) and retry. |
 | Diff panel keeps showing changes after save | Stale editor state — hit `⌘R`. The in-flight Zustand store and the on-disk bytes should match. |
+| Auto-commit produces no commit              | Check `git config user.email` inside the cloned repo. The Chrome status bar shows the last auto-commit error as a toast. |

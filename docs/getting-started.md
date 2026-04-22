@@ -28,7 +28,7 @@ pip install 'datalex-cli[serve,all]'             # every driver + Node
 
 | You have...                                   | Start here                                                     | Time  |
 |-----------------------------------------------|----------------------------------------------------------------|-------|
-| Nothing — just want the demo                  | [Scenario 1 — jaffle-shop demo](#scenario-1--jaffle-shop-demo) | 3 min |
+| Nothing — want to try with a canonical dbt repo | [Scenario 1 — clone jaffle-shop](#scenario-1--clone-jaffle-shop) | 5 min |
 | An existing dbt project on disk               | [Scenario 2 — your local dbt repo](#scenario-2--your-local-dbt-repo) | 5 min |
 | A dbt repo on GitHub you want to try          | [Scenario 3 — a git URL](#scenario-3--a-git-url)               | 4 min |
 | A live warehouse, no dbt yet                  | [Scenario 4 — warehouse pull](#scenario-4--live-warehouse-pull) | 7 min |
@@ -36,23 +36,27 @@ pip install 'datalex-cli[serve,all]'             # every driver + Node
 
 ---
 
-## Scenario 1 — Jaffle-shop demo
+## Scenario 1 — Clone jaffle-shop
 
-The fastest way to see if DataLex fits how you think. No dbt repo
-needed, no warehouse, fully offline.
+The fastest way to see if DataLex fits how you think. Uses the real
+`dbt-labs/jaffle-shop` repo — no bundled demo, no surprises when you
+switch to your own project later.
 
 ```bash
 pip install 'datalex-cli[serve]'
+git clone https://github.com/dbt-labs/jaffle-shop ~/src/jaffle-shop
 datalex serve
 ```
 
-Browser opens. Click **Import dbt repo → Load jaffle-shop demo**. The
-Explorer fills with `models/staging/`, `models/marts/`, the canvas
-shows an ER diagram with relationships, and the inspector renders
-every column.
+In the UI: **Import dbt repo → Git URL tab** → paste
+`https://github.com/dbt-labs/jaffle-shop` → **Import**. The API
+server clones on your behalf, runs the importer, and shows the
+**Import Results** panel. Click **Open project**.
 
-Nothing is written to disk. Close the tab and everything is gone.
-When you want the real workflow, go to Scenario 2.
+Prefer Save-All-writes-to-disk? Use the **Local folder** tab instead,
+point it at the clone you just made (`~/src/jaffle-shop`), keep
+**Edit in place** checked. Every UI edit then lands in the clone and
+`git diff` shows normal dbt changes.
 
 📖 **Full walkthrough:** [tutorials/jaffle-shop-walkthrough.md](tutorials/jaffle-shop-walkthrough.md)
 

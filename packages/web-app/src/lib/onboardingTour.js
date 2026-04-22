@@ -35,7 +35,7 @@ const TOUR_STEPS = [
     popover: {
       title: "1 · Import your dbt repo",
       description:
-        "Start here. Paste a git URL, pick a local folder, or load the bundled jaffle-shop demo. Every model in <code>manifest.json</code> becomes a DataLex YAML entity — the Explorer on the left fills in immediately.",
+        "Start here. Paste a public git URL (e.g. <code>https://github.com/dbt-labs/jaffle-shop</code>) or pick a local folder. Every model in <code>manifest.json</code> becomes a DataLex YAML entity — the Explorer on the left fills in immediately.",
       side: "bottom",
       align: "start",
     },

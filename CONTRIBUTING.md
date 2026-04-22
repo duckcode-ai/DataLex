@@ -1,52 +1,155 @@
 # Contributing to DataLex
 
-Thanks for contributing. This project includes a React web app, a Node API server, and a Python core/CLI.
+Thanks for contributing. This project is a monorepo with three pieces:
 
-## Development Setup
-1. Clone the repository and enter the project root.
-2. Install Node dependencies:
-   - `npm --prefix packages/api-server install`
-   - `npm --prefix packages/web-app install`
-3. Create Python venv and install requirements:
-   - `python3 -m venv .venv`
-   - `source .venv/bin/activate`
-   - `pip install -r requirements.txt`
+- `packages/core_engine/` — Python loader, dialects, dbt integration, packages
+- `packages/api-server/` — Node.js API the web UI talks to
+- `packages/web-app/` — React/Vite studio (Zustand + React Flow)
+- `packages/cli/` — `datalex` entry point
 
-## Run Locally
-- API: `npm --prefix packages/api-server run dev`
-- Web: `npm --prefix packages/web-app run dev`
-- CLI example: `./datalex validate model-examples/starter-commerce.model.yaml`
+## Development setup
 
-## Branch and PR Flow
+### Prerequisites
+
+- **Python 3.9+** with `pip` and `venv`
+- **Node 20+** (`nvm use 20` if you use nvm)
+- **Git**
+
+### One-time bootstrap
+
+```bash
+git clone https://github.com/duckcode-ai/DataLex.git
+cd DataLex
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e '.[serve,duckdb]'      # core_engine + CLI + connector
+npm --prefix packages/api-server install
+npm --prefix packages/web-app install
+```
+
+`pip install -e '.[serve,duckdb]'` installs `datalex_core` + the `datalex`
+CLI in editable mode and pulls the bundled Node runtime used by
+`datalex serve`. Add more connector extras as needed:
+`'.[serve,postgres,snowflake,bigquery,databricks]'`.
+
+## Running locally
+
+Two supported modes:
+
+### Single-command (production-like)
+
+```bash
+datalex serve --project-dir .
+```
+
+Serves the API and the pre-built web bundle together on
+`http://localhost:3030`. Uses the portable Node that `[serve]`
+installed. Good for smoke-testing a change in a real browser.
+
+### Hot-reload (for UI work)
+
+Two terminals:
+
+```bash
+# Terminal 1 — API on :3006
+npm --prefix packages/api-server run dev
+
+# Terminal 2 — Vite dev server on :5173 with HMR
+#   (vite.config.js proxies /api → :3006 for you)
+npm --prefix packages/web-app run dev
+```
+
+Open `http://localhost:5173`. The Vite proxy forwards every `/api/*`
+call to the api-server, so the UI talks to the live backend while
+HMR rebuilds React components on save.
+
+CLI during development (for package-level hacks): `./datalex <cmd>`.
+
+## Testing
+
+### Python (core_engine + datalex)
+
+```bash
+python3 -m unittest -v tests/test_mvp.py tests/test_cli_dx.py tests/test_policy_engine_v2.py
+./datalex validate-all --schema schemas/model.schema.json
+```
+
+### API server
+
+```bash
+npm --prefix packages/api-server test
+```
+
+### Web app — unit tests (fast, no browser)
+
+```bash
+npm --prefix packages/web-app test
+```
+
+Runs everything in `packages/web-app/tests/*.test.js` via Node's
+built-in test runner.
+
+### Web app — Playwright end-to-end
+
+```bash
+# One-time: install browsers
+npx --prefix packages/web-app playwright install chromium
+
+# Run the suite (starts api + vite via Playwright webServer)
+npm --prefix packages/web-app run test:e2e
+```
+
+The E2E suite clones `https://github.com/dbt-labs/jaffle-shop` into
+`packages/web-app/test-results/jaffle-shop/` on first run and reuses
+the checkout afterwards. It drives the real user journey: import →
+diagram → rename cascade → autosave → auto-commit → dry-run apply.
+
+Offline? `OFFLINE=1 npm --prefix packages/web-app run test:e2e`
+short-circuits global-setup so the rest of the tooling still compiles.
+The critical-path spec is skipped in that mode.
+
+See `packages/web-app/e2e/README.md` for the full story.
+
+## Branch and PR flow
+
 1. Create a branch from `main`.
 2. Keep changes focused and atomic.
-3. Add or update tests for behavior changes.
-4. Run relevant checks before opening PR.
-5. Open PR with clear summary, impact, and test evidence.
+3. Add or update tests for behavior changes (unit **and** E2E when the
+   change affects the UI loop).
+4. Run the relevant test suites locally before opening the PR.
+5. Open the PR with a clear summary, user-visible impact, and test
+   evidence.
 
-## Recommended Checks
-- Python unit tests:
-  - `python3 -m unittest -v tests/test_mvp.py tests/test_cli_dx.py tests/test_policy_engine_v2.py`
-- Web tests:
-  - `npm --prefix packages/web-app test`
-- Validate example models:
-  - `./datalex validate-all --schema schemas/model.schema.json`
+CI runs on every PR:
 
-## Commit Style
-- Use short, imperative commit messages.
-- Include scope when helpful, for example: `docs: update security policy`.
+- `api-server-tests.yml` — `packages/api-server/` unit tests
+- `e2e-tests.yml` — web-app unit tests, then Playwright E2E on a fresh
+  jaffle-shop clone
+- `model-quality.yml` — core_engine unit tests + policy checks
+- `datalex.yml` — `datalex validate` / `diff` / `dbt emit` on touched
+  DataLex projects
 
-## Coding Expectations
-- Keep changes backward compatible unless a breaking change is explicitly discussed.
+## Commit style
+
+- Short, imperative commit messages.
+- Include scope when helpful: `docs: update contributing guide`,
+  `web-app: drop bundled jaffle-shop fixture`.
+
+## Coding expectations
+
+- Keep changes backward compatible unless a breaking change is
+  explicitly discussed.
 - Update docs/examples when behavior or CLI output changes.
 - Avoid committing secrets, credentials, or local environment files.
 
-## Reporting Bugs and Requesting Features
+## Reporting bugs / requesting features
+
 - Open a GitHub issue with reproduction steps and expected behavior.
-- For connector issues, include connector type, redacted config, and failing command/log excerpt.
+- For connector issues, include connector type, redacted config, and
+  the failing command/log excerpt.
 
 ## Cutting a release
+
 See [RELEASING.md](RELEASING.md) for the full process. Short version:
-bump `project.version` in `pyproject.toml`, move items from `[Unreleased]`
-into a new dated section in `CHANGELOG.md`, merge, then push a signed
-`vX.Y.Z` tag. CI publishes to PyPI automatically.
+bump `project.version` in `pyproject.toml`, move items from
+`[Unreleased]` into a new dated section in `CHANGELOG.md`, merge, then
+push a signed `vX.Y.Z` tag. CI publishes to PyPI automatically.

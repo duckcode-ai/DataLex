@@ -1,77 +1,37 @@
 /* Import dbt Repo — entry point for the "I just want to try this with my dbt
- * project" flow. Three input modes share one submit path:
+ * project" flow. Two input modes share one submit path:
  *   1. Local folder (absolute path on the server)
  *   2. Public git URL + optional ref
- *   3. "Load jaffle-shop demo" — one-click load of a known-good dbt project
  *
  * On submit we call `POST /api/dbt/import` (wraps `dm dbt import`) which
  * returns `{tree: [{path, content}], report, project?}`. For local-folder
  * imports with "Edit in place" checked, the server also registers the folder
  * as a DataLex project and returns it; the web-app then binds the tree to
  * that project so Save All writes edits back into the original dbt repo
- * at each file's source path. Without "Edit in place" (or for git/demo
- * imports), the tree lives in memory only.
+ * at each file's source path. Without "Edit in place" (or for git imports),
+ * the tree lives in memory only.
  *
- * The jaffle-shop demo tries a checked-in local fixture first (via Vite's
- * `import.meta.glob`) and falls back to the public git URL so `dm serve`
- * works offline when the fixture is present and degrades gracefully when
- * it isn't.
+ * To try DataLex with a canonical dbt project, paste the public jaffle-shop
+ * repo URL into the Git URL tab: https://github.com/dbt-labs/jaffle-shop
  */
 import React, { useState } from "react";
-import { GitBranch, FolderOpen, Sparkles, AlertCircle, Loader2 } from "lucide-react";
+import { GitBranch, FolderOpen, AlertCircle, Loader2 } from "lucide-react";
 import Modal from "./Modal";
+import ImportResultsPanel from "./ImportResultsPanel";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { importDbtProject } from "../../lib/api";
 
-// Vite-native glob-import of the checked-in jaffle-shop fixture.
-// `{as: "raw"}` returns the file content as a plain string (YAML text), and
-// the `eager: true` default we set below loads all files at build time so
-// "Load demo" is instant and offline-ready. The bundle cost is ~few KB
-// because the fixture is small — much cheaper than a round-trip to
-// GitHub every time a user clicks the button.
-//
-// When the fixture directory doesn't exist, the glob resolves to an empty
-// object and the demo falls back to the network path automatically.
-const JAFFLE_FIXTURE = (() => {
-  try {
-    // eslint-disable-next-line no-undef
-    return import.meta.glob("../../fixtures/jaffle-shop/**/*.{yaml,yml}", {
-      query: "?raw",
-      import: "default",
-      eager: true,
-    });
-  } catch (_err) {
-    return {};
-  }
-})();
-
-const JAFFLE_GIT_URL = "https://github.com/dbt-labs/jaffle-shop.git";
-const JAFFLE_GIT_REF = "main";
-
-function loadJaffleFixture() {
-  // With `eager: true`, values are strings — no async loader to await.
-  const entries = Object.entries(JAFFLE_FIXTURE);
-  if (entries.length === 0) return null;
-  const tree = [];
-  for (const [fullPath, content] of entries) {
-    const rel = fullPath.replace(/^.*\/fixtures\/jaffle-shop\//, "");
-    tree.push({ path: rel, content: String(content || "") });
-  }
-  return tree.length > 0 ? tree : null;
-}
-
 const TABS = [
-  { id: "demo",   label: "Demo",         icon: Sparkles },
-  { id: "folder", label: "Local folder", icon: FolderOpen },
   { id: "git",    label: "Git URL",      icon: GitBranch },
+  { id: "folder", label: "Local folder", icon: FolderOpen },
 ];
 
 export default function ImportDbtRepoDialog() {
   const { closeModal, addToast } = useUiStore();
   const { loadDbtImportTree, loadDbtImportTreeAsProject } = useWorkspaceStore();
 
-  const [tab, setTab] = useState("demo");
+  const [tab, setTab] = useState("git");
 
   // Folder mode
   const [folder, setFolder] = useState("");
@@ -90,36 +50,23 @@ export default function ImportDbtRepoDialog() {
   const [progress, setProgress] = useState(""); // human-readable current step
   const [error, setError] = useState("");
 
+  // Import Results panel state — after a successful import we stash the
+  // SyncReport + tree and keep the dialog open so the user can inspect
+  // gaps (unknown types, unresolved rels, manifest-only banner) before
+  // jumping into the canvas. `openProject` is the deferred action we
+  // invoke when the user clicks "Open project" in the panel.
+  const [results, setResults] = useState(null); // { report, tree, sourceLabel, openProject }
+
   const canSubmit =
     !submitting &&
-    ((tab === "demo") ||
-      (tab === "folder" && folder.trim()) ||
+    ((tab === "folder" && folder.trim()) ||
       (tab === "git" && gitUrl.trim()));
 
-  const ingestTree = async (tree, label) => {
-    await loadDbtImportTree(tree, { sourceLabel: label });
-    addToast({
-      type: "success",
-      message: `Loaded ${tree.length} file${tree.length === 1 ? "" : "s"} from ${label}.`,
-    });
-    closeModal();
-  };
-
-  const handleDemo = async () => {
-    setProgress("Loading bundled jaffle-shop fixture…");
-    const local = loadJaffleFixture();
-    if (local) {
-      await ingestTree(local, "jaffle-shop demo");
-      return;
-    }
-    // Fall back to network import via the api-server.
-    setProgress("No bundled fixture — cloning from GitHub…");
-    const res = await importDbtProject({
-      gitUrl: JAFFLE_GIT_URL,
-      gitRef: JAFFLE_GIT_REF,
-      skipWarehouse: true,
-    });
-    await ingestTree(res.tree || [], "jaffle-shop (github)");
+  // Show the Import Results panel instead of closing. The actual load of
+  // the tree into the workspace is deferred to the panel's "Open project"
+  // button via `openProject`.
+  const showResults = ({ tree, report, sourceLabel, openProject }) => {
+    setResults({ tree: tree || [], report: report || null, sourceLabel, openProject });
   };
 
   const handleFolder = async () => {
@@ -131,39 +78,53 @@ export default function ImportDbtRepoDialog() {
       editInPlace: !!editInPlace,
     });
     const tree = res.tree || [];
-    // When the api-server registered a project for us, bind the tree to it so
-    // Save All writes back into the dbt repo. Otherwise fall back to the
-    // in-memory loader (explore-only).
-    if (editInPlace && res.project && res.project.id) {
-      await loadDbtImportTreeAsProject(tree, res.project);
-      const n = tree.length;
-      addToast({
-        type: "success",
-        message: `Opened ${dir} in place — ${n} file${n === 1 ? "" : "s"}. Save All writes back into this folder.`,
-      });
-      // Collision warning: shared schema.yml files will clobber sibling
-      // models on save until the Phase-2 merge path lands.
-      const collisions = useWorkspaceStore.getState().dbtImportCollisions || [];
-      if (collisions.length) {
+
+    const openProject = async () => {
+      if (editInPlace && res.project && res.project.id) {
+        await loadDbtImportTreeAsProject(tree, res.project);
         addToast({
-          type: "warning",
-          message: `${collisions.length} shared schema file${collisions.length === 1 ? "" : "s"} detected; saves may overwrite sibling models. See Save All preview.`,
+          type: "success",
+          message: `Opened ${dir} in place — ${tree.length} file${tree.length === 1 ? "" : "s"}. Save All writes back into this folder.`,
+        });
+        const collisions = useWorkspaceStore.getState().dbtImportCollisions || [];
+        if (collisions.length) {
+          addToast({
+            type: "warning",
+            message: `${collisions.length} shared schema file${collisions.length === 1 ? "" : "s"} detected; saves may overwrite sibling models. See Save All preview.`,
+          });
+        }
+      } else {
+        await loadDbtImportTree(tree, { sourceLabel: dir });
+        addToast({
+          type: "success",
+          message: `Loaded ${tree.length} file${tree.length === 1 ? "" : "s"} from ${dir}.`,
         });
       }
-      closeModal();
-      return;
-    }
-    await ingestTree(tree, dir);
+    };
+
+    showResults({ tree, report: res.report || null, sourceLabel: dir, openProject });
   };
 
   const handleGit = async () => {
-    setProgress(`Cloning ${gitUrl.trim()}…`);
+    const label = gitUrl.trim();
+    setProgress(`Cloning ${label}…`);
     const res = await importDbtProject({
-      gitUrl: gitUrl.trim(),
+      gitUrl: label,
       gitRef: gitRef.trim() || "main",
       skipWarehouse,
     });
-    await ingestTree(res.tree || [], gitUrl.trim());
+    showResults({
+      tree: res.tree || [],
+      report: res.report || null,
+      sourceLabel: label,
+      openProject: async () => {
+        await loadDbtImportTree(res.tree || [], { sourceLabel: label });
+        addToast({
+          type: "success",
+          message: `Loaded ${(res.tree || []).length} file${(res.tree || []).length === 1 ? "" : "s"} from ${label}.`,
+        });
+      },
+    });
   };
 
   const handleSubmit = async (e) => {
@@ -173,8 +134,7 @@ export default function ImportDbtRepoDialog() {
     setError("");
     setProgress("");
     try {
-      if (tab === "demo") await handleDemo();
-      else if (tab === "folder") await handleFolder();
+      if (tab === "folder") await handleFolder();
       else if (tab === "git") await handleGit();
     } catch (err) {
       setError(err?.message || String(err) || "Import failed.");
@@ -183,6 +143,38 @@ export default function ImportDbtRepoDialog() {
       setProgress("");
     }
   };
+
+  // Once the import resolves we swap the form out for the Results panel.
+  if (results) {
+    const handleOpen = async () => {
+      try {
+        if (results.openProject) await results.openProject();
+      } finally {
+        closeModal();
+      }
+    };
+    return (
+      <Modal
+        icon={<GitBranch size={14} />}
+        title="Import complete"
+        subtitle="Review the report below, then open the project."
+        size="lg"
+        onClose={closeModal}
+        footer={
+          <button type="button" className="panel-btn" onClick={closeModal}>
+            Close
+          </button>
+        }
+      >
+        <ImportResultsPanel
+          report={results.report}
+          tree={results.tree}
+          sourceLabel={results.sourceLabel}
+          onClose={handleOpen}
+        />
+      </Modal>
+    );
+  }
 
   return (
     <Modal
@@ -212,8 +204,6 @@ export default function ImportDbtRepoDialog() {
                 <Loader2 size={12} style={{ animation: "spin 1s linear infinite" }} />
                 Importing…
               </span>
-            ) : tab === "demo" ? (
-              "Load demo"
             ) : (
               "Import"
             )}
@@ -266,49 +256,6 @@ export default function ImportDbtRepoDialog() {
             );
           })}
         </div>
-
-        {tab === "demo" && (
-          <div className="dlx-modal-section">
-            <div
-              style={{
-                display: "flex",
-                gap: 12,
-                padding: 14,
-                background: "var(--bg-2)",
-                border: "1px solid var(--border-default)",
-                borderRadius: 8,
-              }}
-            >
-              <div
-                style={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 8,
-                  background: "var(--accent-dim)",
-                  display: "grid",
-                  placeItems: "center",
-                  flexShrink: 0,
-                }}
-              >
-                <Sparkles size={16} color="var(--accent)" />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
-                  dbt-labs / jaffle-shop
-                </div>
-                <div style={{ fontSize: 12, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
-                  The canonical dbt demo project — staging models, marts, seeds, tests.
-                  Great for exploring DataLex without wiring up your own repo.
-                </div>
-                <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 8, fontFamily: "var(--font-mono)" }}>
-                  {Object.keys(JAFFLE_FIXTURE).length > 0
-                    ? `${Object.keys(JAFFLE_FIXTURE).length} bundled files • offline`
-                    : `via ${JAFFLE_GIT_URL.replace(/\.git$/, "")}`}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {tab === "folder" && (
           <div className="dlx-modal-section">
@@ -377,8 +324,9 @@ export default function ImportDbtRepoDialog() {
                 autoFocus
               />
               <p className="dlx-modal-hint">
-                Public HTTPS URL. For private repos, clone locally and use the{" "}
-                <strong>Local folder</strong> tab.
+                Public HTTPS URL. To try it with a canonical dbt project, paste{" "}
+                <code>https://github.com/dbt-labs/jaffle-shop</code>. For private repos,
+                clone locally and use the <strong>Local folder</strong> tab.
               </p>
             </div>
             <div className="dlx-modal-section">
@@ -398,28 +346,26 @@ export default function ImportDbtRepoDialog() {
           </>
         )}
 
-        {(tab === "folder" || tab === "git") && (
-          <div className="dlx-modal-section">
-            <label
-              className="dlx-check"
-              style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: submitting ? "not-allowed" : "pointer" }}
-            >
-              <input
-                type="checkbox"
-                checked={skipWarehouse}
-                onChange={(e) => setSkipWarehouse(e.target.checked)}
-                disabled={submitting}
-              />
-              <span style={{ fontSize: 12 }}>
-                Skip live warehouse introspection
-                <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
-                  Recommended. Uses <code>manifest.json</code> only — avoids needing dbt
-                  profiles or warehouse credentials for the import.
-                </span>
+        <div className="dlx-modal-section">
+          <label
+            className="dlx-check"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: submitting ? "not-allowed" : "pointer" }}
+          >
+            <input
+              type="checkbox"
+              checked={skipWarehouse}
+              onChange={(e) => setSkipWarehouse(e.target.checked)}
+              disabled={submitting}
+            />
+            <span style={{ fontSize: 12 }}>
+              Skip live warehouse introspection
+              <span style={{ display: "block", fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>
+                Recommended. Uses <code>manifest.json</code> only — avoids needing dbt
+                profiles or warehouse credentials for the import.
               </span>
-            </label>
-          </div>
-        )}
+            </span>
+          </label>
+        </div>
 
         {progress && !error && (
           <div
