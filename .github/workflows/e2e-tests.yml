@@ -47,9 +47,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      # DataLex core_engine is needed by /api/dbt/import
-      - name: Install core_engine
-        working-directory: packages/core_engine
+      # DataLex core_engine is needed by /api/dbt/import. The Python
+      # project root lives at the repo top-level (pyproject.toml); the
+      # `datalex_core` package is resolved via the setuptools package
+      # discovery declared there.
+      - name: Install datalex-cli (core_engine + CLI)
+        working-directory: .
         run: pip install -e .
       - name: Install api-server deps
         working-directory: packages/api-server
