@@ -23,6 +23,9 @@ const MAX_ZOOM = 2.25;
 
 function estimateTableBounds(table) {
   const width = Number.isFinite(Number(table?.width)) ? Number(table.width) : 240;
+  if (String(table?.modelKind || "").toLowerCase() === "conceptual") {
+    return { width, height: 164 };
+  }
   const rowCount = Array.isArray(table?.columns) ? table.columns.length : 0;
   const bodyHeight = Math.max(1, rowCount) * 26;
   const footerHeight = table?.kind === "ENUM" ? 0 : 28;
@@ -68,10 +71,12 @@ function getWorldBounds(tables) {
   };
 }
 
-function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus, zoom }) {
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus, zoom, modelKind }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
+  const conceptual = String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual";
+  const logical = String(modelKind || table?.modelKind || "").toLowerCase() === "logical";
 
   const hasValue = (value) => value != null && String(value).trim() !== "";
 
@@ -137,6 +142,17 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     outline: `2px solid ${diffTheme.stroke}`,
     outlineOffset: 2,
   } : null;
+  const summaryBadges = [
+    table?.type || table?.kind || (conceptual ? "concept" : logical ? "logical" : "table"),
+    table?.subject_area || table?.subject || "",
+    table?.domain || "",
+  ].filter(Boolean);
+  const conceptPreview = [
+    table?.description || "",
+    table?.owner ? `Owner: ${table.owner}` : "",
+    Array.isArray(table?.terms) && table.terms.length ? `Terms: ${table.terms.slice(0, 2).join(", ")}` : "",
+    Array.isArray(table?.tags) && table.tags.length ? `Tags: ${table.tags.slice(0, 3).join(", ")}` : "",
+  ].filter(Boolean);
 
   return (
     <div
@@ -147,9 +163,9 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
       onMouseDown={onMouseDown}
     >
       <div className="tc-header">
-        {table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
+        {conceptual ? <I.Boxes /> : table.kind === "ENUM" ? <I.Enum /> : table.junction ? <I.Junction /> : <I.Table />}
         <span className="tc-name">{table.name}</span>
-        <span className="tc-schema">{table.schema}</span>
+        <span className="tc-schema">{conceptual ? "conceptual" : logical ? "logical" : table.schema}</span>
         <div className="tc-badges">
           {diffTheme && (
             <span
@@ -169,41 +185,80 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
           ))}
         </div>
       </div>
-      <div className="tc-rows">
-        {table.columns.map((c) => {
-          const isPk = c.pk;
-          const isFk = !!c.fk || !!c.semanticFk;
-          const flags = colFlags(c);
-          return (
-            <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
-              <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
-                {isPk ? <I.Key /> : isFk ? <I.Link /> : (
-                  <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-muted)" }} />
-                )}
+      {conceptual ? (
+        <>
+          <div style={{ padding: "10px 12px 8px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {summaryBadges.map((badge) => (
+              <span
+                key={badge}
+                style={{
+                  fontSize: 10,
+                  padding: "2px 6px",
+                  borderRadius: 999,
+                  background: "rgba(148,163,184,0.12)",
+                  border: "1px solid var(--border-default)",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {badge}
+              </span>
+            ))}
+          </div>
+          <div style={{ padding: "0 12px 12px", display: "grid", gap: 6 }}>
+            {conceptPreview.length ? conceptPreview.slice(0, 3).map((line) => (
+              <div key={line} style={{ fontSize: 11, color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                {line}
               </div>
-              <div className="tc-col">{c.name}</div>
-              <div className="tc-type">{c.type}</div>
-              <div className="tc-colflags">
-                {flags.map((f) => (
-                  <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
-                    <f.I />
-                  </span>
-                ))}
-                {flags.length === 0 && (
-                  <span className="tc-nn" title="No constraints">
-                    ·
-                  </span>
-                )}
+            )) : (
+              <div style={{ fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.4 }}>
+                Business concept card. Add description, owner, terms, and domain context in the inspector.
               </div>
+            )}
+          </div>
+          <div className="tc-footer">
+            <span>{table.columns.length} attributes</span>
+            <span>{Array.isArray(table.tags) ? table.tags.length : 0} tags</span>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="tc-rows">
+            {table.columns.map((c) => {
+              const isPk = c.pk;
+              const isFk = !!c.fk || !!c.semanticFk;
+              const flags = colFlags(c);
+              return (
+                <div key={c.name} className={`tc-row ${isPk ? "pk" : ""}`} data-col={c.name}>
+                  <div className={`tc-key ${isPk ? "pk" : ""} ${isFk ? "fk" : ""}`}>
+                    {isPk ? <I.Key /> : isFk ? <I.Link /> : (
+                      <span style={{ width: 3, height: 3, borderRadius: "50%", background: "var(--text-muted)" }} />
+                    )}
+                  </div>
+                  <div className="tc-col">{c.name}</div>
+                  <div className="tc-type">{c.type}</div>
+                  <div className="tc-colflags">
+                    {flags.map((f) => (
+                      <span key={f.k} className={`tc-cf tc-cf-${f.k.toLowerCase()}`} title={f.title}>
+                        <f.I />
+                      </span>
+                    ))}
+                    {flags.length === 0 && (
+                      <span className="tc-nn" title="No constraints">
+                        ·
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          {table.kind !== "ENUM" && (
+            <div className="tc-footer">
+              <span>{table.columns.length} cols</span>
+              <span>{table.rowCount}{typeof table.rowCount === "number" ? " rows" : ""}</span>
             </div>
-          );
-        })}
-      </div>
-      {table.kind !== "ENUM" && (
-        <div className="tc-footer">
-          <span>{table.columns.length} cols</span>
-          <span>{table.rowCount}{typeof table.rowCount === "number" ? " rows" : ""}</span>
-        </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -518,7 +573,7 @@ function Legend({ open, onToggle }) {
   );
 }
 
-export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, legendOpen, setLegendOpen }) {
+export default function Canvas({ tables, setTables, relationships, areas, selected, onSelect, onMoveEnd, onConnect, onDropYamlSource, onDeleteEntity, onDeleteRelationship, onAutoLayout, onFit, onExport, title, engine, modelKind = "physical", legendOpen, setLegendOpen }) {
   // Git-diff overlay (v0.4.2). Subscribe to the entity→status map so each
   // TableCard can render an ADD/MOD/DEL decoration. Pulled here at the
   // Canvas level (not individual TableCards) so every card reads the same
@@ -699,6 +754,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
           <p>
             <span className="engine">{engine}</span>
             <span className="dot" />
+            <span>{modelKind}</span>
+            <span className="dot" />
             <span>{tables.length} objects</span>
             <span className="dot" />
             <span>{relationships.length} relationships</span>
@@ -707,7 +764,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
         <div className="canvas-actions">
           <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
           <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
-          <button className="canvas-btn" onClick={() => onExport && onExport()} title="Export DDL / SQL"><I.Download />Export</button>
+          {onExport && <button className="canvas-btn" onClick={() => onExport()} title="Export DDL / SQL"><I.Download />Export</button>}
         </div>
       </div>
 
@@ -767,7 +824,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                            onMoveEnd={onMoveEnd}
                            onStartConnect={handleStartConnect}
                            diffStatus={diffEntities[t.name] || diffEntities[t.id] || null}
-                           zoom={zoom} />
+                           zoom={zoom}
+                           modelKind={modelKind} />
               </NodeErrorBoundary>
             ))}
             {connectDrag && (

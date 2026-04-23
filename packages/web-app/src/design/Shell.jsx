@@ -1231,6 +1231,7 @@ export default function Shell() {
           onExport={canRunForwardSql ? () => openModal("exportDdl") : undefined}
           title={schema.name}
           engine={schema.engine}
+          modelKind={activeModelKind}
           legendOpen={legendOpen}
           setLegendOpen={setLegendOpen}
         />
