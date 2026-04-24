@@ -84,13 +84,17 @@ export function buildAiProposalPreviewData(change) {
     path,
     kind: isDiagram ? "diagram" : "model",
     nodes,
-    relationships: relationships.map((relationship, index) => ({
-      name: cleanName(relationship?.name || relationship?.verb || `relationship_${index + 1}`),
-      from: endpointName(relationship?.from),
-      to: endpointName(relationship?.to),
-      cardinality: cleanName(relationship?.cardinality || relationship?.type || relationship?.relationship_type || "", ""),
-      verb: cleanName(relationship?.verb || relationship?.description || "", ""),
-    })).filter((relationship) => relationship.from && relationship.to),
+    relationships: relationships.map((relationship, index) => {
+      const verb = cleanName(relationship?.verb || "", "");
+      return {
+        name: cleanName(relationship?.name || verb || `relationship_${index + 1}`),
+        from: endpointName(relationship?.from),
+        to: endpointName(relationship?.to),
+        cardinality: cleanName(relationship?.cardinality || relationship?.type || relationship?.relationship_type || "", ""),
+        verb,
+        description: cleanName(relationship?.description || "", ""),
+      };
+    }).filter((relationship) => relationship.from && relationship.to),
   };
 }
 
@@ -100,17 +104,40 @@ function relationshipLabel(relationship) {
   return relationship.name;
 }
 
+function cardinalityLabel(value) {
+  return String(value || "").replace(/_/g, ":").replace("one", "1").replace("many", "N") || "relationship";
+}
+
+function relationshipSentence(relationship) {
+  const label = relationshipLabel(relationship);
+  const base = label
+    ? `${relationship.from} ${label} ${relationship.to}.`
+    : `${relationship.from} relates to ${relationship.to}.`;
+  if (relationship.description && relationship.description !== relationship.verb) return relationship.description;
+  if (!relationship.cardinality) return base;
+  return `${base} Cardinality: ${cardinalityLabel(relationship.cardinality)}.`;
+}
+
 export default function AiProposalPreview({ change, compact = false }) {
   const preview = buildAiProposalPreviewData(change);
   if (!preview) return null;
-  const nodeByName = new Map(preview.nodes.map((node) => [node.name, node]));
-  const width = Math.max(520, ...preview.nodes.map((node) => node.x + 170), 520);
-  const height = Math.max(260, ...preview.nodes.map((node) => node.y + 92), 260);
-  const nodeWidth = compact ? 132 : 154;
-  const nodeHeight = compact ? 58 : 72;
+  const nodeWidth = compact ? 190 : 220;
+  const nodeHeight = compact ? 86 : 104;
+  const maxSourceX = Math.max(0, ...preview.nodes.map((node) => node.x || 0));
+  const maxSourceY = Math.max(0, ...preview.nodes.map((node) => node.y || 0));
+  const scaleX = maxSourceX > 0 ? (compact ? 1.18 : 1.35) : 1;
+  const scaleY = maxSourceY > 0 ? (compact ? 1.12 : 1.28) : 1;
+  const nodes = preview.nodes.map((node) => ({
+    ...node,
+    x: Math.max(40, Math.round(node.x * scaleX)),
+    y: Math.max(42, Math.round(node.y * scaleY)),
+  }));
+  const layoutNodeByName = new Map(nodes.map((node) => [node.name, node]));
+  const width = Math.max(compact ? 820 : 980, ...nodes.map((node) => node.x + nodeWidth + 72));
+  const height = Math.max(compact ? 430 : 520, ...nodes.map((node) => node.y + nodeHeight + 70));
 
   return (
-    <div className="ai-proposal-preview">
+    <div className={`ai-proposal-preview ${compact ? "compact" : "expanded"}`}>
       <div className="ai-proposal-preview-head">
         <div>
           <strong>{preview.title}</strong>
@@ -131,8 +158,8 @@ export default function AiProposalPreview({ change, compact = false }) {
             </marker>
           </defs>
           {preview.relationships.map((relationship, index) => {
-            const from = nodeByName.get(relationship.from);
-            const to = nodeByName.get(relationship.to);
+            const from = layoutNodeByName.get(relationship.from);
+            const to = layoutNodeByName.get(relationship.to);
             if (!from || !to) return null;
             const x1 = from.x + nodeWidth;
             const y1 = from.y + nodeHeight / 2;
@@ -147,18 +174,37 @@ export default function AiProposalPreview({ change, compact = false }) {
               </g>
             );
           })}
-          {preview.nodes.map((node) => (
+          {nodes.map((node) => (
             <g key={node.name} className="ai-proposal-preview-node" transform={`translate(${node.x}, ${node.y})`}>
               <rect width={nodeWidth} height={nodeHeight} rx="12" />
-              <text className="node-title" x="12" y="22">{node.name}</text>
-              <text className="node-meta" x="12" y="40">{node.type || node.subjectArea || preview.layer || "model object"}</text>
+              <text className="node-title" x="14" y="26">{node.name}</text>
+              <text className="node-meta" x="14" y="48">{node.type || node.subjectArea || preview.layer || "model object"}</text>
+              {node.subjectArea && <text className="node-field" x="14" y="66">{node.subjectArea}</text>}
               {!compact && node.fields.slice(0, 2).map((field, index) => (
-                <text key={field} className="node-field" x="12" y={57 + index * 12}>{field}</text>
+                <text key={field} className="node-field" x="14" y={84 + index * 14}>{field}</text>
               ))}
             </g>
           ))}
         </svg>
       </div>
+      {preview.relationships.length > 0 ? (
+        <div className="ai-proposal-preview-meaning">
+          <div className="ai-mini-heading">Business flow</div>
+          {preview.relationships.map((relationship, index) => (
+            <div key={`${relationship.name}-meaning-${index}`} className="ai-proposal-flow-row">
+              <strong>{relationship.from}</strong>
+              <span>{relationshipLabel(relationship)}</span>
+              <strong>{relationship.to}</strong>
+              <small>{relationshipSentence(relationship)}</small>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="ai-proposal-preview-meaning empty">
+          <div className="ai-mini-heading">Business flow</div>
+          <span>No relationships proposed yet. A flow proposal should include business relationships before apply.</span>
+        </div>
+      )}
     </div>
   );
 }
