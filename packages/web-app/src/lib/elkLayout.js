@@ -81,6 +81,9 @@ function estimateNodeSize(node, options = {}) {
   const fieldView = options.fieldView || "all";
   const isLargeGraph = Boolean(options.isLargeGraph);
   const isEntityNode = node?.type === "entityNode";
+  const modelKind = String(options.modelKind || node?.data?.modelKind || node?.data?.modelingViewMode || "").toLowerCase();
+  const nodeType = String(node?.data?.type || node?.data?.entityType || "").toLowerCase();
+  const isConceptual = modelKind === "conceptual" || nodeType === "concept";
 
   if (!isEntityNode) {
     return {
@@ -91,6 +94,25 @@ function estimateNodeSize(node, options = {}) {
 
   if (isLargeGraph) {
     return { width: COMPACT_NODE_WIDTH, height: COMPACT_NODE_HEIGHT };
+  }
+
+  if (isConceptual) {
+    const description = String(node?.data?.description || "");
+    const tags = Array.isArray(node?.data?.tags) ? node.data.tags : [];
+    const terms = Array.isArray(node?.data?.terms) ? node.data.terms : [];
+    const explicitWidth = Number(node?.data?.width || node?.width);
+    let height = 142;
+    if (description.length > 90) height += 24;
+    if (description.length > 160) height += 18;
+    if (tags.length > 0 || terms.length > 0) height += 22;
+    if (node?.data?.subject_area || node?.data?.owner) height += 16;
+
+    return {
+      // Use a larger layout footprint than the visual card so long labels,
+      // handles, and business relationship text have readable air around them.
+      width: Math.max(Number.isFinite(explicitWidth) ? explicitWidth : 0, 300),
+      height: Math.max(160, Math.min(240, Math.round(height))),
+    };
   }
 
   const fields = Array.isArray(node?.data?.fields) ? node.data.fields : [];
@@ -203,6 +225,12 @@ export async function layoutWithElk(nodes, edges, options = {}) {
   const direction = parsed.direction || "RIGHT";
   const density = parsed.density || "normal";
   const fieldView = parsed.fieldView || "all";
+  const modelKind = String(parsed.modelKind || "").toLowerCase();
+  const isConceptualLayout = modelKind === "conceptual" || nodes.some((node) => {
+    const type = String(node?.data?.type || node?.data?.entityType || "").toLowerCase();
+    const kind = String(node?.data?.modelKind || node?.data?.modelingViewMode || "").toLowerCase();
+    return type === "concept" || kind === "conceptual";
+  });
 
   // Grid gives cleaner non-overlapping results for disconnected or very large models.
   if ((edges || []).length === 0 || nodes.length >= VERY_LARGE_GRAPH_THRESHOLD) {
@@ -210,11 +238,13 @@ export async function layoutWithElk(nodes, edges, options = {}) {
   }
 
   const spacingMultiplier = density === "compact" ? 0.7 : density === "wide" ? 1.4 : 1;
-  const nodeSpacing = Math.round(90 * spacingMultiplier);
-  const layerSpacing = Math.round(140 * spacingMultiplier);
+  const readabilityMultiplier = isConceptualLayout ? 1.35 : 1;
+  const nodeSpacing = Math.round(90 * spacingMultiplier * readabilityMultiplier);
+  const layerSpacing = Math.round(140 * spacingMultiplier * (isConceptualLayout ? 1.65 : 1));
+  const edgeNodeSpacing = Math.round((isConceptualLayout ? 86 : 48) * spacingMultiplier);
 
   const isLargeGraph = nodes.length > LARGE_GRAPH_THRESHOLD;
-  const nodeSizes = buildSizeMap(nodes, { isLargeGraph, fieldView });
+  const nodeSizes = buildSizeMap(nodes, { isLargeGraph, fieldView, modelKind });
 
   const elkNodes = nodes.map((node) => ({
     id: node.id,
@@ -235,6 +265,11 @@ export async function layoutWithElk(nodes, edges, options = {}) {
         "elk.direction": direction,
         "elk.spacing.nodeNode": String(nodeSpacing),
         "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
+        "elk.layered.spacing.edgeNodeBetweenLayers": String(edgeNodeSpacing),
+        "elk.layered.spacing.edgeEdgeBetweenLayers": String(Math.round(edgeNodeSpacing * 0.65)),
+        "elk.padding": isConceptualLayout
+          ? "[top=90,left=90,bottom=90,right=120]"
+          : LAYOUT_OPTIONS["elk.padding"],
       };
 
   const graph = {
@@ -280,6 +315,7 @@ export function fallbackGridLayout(nodes, edges, options = "normal") {
   const sizes = buildSizeMap(nodes, {
     isLargeGraph: nodes.length > LARGE_GRAPH_THRESHOLD,
     fieldView,
+    modelKind: parsed.modelKind,
   });
 
   const groups = new Map();
@@ -297,11 +333,14 @@ export function fallbackGridLayout(nodes, edges, options = "normal") {
     .sort((a, b) => b[1].length - a[1].length)
     .map(([name, groupNodes]) => ({ name, nodes: groupNodes }));
 
-  const innerPadding = Math.round(24 * scale);
-  const nodeGapX = Math.round(64 * scale);
-  const nodeGapY = Math.round(54 * scale);
-  const groupGapX = Math.round(110 * scale);
-  const groupGapY = Math.round(90 * scale);
+  const isConceptualLayout = String(parsed.modelKind || "").toLowerCase() === "conceptual"
+    || nodes.some((node) => String(node?.data?.type || node?.data?.entityType || "").toLowerCase() === "concept");
+  const readableScale = isConceptualLayout ? 1.25 : 1;
+  const innerPadding = Math.round(24 * scale * readableScale);
+  const nodeGapX = Math.round(64 * scale * readableScale);
+  const nodeGapY = Math.round(54 * scale * readableScale);
+  const groupGapX = Math.round(110 * scale * readableScale);
+  const groupGapY = Math.round(90 * scale * readableScale);
   const groupTitleHeight = groupBySubjectArea && orderedGroups.length > 1 ? Math.round(24 * scale) : 0;
 
   const groupLayouts = orderedGroups.map((group) => {

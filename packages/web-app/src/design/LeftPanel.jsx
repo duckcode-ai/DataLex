@@ -198,6 +198,125 @@ function buildSkillContent({ name, description, useWhen, tags, layers, agentMode
   ].join("\n");
 }
 
+function flattenFolderOptions(nodes, moving = null) {
+  const movingPath = String(moving?.path || "").replace(/\/+$/g, "");
+  const out = [{ path: "", label: "DataLex root" }];
+  const visit = (items) => {
+    for (const node of items || []) {
+      if (node.kind !== "folder") continue;
+      const path = String(node.path || "").replace(/\/+$/g, "");
+      const isSelfOrChild = moving?.target === "folder" && (
+        path === movingPath || path.startsWith(`${movingPath}/`)
+      );
+      if (!isSelfOrChild) {
+        out.push({ path, label: path });
+        visit(node.children || []);
+      }
+    }
+  };
+  visit(nodes || []);
+  return out;
+}
+
+function basenameFromPath(path) {
+  return String(path || "").replace(/\/+$/g, "").split("/").filter(Boolean).pop() || "";
+}
+
+function joinExplorerPath(parent, name) {
+  const base = String(parent || "").replace(/^\/+|\/+$/g, "");
+  const clean = String(name || "").replace(/^\/+|\/+$/g, "");
+  return base ? `${base}/${clean}` : clean;
+}
+
+function MoveExplorerItemDialog({ moveState, folders, onClose, onMove }) {
+  const [destination, setDestination] = React.useState("");
+  const [name, setName] = React.useState(() => basenameFromPath(moveState?.path));
+  const [filter, setFilter] = React.useState("");
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  React.useEffect(() => {
+    setDestination("");
+    setName(basenameFromPath(moveState?.path));
+    setFilter("");
+    setBusy(false);
+    setError("");
+  }, [moveState]);
+  if (!moveState) return null;
+  const filteredFolders = folders.filter((folder) => {
+    const haystack = `${folder.label} ${folder.path}`.toLowerCase();
+    return !filter || haystack.includes(filter.toLowerCase());
+  });
+  const targetPath = joinExplorerPath(destination, name);
+  const canMove = targetPath && targetPath !== moveState.path && !busy;
+  const submit = async () => {
+    if (!canMove) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onMove(moveState, targetPath);
+      onClose();
+    } catch (err) {
+      setError(err?.message || String(err));
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="dlx-modal-overlay move-explorer-overlay" role="presentation" onMouseDown={onClose}>
+      <div className="dlx-modal-card md move-explorer-card" role="dialog" aria-modal="true" aria-label="Move workspace item" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="dlx-modal-header">
+          <div className="dlx-modal-title-group">
+            <div className="dlx-modal-icon">↗</div>
+            <div>
+              <div className="dlx-modal-title">Move {moveState.target === "folder" ? "Folder" : "File"}</div>
+              <div className="dlx-modal-subtitle">{moveState.path}</div>
+            </div>
+          </div>
+          <button className="dlx-modal-close" type="button" onClick={onClose}>×</button>
+        </div>
+        <div className="dlx-modal-body loose">
+          <label className="dlx-modal-field-label">
+            Destination folder
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Search folders..."
+              autoFocus
+            />
+          </label>
+          <div className="move-explorer-folder-list">
+            {filteredFolders.map((folder) => (
+              <button
+                key={folder.path || "__root__"}
+                type="button"
+                className={`move-explorer-folder ${destination === folder.path ? "active" : ""}`}
+                onClick={() => setDestination(folder.path)}
+              >
+                <span>{folder.path ? folder.label : "DataLex root"}</span>
+                {destination === folder.path && <strong>Selected</strong>}
+              </button>
+            ))}
+          </div>
+          <label className="dlx-modal-field-label">
+            Name after move
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="file-or-folder-name" />
+          </label>
+          <div className="move-explorer-preview">
+            <span>Destination</span>
+            <code>{targetPath || "(choose a destination)"}</code>
+          </div>
+          {error && <div className="dlx-modal-alert warn">{error}</div>}
+        </div>
+        <div className="dlx-modal-footer">
+          <button type="button" className="panel-btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="panel-btn primary" onClick={submit} disabled={!canMove}>
+            {busy ? "Moving..." : "Move"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("OBJECTS");
@@ -315,6 +434,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
 
   // Context menu + drag state. `ctxMenu` is `{x, y, target, path}` or null.
   const [ctxMenu, setCtxMenu] = React.useState(null);
+  const [moveState, setMoveState] = React.useState(null);
   const dragStateRef = React.useRef({ path: "", at: 0 });
 
   const openCtxMenu = React.useCallback((e, target, path) => {
@@ -325,6 +445,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   }, [explorerReady]);
 
   const closeCtxMenu = React.useCallback(() => setCtxMenu(null), []);
+  const folderOptions = React.useMemo(() => flattenFolderOptions(fileTree, moveState), [fileTree, moveState]);
 
   // Combine a parent folder path with a child name into a POSIX subpath.
   const joinChild = React.useCallback((parent, name) => {
@@ -383,10 +504,8 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
           console.warn("[datalex] rename-cascade failures:", cascade.failures);
         }
       } else if (actionId === "move") {
-        const current = menu.path || "";
-        const next = window.prompt("Move to (full path from model root):", current);
-        if (!next || next === current) return;
-        await moveFileAction(current, next);
+        if (!menu.path) return;
+        setMoveState({ target: menu.target === "folder" ? "folder" : "file", path: menu.path });
       } else if (actionId === "delete") {
         // Phase 3.4 — preview the cascade before confirming. User sees how
         // many diagrams + relationships will be affected so there's no
@@ -431,18 +550,30 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     openAiPanel,
   ]);
 
-  // Drag-and-drop: drop a file onto a folder to move it there.
-  const handleDropOnFolder = React.useCallback(async (sourcePath, folderPath) => {
+  const moveExplorerItem = React.useCallback(async (item, targetPath) => {
+    if (!item?.path || !targetPath || item.path === targetPath) return;
+    if (item.target === "folder") {
+      await renameFolderAction(item.path, targetPath);
+      addToast?.({ type: "success", message: `Moved folder to ${targetPath}.` });
+    } else {
+      await moveFileAction(item.path, targetPath);
+      addToast?.({ type: "success", message: `Moved file to ${targetPath}.` });
+    }
+  }, [addToast, moveFileAction, renameFolderAction]);
+
+  // Drag-and-drop: drop a file or folder onto a folder to move it there.
+  const handleDropOnFolder = React.useCallback(async (sourcePath, folderPath, sourceKind = "file") => {
     if (!explorerReady || !sourcePath) return;
-    const name = sourcePath.split("/").pop();
+    const name = basenameFromPath(sourcePath);
     const destPath = joinChild(folderPath, name);
     if (destPath === sourcePath) return;
+    if (sourceKind === "folder" && (folderPath === sourcePath || folderPath.startsWith(`${sourcePath}/`))) return;
     try {
-      await moveFileAction(sourcePath, destPath);
+      await moveExplorerItem({ target: sourceKind, path: sourcePath }, destPath);
     } catch (err) {
       window.alert(`Move failed: ${err?.message || err}`);
     }
-  }, [explorerReady, joinChild, moveFileAction]);
+  }, [explorerReady, joinChild, moveExplorerItem]);
 
   const filteredTables = tables.filter((t) => !query || t.name.toLowerCase().includes(query.toLowerCase()));
 
@@ -646,6 +777,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
               depth={0}
               onContextMenu={explorerReady ? openCtxMenu : null}
               onDropOnFolder={explorerReady ? handleDropOnFolder : null}
+              onMoveItem={explorerReady ? (target, path) => setMoveState({ target, path }) : null}
               dragStateRef={dragStateRef}
             />
           )}
@@ -654,6 +786,12 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             menu={ctxMenu}
             onClose={closeCtxMenu}
             onAction={handleCtxAction}
+          />
+          <MoveExplorerItemDialog
+            moveState={moveState}
+            folders={folderOptions}
+            onClose={() => setMoveState(null)}
+            onMove={moveExplorerItem}
           />
         </div>
       )}
@@ -802,6 +940,7 @@ function TreeRender({
   depth,
   onContextMenu = null,
   onDropOnFolder = null,
+  onMoveItem = null,
   dragStateRef = null,
 }) {
   if (!nodes || nodes.length === 0) return null;
@@ -821,18 +960,43 @@ function TreeRender({
             <div key={`f:${n.path}`}>
               <div
                 className={`tree-item tree-artifact tree-artifact-${meta.tone}`}
-                onClick={() => toggleFolder(n.path)}
+                onClick={() => {
+                  const dragState = dragStateRef?.current;
+                  if (
+                    dragState &&
+                    dragState.path === n.path &&
+                    Date.now() - dragState.at < 500
+                  ) {
+                    dragState.path = "";
+                    return;
+                  }
+                  toggleFolder(n.path);
+                }}
                 onContextMenu={onContextMenu ? (e) => onContextMenu(e, "folder", n.path) : undefined}
+                draggable={!!onDropOnFolder}
                 title={n.path}
                 style={{
                   paddingLeft: indent,
-                  cursor: "pointer",
+                  cursor: onDropOnFolder ? "grab" : "pointer",
                   background: isDragOver ? "var(--accent-dim, var(--bg-3))" : undefined,
                   outline: isDragOver ? "1px solid var(--accent, var(--border-default))" : undefined,
                   transition: "background 80ms var(--ease)",
                 }}
+                onDragStart={onDropOnFolder ? (e) => {
+                  if (dragStateRef?.current) {
+                    dragStateRef.current.path = n.path;
+                    dragStateRef.current.at = Date.now();
+                  }
+                  e.dataTransfer.setData("application/x-datalex-folder-path", n.path);
+                  e.dataTransfer.effectAllowed = "move";
+                } : undefined}
                 onDragOver={onDropOnFolder ? (e) => {
                   e.preventDefault();
+                  const sourceFolderPath = e.dataTransfer.getData("application/x-datalex-folder-path");
+                  if (sourceFolderPath && (n.path === sourceFolderPath || n.path.startsWith(`${sourceFolderPath}/`))) {
+                    e.dataTransfer.dropEffect = "none";
+                    return;
+                  }
                   e.dataTransfer.dropEffect = "move";
                   if (dragOverPath !== n.path) setDragOverPath(n.path);
                 } : undefined}
@@ -841,9 +1005,19 @@ function TreeRender({
                 } : undefined}
                 onDrop={onDropOnFolder ? (e) => {
                   e.preventDefault();
+                  e.stopPropagation();
                   setDragOverPath("");
-                  const sourcePath = e.dataTransfer.getData("application/x-datalex-file-path");
-                  if (sourcePath) onDropOnFolder(sourcePath, n.path);
+                  const sourceFolderPath = e.dataTransfer.getData("application/x-datalex-folder-path");
+                  const sourceFilePath = e.dataTransfer.getData("application/x-datalex-file-path");
+                  if (sourceFolderPath) onDropOnFolder(sourceFolderPath, n.path, "folder");
+                  else if (sourceFilePath) onDropOnFolder(sourceFilePath, n.path, "file");
+                } : undefined}
+                onDragEnd={onDropOnFolder ? () => {
+                  if (!dragStateRef?.current) return;
+                  window.setTimeout(() => {
+                    dragStateRef.current.path = "";
+                    dragStateRef.current.at = 0;
+                  }, 0);
                 } : undefined}
               >
                 <svg
@@ -859,6 +1033,20 @@ function TreeRender({
                 </svg>
                 <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+                {onMoveItem && (
+                  <button
+                    type="button"
+                    className="tree-inline-action"
+                    title={`Move folder ${n.path}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onMoveItem("folder", n.path);
+                    }}
+                  >
+                    <I.Arrow />
+                  </button>
+                )}
                 <span className="badge">{count}</span>
               </div>
               {!isFolded && (
@@ -872,6 +1060,7 @@ function TreeRender({
                   depth={depth + 1}
                   onContextMenu={onContextMenu}
                   onDropOnFolder={onDropOnFolder}
+                  onMoveItem={onMoveItem}
                   dragStateRef={dragStateRef}
                 />
               )}
@@ -935,6 +1124,20 @@ function TreeRender({
           >
             <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+            {onMoveItem && (
+              <button
+                type="button"
+                className="tree-inline-action"
+                title={`Move file ${n.path}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onMoveItem("file", n.path);
+                }}
+              >
+                <I.Arrow />
+              </button>
+            )}
           </div>
         );
       })}

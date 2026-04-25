@@ -34,6 +34,7 @@ const ITEMS_BY_TARGET = {
     { id: "new-folder", label: "New folder…", icon: FolderPlus },
     { id: "new-diagram", label: "New diagram here…", icon: LayoutDashboard },
     { id: "rename", label: "Rename folder…", icon: Edit3 },
+    { id: "move", label: "Move folder…", icon: Scissors },
     { id: "delete", label: "Delete folder", icon: Trash2, danger: true },
   ],
   root: [

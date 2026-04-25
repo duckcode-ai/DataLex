@@ -4,6 +4,7 @@ import { askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import AiProposalPreview from "./AiProposalPreview";
+import { aiProposalPath, proposalEditableYaml } from "./aiProposalYaml";
 
 const AI_WORK_STEPS = [
   "Finding the most relevant dbt and DataLex context",
@@ -122,10 +123,9 @@ function buildAiReviewDocument({ result, context, message }) {
         lines.push("Validation impact:");
         lines.push(typeof change.validation_impact === "string" ? change.validation_impact : compactJson(change.validation_impact));
       }
+      const path = aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram");
       lines.push("");
-      lines.push("```json");
-      lines.push(compactJson(change));
-      lines.push("```");
+      lines.push(`Review path: DataLex/${path}`);
     });
   }
 
@@ -133,7 +133,11 @@ function buildAiReviewDocument({ result, context, message }) {
     title: changes.length > 0 ? `AI proposal review · ${changes.length} change${changes.length === 1 ? "" : "s"}` : "AI answer review",
     subtitle: context?.activeFilePath || context?.filePath || "Workspace context",
     content: lines.join("\n"),
-    proposals: changes,
+    proposals: changes.map((change) => ({
+      ...change,
+      editor_path: aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram"),
+      editor_yaml: proposalEditableYaml(change),
+    })),
   };
 }
 
@@ -254,6 +258,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
   const applyAiProposalChanges = useWorkspaceStore((s) => s.applyAiProposalChanges);
   const openAiReviewDocument = useUiStore((s) => s.openAiReviewDocument);
+  const closeAiReviewDocument = useUiStore((s) => s.closeAiReviewDocument);
 
   const [message, setMessage] = React.useState("");
   const [result, setResult] = React.useState(null);
@@ -474,7 +479,23 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const reviewDocument = result ? buildAiReviewDocument({ result, context, message: lastRequest }) : null;
   const openReviewPlan = () => {
     if (!reviewDocument) return;
-    openAiReviewDocument(reviewDocument);
+    openAiReviewDocument({
+      ...reviewDocument,
+      onValidate: async (changes) => validateAiProposal({
+        projectId: activeProjectId,
+        changes,
+      }),
+      onApply: async (changes) => {
+        const applied = await applyAiProposalChanges(changes);
+        addToast({
+          type: "success",
+          message: `Applied ${applied?.applied?.length || changes.length} AI proposal change${changes.length === 1 ? "" : "s"}.`,
+        });
+        closeAiReviewDocument();
+        onClose?.();
+        return applied;
+      },
+    });
   };
 
   return (
@@ -626,10 +647,9 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
                       </summary>
                       <AiProposalPreview change={change} />
                       {change.rationale && <div className="muted ai-proposal-rationale"><MarkdownText text={change.rationale} /></div>}
-                      <details className="ai-proposal-technical">
-                        <summary>YAML/change details</summary>
-                        <pre>{compactJson(change)}</pre>
-                      </details>
+                      <button className="panel-btn mini" type="button" onClick={openReviewPlan}>
+                        <ClipboardList size={12} /> Open visual editor
+                      </button>
                     </details>
                   ))}
                 </div>

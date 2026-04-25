@@ -33,6 +33,7 @@ import {
 } from "../components/dialogs/ProjectModals";
 import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
 import AiProposalPreview from "../components/ai/AiProposalPreview";
+import { proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle } from "../components/ai/aiProposalYaml";
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
@@ -241,9 +242,57 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
 function AiPlanReviewEditor({ document, onClose }) {
   const content = String(document?.content || "");
   const proposals = Array.isArray(document?.proposals) ? document.proposals : [];
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const [drafts, setDrafts] = React.useState(() => proposals.map((proposal) => proposal.editor_yaml || proposalEditableYaml(proposal)));
+  const [validation, setValidation] = React.useState(null);
+  const [error, setError] = React.useState("");
+  const [busy, setBusy] = React.useState("");
+  React.useEffect(() => {
+    setActiveIndex(0);
+    setDrafts(proposals.map((proposal) => proposal.editor_yaml || proposalEditableYaml(proposal)));
+    setValidation(null);
+    setError("");
+    setBusy("");
+  }, [document]);
+  const activeProposal = proposals[activeIndex] || null;
+  const activeDraft = drafts[activeIndex] || "";
+  const draftChanges = React.useMemo(
+    () => proposals.map((proposal, index) => proposalChangeFromYaml(proposal, drafts[index] || "")),
+    [drafts, proposals]
+  );
+  const activePreviewChange = activeProposal ? proposalChangeFromYaml(activeProposal, activeDraft) : null;
+  const setActiveDraft = (value) => {
+    setDrafts((items) => items.map((item, index) => index === activeIndex ? value : item));
+    setValidation(null);
+    setError("");
+  };
   const copy = React.useCallback(() => {
-    navigator.clipboard?.writeText(content).catch(() => {});
-  }, [content]);
+    navigator.clipboard?.writeText(activeDraft || content).catch(() => {});
+  }, [activeDraft, content]);
+  const validateDrafts = async () => {
+    if (!document?.onValidate || proposals.length === 0) return;
+    setBusy("validate");
+    setError("");
+    try {
+      const response = await document.onValidate(draftChanges);
+      setValidation(response);
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy("");
+    }
+  };
+  const applyDrafts = async () => {
+    if (!document?.onApply || proposals.length === 0) return;
+    setBusy("apply");
+    setError("");
+    try {
+      await document.onApply(draftChanges);
+    } catch (err) {
+      setError(err?.message || String(err));
+      setBusy("");
+    }
+  };
   if (!document) return null;
   return (
     <section className="ai-plan-editor-shell" aria-label="AI review plan">
@@ -254,6 +303,16 @@ function AiPlanReviewEditor({ document, onClose }) {
           {document.subtitle && <small>{document.subtitle}</small>}
         </div>
         <div className="ai-plan-editor-actions">
+          {proposals.length > 0 && (
+            <button type="button" className="panel-btn" onClick={validateDrafts} disabled={busy === "validate"}>
+              {busy === "validate" ? "Validating..." : "Validate"}
+            </button>
+          )}
+          {proposals.length > 0 && (
+            <button type="button" className="panel-btn primary" onClick={applyDrafts} disabled={busy === "apply" || validation?.valid === false}>
+              {busy === "apply" ? "Applying..." : `Apply ${proposals.length}`}
+            </button>
+          )}
           <button type="button" className="panel-btn" onClick={copy}>
             <Copy size={12} /> Copy
           </button>
@@ -264,18 +323,66 @@ function AiPlanReviewEditor({ document, onClose }) {
       </div>
       <div className="ai-plan-editor-body">
         {proposals.length > 0 && (
-          <div className="ai-plan-preview-grid">
+          <div className="ai-plan-proposal-tabs" role="tablist" aria-label="AI proposal files">
             {proposals.map((proposal, index) => (
-              <AiProposalPreview key={index} change={proposal} compact />
+              <button
+                key={`${proposalEditorTitle(proposal, index)}-${index}`}
+                type="button"
+                className={`ai-plan-proposal-tab ${index === activeIndex ? "active" : ""}`}
+                onClick={() => setActiveIndex(index)}
+              >
+                {proposalEditorTitle(proposal, index)}
+              </button>
             ))}
           </div>
         )}
-        <textarea
-          className="ai-plan-editor-text"
-          readOnly
-          value={content}
-          spellCheck={false}
-        />
+        {proposals.length > 0 ? (
+          <div className="ai-plan-review-workspace">
+            <div className="ai-plan-preview-grid">
+              {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
+            </div>
+            <div className="ai-plan-yaml-pane">
+              <div className="ai-plan-yaml-toolbar">
+                <strong>Editable YAML</strong>
+                <span>Modify the proposal, then validate and apply. The preview updates from this YAML.</span>
+              </div>
+              <textarea
+                className="ai-plan-editor-text"
+                value={activeDraft}
+                onChange={(event) => setActiveDraft(event.target.value)}
+                spellCheck={false}
+              />
+            </div>
+          </div>
+        ) : (
+          <textarea
+            className="ai-plan-editor-text"
+            readOnly
+            value={content}
+            spellCheck={false}
+          />
+        )}
+        {(validation || error) && (
+          <div className={`ai-plan-validation ${validation?.valid ? "ok" : "bad"}`}>
+            {error && <strong>{error}</strong>}
+            {validation && (
+              <>
+                <strong>{validation.valid ? "Validation passed" : "Validation needs fixes"}</strong>
+                <span>
+                  {validation.summary?.valid || 0}/{validation.summary?.total || 0} valid,
+                  {" "}{validation.summary?.errors || 0} errors,
+                  {" "}{validation.summary?.warnings || 0} warnings
+                </span>
+                {(validation.results || []).flatMap((item) => item.errors || []).slice(0, 5).map((item, index) => (
+                  <small key={`err-${index}`}>{item.message}</small>
+                ))}
+                {(validation.results || []).flatMap((item) => item.warnings || []).slice(0, 5).map((item, index) => (
+                  <small key={`warn-${index}`}>{item}</small>
+                ))}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -1125,98 +1232,99 @@ export default function Shell() {
     })();
   }, [schema.relationships, addToast]);
 
-  /* ── ELK auto-layout (palette action) ──────────────────────────────
-   * v0.3.4: respects `manualPosition` — entities the user has already
-   * dragged (persisted to YAML `display.x/y` or diagram ref x/y) stay
-   * put. ELK is only asked to place tables that have no manual position
-   * yet, and we nudge the result so it doesn't overlap the locked set.
-   * A "locked" node is submitted to ELK in its existing coordinates so
-   * the layered algorithm routes around it when possible. If nothing is
-   * locked, behaviour is identical to pre-0.3.4 (full relayout). */
+  /* ── Smart ELK auto-layout (explicit user action) ─────────────────
+   * Auto-layout should be a true readability reset. Diagram entities often
+   * already have x/y because users dragged files onto the canvas, so treating
+   * those coordinates as locked made the button look broken on messy diagrams.
+   */
   const handleAutoLayout = React.useCallback(async () => {
     if (!tables.length) return;
     try {
       const mod = await import("../lib/elkLayout");
+      const modelKind = String(activeModelKind || schema?.modelKind || "physical").toLowerCase();
+      const conceptual = modelKind === "conceptual";
+      const endpointKey = (value) => String(value || "").trim().toLowerCase();
+      const tableIdByName = new Map();
+      tables.forEach((t) => {
+        [t.id, t.name, t.label, t.table].filter(Boolean).forEach((value) => {
+          tableIdByName.set(endpointKey(value), t.id);
+        });
+      });
+      const resolveEndpoint = (endpoint) => {
+        const raw = endpoint?.table || endpoint?.entity || endpoint?.name || endpoint;
+        return tableIdByName.get(endpointKey(raw)) || raw;
+      };
+      const estimateLayoutSize = (table) => {
+        if (conceptual || table.type === "concept") {
+          const description = String(table.description || "");
+          const terms = Array.isArray(table.terms) ? table.terms : [];
+          const tags = Array.isArray(table.tags) ? table.tags : [];
+          let height = 160;
+          if (description.length > 90) height += 24;
+          if (description.length > 160) height += 18;
+          if (terms.length || tags.length || table.owner || table.subject) height += 18;
+          return { width: Math.max(Number(table.width) || 0, 300), height };
+        }
+        const columnCount = Array.isArray(table.columns) ? table.columns.length : 0;
+        return {
+          width: Math.max(Number(table.width) || 0, 300),
+          height: Math.max(140, Math.min(760, 104 + columnCount * 24)),
+        };
+      };
+
       const rfNodes = tables.map((t) => ({
         id: t.id,
         type: "entityNode",
         position: { x: t.x || 0, y: t.y || 0 },
+        ...estimateLayoutSize(t),
         data: {
           fields: t.columns,
           subject_area: t.subject || t.cat,
-          manualPosition: !!t.manualPosition,
+          modelKind,
+          type: conceptual ? "concept" : t.type,
+          description: t.description,
+          owner: t.owner,
+          terms: t.terms,
+          tags: t.tags,
         },
       }));
+      const nodeIds = new Set(rfNodes.map((node) => node.id));
       const rfEdges = (schema.relationships || []).map((r, i) => ({
         id: `e-${i}`,
-        source: r.from?.table, target: r.to?.table,
-      })).filter((e) => e.source && e.target);
+        source: resolveEndpoint(r.from),
+        target: resolveEndpoint(r.to),
+      })).filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-      const lockedIds = new Set(tables.filter((t) => t.manualPosition).map((t) => t.id));
-      const lockedCount = lockedIds.size;
-
-      // Fast path: nothing locked → behave like before.
-      if (lockedCount === 0) {
-        const { nodes: laid } = await mod.layoutWithElk(rfNodes, rfEdges, { density: "normal", groupBySubjectArea: false });
-        const pos = new Map(laid.map((n) => [n.id, n.position]));
-        setTables((prev) => prev.map((t) => {
-          const p = pos.get(t.id);
-          return p ? { ...t, x: Math.round(p.x), y: Math.round(p.y) } : t;
-        }));
-        addToast({ type: "success", message: "Auto-layout applied." });
-        return;
-      }
-
-      // Split: layout only the non-locked subset. Edges are kept when at
-      // least one end is in the subset — those dangle into the locked
-      // region and help ELK's layered pass place children near parents.
-      const unlockedNodes = rfNodes.filter((n) => !lockedIds.has(n.id));
-      const allIds = new Set(rfNodes.map((n) => n.id));
-      const subsetIds = new Set(unlockedNodes.map((n) => n.id));
-      const subsetEdges = rfEdges.filter(
-        (e) => allIds.has(e.source) && allIds.has(e.target) && (subsetIds.has(e.source) || subsetIds.has(e.target))
-      );
-
-      // If every entity is locked there's nothing to do.
-      if (unlockedNodes.length === 0) {
-        addToast({ type: "info", message: "All entities are manually placed — nothing to auto-layout." });
-        return;
-      }
-
-      const { nodes: laid } = await mod.layoutWithElk(unlockedNodes, subsetEdges, {
-        density: "normal",
+      const { nodes: laid } = await mod.layoutWithElk(rfNodes, rfEdges, {
+        density: conceptual ? "wide" : "normal",
         groupBySubjectArea: false,
+        modelKind,
+        direction: "RIGHT",
+        fieldView: conceptual ? "minimal" : "all",
       });
 
-      // ELK lays out relative to its own origin; offset the result so the
-      // freshly-placed block sits to the right of the locked cluster and
-      // doesn't stomp on it.
-      let offsetX = 0;
-      let offsetY = 0;
-      const lockedTables = tables.filter((t) => t.manualPosition);
-      if (lockedTables.length > 0) {
-        const lockedMaxX = Math.max(...lockedTables.map((t) => (t.x || 0) + (t.width || 280)));
-        const lockedMinY = Math.min(...lockedTables.map((t) => t.y || 0));
-        offsetX = Math.round(lockedMaxX + 80);
-        offsetY = Math.round(lockedMinY);
-      }
-
-      const pos = new Map(
-        laid.map((n) => [n.id, { x: n.position.x + offsetX, y: n.position.y + offsetY }])
-      );
+      const xs = laid.map((n) => Number(n.position?.x)).filter(Number.isFinite);
+      const ys = laid.map((n) => Number(n.position?.y)).filter(Number.isFinite);
+      const minX = xs.length ? Math.min(...xs) : 0;
+      const minY = ys.length ? Math.min(...ys) : 0;
+      const originX = conceptual ? 110 : 80;
+      const originY = conceptual ? 120 : 80;
+      const pos = new Map(laid.map((n) => [
+        n.id,
+        {
+          x: Math.round((Number(n.position?.x) || 0) - minX + originX),
+          y: Math.round((Number(n.position?.y) || 0) - minY + originY),
+        },
+      ]));
       setTables((prev) => prev.map((t) => {
-        if (t.manualPosition) return t; // locked — don't touch
         const p = pos.get(t.id);
-        return p ? { ...t, x: Math.round(p.x), y: Math.round(p.y) } : t;
+        return p ? { ...t, x: p.x, y: p.y, manualPosition: true } : t;
       }));
-      addToast({
-        type: "success",
-        message: `Auto-layout applied (${lockedCount} manually placed ${lockedCount === 1 ? "entity" : "entities"} preserved).`,
-      });
+      addToast({ type: "success", message: conceptual ? "Smart conceptual layout applied." : "Auto-layout applied." });
     } catch (err) {
       addToast({ type: "error", message: `Auto-layout failed: ${err.message || err}` });
     }
-  }, [tables, schema.relationships, addToast]);
+  }, [activeModelKind, tables, schema?.modelKind, schema.relationships, addToast]);
 
   /* ── Persist moved node position to YAML `display:` ──────────────
    * Called by Canvas after a table drag completes. We round-trip through

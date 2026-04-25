@@ -337,6 +337,39 @@ entities:
     assert.equal(existsSync(target), false);
   });
 
+  test("canonicalizes AI-created artifact paths into domain layer folders", async () => {
+    const res = await request(app)
+      .post("/api/ai/proposals/validate")
+      .send({
+        projectId: project.id,
+        changes: [{
+          type: "create_diagram",
+          path: "diagrams/opportunity_flow.diagram.yaml",
+          domain: "sales",
+          layer: "logical",
+          name: "opportunity_flow",
+          entities: [{ entity: "Opportunity", x: 100, y: 100 }],
+          relationships: [],
+        }, {
+          type: "create_model",
+          path: "DataLex/models/conceptual/crm/account.model.yaml",
+          domain: "crm",
+          layer: "conceptual",
+          name: "account",
+          entities: [{ name: "Account", type: "concept" }],
+          relationships: [],
+        }],
+      });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.valid, true);
+    assert.equal(res.body.results[0].path, "sales/Logical/opportunity_flow.diagram.yaml");
+    assert.equal(res.body.results[0].normalized_change.path, "sales/Logical/opportunity_flow.diagram.yaml");
+    assert.match(res.body.results[0].warnings[0], /domain-first/);
+    assert.equal(res.body.results[1].path, "crm/Conceptual/account.model.yaml");
+    assert.equal(res.body.results[1].normalized_change.path, "crm/Conceptual/account.model.yaml");
+  });
+
   test("proposal validation reports invalid YAML", async () => {
     const res = await request(app)
       .post("/api/ai/proposals/validate")

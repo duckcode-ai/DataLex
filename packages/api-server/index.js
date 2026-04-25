@@ -3266,6 +3266,80 @@ function detectDuplicateRelationships(doc) {
   return duplicates;
 }
 
+function cleanAiPath(value) {
+  return toPosixPath(String(value || "").trim()).replace(/^\/+/, "").replace(/^DataLex\//i, "");
+}
+
+function slugAiPathSegment(value, fallback = "core") {
+  const slug = String(value || "")
+    .trim()
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .pop()
+    ?.toLowerCase()
+    .replace(/[^a-z0-9_ -]+/g, "")
+    .replace(/[\s-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return slug || fallback;
+}
+
+function aiLayerFolder(layerValue) {
+  const layer = String(layerValue || "").trim().toLowerCase();
+  if (layer === "physical") return "physical";
+  if (layer === "logical") return "Logical";
+  return "Conceptual";
+}
+
+function inferAiLayerFromPath(pathValue) {
+  const parts = cleanAiPath(pathValue).split("/").filter(Boolean);
+  const layerPart = String(parts[1] || "").toLowerCase();
+  if (layerPart === "physical") return "physical";
+  if (layerPart === "logical") return "logical";
+  if (layerPart === "conceptual") return "conceptual";
+  return "";
+}
+
+function aiCreateNameFromChange(change, suffix, fallback = "ai_generated") {
+  if (change?.name) return slugAiPathSegment(change.name, fallback);
+  const path = cleanAiPath(change?.path || change?.fullPath || "");
+  const file = basename(path || fallback)
+    .replace(new RegExp(`\\.${suffix}\\.ya?ml$`, "i"), "")
+    .replace(/\.ya?ml$/i, "");
+  return slugAiPathSegment(file, fallback);
+}
+
+function isAiDomainLayerPath(pathValue, suffix) {
+  const path = cleanAiPath(pathValue);
+  const parts = path.split("/").filter(Boolean);
+  const reservedRoot = ["models", "diagrams", "diagram", "model", "datalex"].includes(String(parts[0] || "").toLowerCase());
+  const layerPart = String(parts[1] || "").toLowerCase();
+  return parts.length >= 3
+    && !reservedRoot
+    && ["conceptual", "logical", "physical"].includes(layerPart)
+    && new RegExp(`\\.${suffix}\\.ya?ml$`, "i").test(path);
+}
+
+function assertNoAiPathTraversal(rawPath) {
+  if (!rawPath) return;
+  const text = toPosixPath(String(rawPath || "").trim());
+  const parts = text.split("/").filter(Boolean);
+  if (isAbsolute(text) || parts.includes("..")) {
+    throw new ApiError(400, "PATH_ESCAPE", "AI proposal path must stay inside the DataLex workspace");
+  }
+}
+
+function canonicalAiCreatePath(change, suffix) {
+  const existingPath = cleanAiPath(change?.path || change?.fullPath || "");
+  if (isAiDomainLayerPath(existingPath, suffix)) return existingPath;
+  const existingParts = existingPath.split("/").filter(Boolean);
+  const domainSource = change?.domain || change?.subject_area || change?.subjectArea || existingParts[0] || "core";
+  const domain = slugAiPathSegment(domainSource, "core");
+  const layer = String(change?.layer || change?.modelKind || inferAiLayerFromPath(existingPath) || "conceptual").toLowerCase();
+  const name = aiCreateNameFromChange(change, suffix);
+  return `${domain}/${aiLayerFolder(layer)}/${name}.${suffix}.yaml`;
+}
+
 function normalizeAiProposalChange(rawChange) {
   const source = rawChange?.change && typeof rawChange.change === "object"
     ? { ...rawChange, ...rawChange.change }
@@ -3354,17 +3428,19 @@ function validateAiProposalChangeDryRun(structure, rawChange) {
   try {
     if (!type) throw new ApiError(400, "VALIDATION", "Each proposed change needs a type");
     if (type === "create_diagram") {
-      const domain = String(change.domain || "core").trim() || "core";
-      const layerRaw = String(change.layer || "conceptual").trim();
-      const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
-      const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
-      normalized = { ...change, type: "create_file", path: change.path || `${domain}/${layerFolder}/${name}.diagram.yaml`, content: change.content || defaultAiDiagramContent(change) };
+      assertNoAiPathTraversal(change.path || change.fullPath);
+      const canonicalPath = canonicalAiCreatePath(change, "diagram");
+      if (change.path && cleanAiPath(change.path) !== canonicalPath) {
+        warnings.push(`Proposal path was normalized to DataLex/${canonicalPath} to keep artifacts domain-first.`);
+      }
+      normalized = { ...change, type: "create_file", path: canonicalPath, content: change.content || defaultAiDiagramContent(change) };
     } else if (type === "create_model") {
-      const domain = String(change.domain || "core").trim() || "core";
-      const layerRaw = String(change.layer || change.modelKind || "conceptual").trim();
-      const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
-      const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
-      normalized = { ...change, type: "create_file", path: change.path || `${domain}/${layerFolder}/${name}.model.yaml`, content: change.content || defaultAiModelContent(change) };
+      assertNoAiPathTraversal(change.path || change.fullPath);
+      const canonicalPath = canonicalAiCreatePath(change, "model");
+      if (change.path && cleanAiPath(change.path) !== canonicalPath) {
+        warnings.push(`Proposal path was normalized to DataLex/${canonicalPath} to keep artifacts domain-first.`);
+      }
+      normalized = { ...change, type: "create_file", path: canonicalPath, content: change.content || defaultAiModelContent(change) };
     }
 
     if (["create_file", "update_file", "patch_yaml"].includes(normalized.type)) {
@@ -3613,25 +3689,19 @@ async function applyAiProposalChange(project, structure, change) {
   if (!type) throw new ApiError(400, "VALIDATION", "Each proposed change needs a type");
 
   if (type === "create_diagram") {
-    const domain = String(change.domain || "core").trim() || "core";
-    const layerRaw = String(change.layer || "conceptual").trim();
-    const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
-    const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+    assertNoAiPathTraversal(change.path || change.fullPath);
     change = {
       ...change,
       type: "create_file",
-      path: change.path || `${domain}/${layerFolder}/${name}.diagram.yaml`,
+      path: canonicalAiCreatePath(change, "diagram"),
       content: change.content || defaultAiDiagramContent(change),
     };
   } else if (type === "create_model") {
-    const domain = String(change.domain || "core").trim() || "core";
-    const layerRaw = String(change.layer || change.modelKind || "conceptual").trim();
-    const layerFolder = layerRaw.toLowerCase() === "physical" ? "physical" : layerRaw.charAt(0).toUpperCase() + layerRaw.slice(1).toLowerCase();
-    const name = String(change.name || "ai_generated").trim().toLowerCase().replace(/[^a-z0-9_]+/g, "_").replace(/^_+|_+$/g, "") || "ai_generated";
+    assertNoAiPathTraversal(change.path || change.fullPath);
     change = {
       ...change,
       type: "create_file",
-      path: change.path || `${domain}/${layerFolder}/${name}.model.yaml`,
+      path: canonicalAiCreatePath(change, "model"),
       content: change.content || defaultAiModelContent(change),
     };
   }
@@ -3862,7 +3932,7 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
         "A visual diagram proposal with zero relationships is only acceptable when the user explicitly asks for isolated concepts or an inventory.",
         "For create_model include domain, layer, name, entities, relationships. Conceptual entities use type: concept and should include description, owner, subject_area, terms, tags when known.",
         "For patch_yaml prefer JSON patch operations when changing small sections; use full content only when necessary.",
-        "Keep new DataLex paths domain-first, for example crm/Conceptual/customer_360.diagram.yaml or sales/physical/orders.diagram.yaml.",
+        "Keep new DataLex paths domain-first, for example crm/Conceptual/customer_360.diagram.yaml or sales/physical/orders.diagram.yaml. Do not create a top-level diagrams folder; server-side validation will canonicalize create_diagram/create_model paths back to DataLex/<domain>/<Layer>/...",
         "Retrieved records with kind=skill are scoped instructions. Use a skill only when its use_when, tags, or content match the current request/context.",
         "If the request lacks required business meaning, ask questions instead of fabricating important facts.",
         aiYamlContractExamples(),
