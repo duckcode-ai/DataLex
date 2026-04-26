@@ -7,6 +7,20 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.3.7] - 2026-04-26
+
+Patch release - fixes the Docker and local install onboarding path.
+
+### Fixed
+
+- **Docker project auto-attach self-heals stale project registry files.**
+  `datalex serve --project-dir ...` now always registers the served
+  folder, even when an existing `.dm-projects.json` contains host paths
+  that are not visible inside a Docker container.
+- **`datalex-cli[serve]` uses the portable Node package that actually
+  publishes current Node wheels.** The `serve` extra now depends on
+  `nodejs-wheel` and the CLI can find a venv-local `node` executable.
+
 ## [1.3.6] - 2026-04-26
 
 Patch release - publishes the simplified replayable onboarding tour to
@@ -1191,7 +1205,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.6...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.3.7...HEAD
+[1.3.7]: https://github.com/duckcode-ai/DataLex/compare/v1.3.6...v1.3.7
 [1.3.6]: https://github.com/duckcode-ai/DataLex/compare/v1.3.5...v1.3.6
 [1.3.5]: https://github.com/duckcode-ai/DataLex/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/duckcode-ai/DataLex/compare/v1.3.0...v1.3.4

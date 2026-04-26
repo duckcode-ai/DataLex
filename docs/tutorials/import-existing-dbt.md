@@ -10,7 +10,7 @@ but built from *your* models — with every `models/staging/`,
 - Python 3.9+ with pip
 - A dbt project you can read locally (either a folder path or a git URL)
 - `dbt` itself installed if your project hasn't been compiled yet
-- Node 20+ if you are running Python 3.13+ or 3.14+
+- Node 20+ only if you install `datalex-cli` without the `[serve]` extra
 
 ---
 

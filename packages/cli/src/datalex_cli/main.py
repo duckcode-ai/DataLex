@@ -1445,9 +1445,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
                 print("[datalex]   install Node 20+ (https://nodejs.org) and re-run, or")
                 print("[datalex]   build manually: `cd packages/web-app && npm install && npm run build`")
 
-    # Node resolution: prefer system node, fall back to `nodejs-bin` if it
-    # was installed as an optional dep.
+    # Node resolution: prefer system/venv node. The `serve` extra installs
+    # nodejs-wheel, which exposes `node` next to the active Python executable
+    # when the venv's bin directory is not otherwise on PATH.
     node_bin = shutil.which("node")
+    if node_bin is None:
+        venv_node = Path(sys.executable).resolve().parent / ("node.exe" if os.name == "nt" else "node")
+        if venv_node.exists():
+            node_bin = str(venv_node)
     if node_bin is None:
         try:
             from nodejs_bin import node as nodejs_bin_node  # type: ignore
@@ -1458,7 +1463,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     if not node_bin:
         print(
             "ERROR: `node` was not found on PATH.\n"
-            "Install Node 20+ (https://nodejs.org) or `pip install nodejs-bin` "
+            "Install Node 20+ (https://nodejs.org) or `pip install 'datalex-cli[serve]'` "
             "and re-run `datalex serve`.",
             file=sys.stderr,
         )
@@ -1553,26 +1558,60 @@ def cmd_serve(args: argparse.Namespace) -> int:
         pass
 
     # Auto-register the --project-dir folder as a DataLex project so the UI
-    # opens directly into it instead of the "model-examples" default. We only
-    # write .dm-projects.json if it doesn't already exist — if the user ran
-    # `datalex serve` here before, we keep their previous state.
+    # opens directly into it instead of an empty/default workspace. This must
+    # also self-heal Docker bind mounts: a host-created .dm-projects.json can
+    # contain /Users/... paths that do not exist inside the container, leaving
+    # the UI with no openable project unless we re-add the served /workspace.
     import json as _json
     import time as _time
     projects_file = Path(project_dir) / ".dm-projects.json"
-    if not projects_file.exists():
-        try:
-            default_name = Path(project_dir).name or "project"
-            initial = [
-                {
-                    "id": f"proj_{int(_time.time() * 1000)}",
-                    "name": default_name,
-                    "path": str(Path(project_dir).resolve()),
-                }
-            ]
-            projects_file.write_text(_json.dumps(initial, indent=2))
-            print(f"[datalex]   registered project: {default_name} → {project_dir}")
-        except Exception as err:
-            print(f"[datalex]   note: couldn't auto-register project: {err}")
+    try:
+        default_name = Path(project_dir).name or "project"
+        served_path = str(Path(project_dir).resolve())
+        projects = []
+        if projects_file.exists():
+            try:
+                parsed = _json.loads(projects_file.read_text(encoding="utf-8"))
+                if isinstance(parsed, list):
+                    projects = [p for p in parsed if isinstance(p, dict) and p.get("path")]
+            except Exception:
+                projects = []
+
+        # Keep accessible projects, drop container-invisible stale paths, and
+        # dedupe by resolved path. Always preserve/re-add the served path.
+        cleaned = []
+        seen_paths = set()
+        for project in projects:
+            raw_path = str(project.get("path") or "")
+            if not raw_path:
+                continue
+            if not Path(raw_path).exists():
+                continue
+            try:
+                key = str(Path(raw_path).resolve())
+            except Exception:
+                key = raw_path
+            if key in seen_paths:
+                continue
+            seen_paths.add(key)
+            cleaned.append(project)
+
+        served_key = served_path
+        exists = served_key in seen_paths
+        if not exists:
+            cleaned.insert(0, {
+                "id": f"proj_{int(_time.time() * 1000)}",
+                "name": default_name,
+                "path": served_path,
+            })
+            print(f"[datalex]   registered project: {default_name} → {served_path}")
+        elif cleaned != projects:
+            print(f"[datalex]   refreshed project registry for {served_path}")
+
+        if cleaned != projects or not projects_file.exists():
+            projects_file.write_text(_json.dumps(cleaned, indent=2), encoding="utf-8")
+    except Exception as err:
+        print(f"[datalex]   note: couldn't auto-register project: {err}")
 
     # Detect an existing server on this port and surface a helpful message
     # rather than letting Node silently fail with EADDRINUSE.
