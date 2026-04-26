@@ -393,9 +393,9 @@ function HelpPane({ onClose }) {
       <header>
         <h3 className="dlx-settings-pane-title">Onboarding tour</h3>
         <p className="dlx-settings-pane-sub">
-          A quick spotlight tour of the icons and panels that matter —
-          import, diagram building, relationship validation, dangling
-          scan, and merge-safe save. Takes about 60 seconds.
+          Replay the same guided flow shown to new users: DataLex goal,
+          dbt project gaps, the DataLex solution, import, readiness review,
+          modeling, validation, AI proposals, and reviewed YAML changes.
         </p>
       </header>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
