@@ -16,7 +16,7 @@
 import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
-export const TOUR_VERSION = 3;
+export const TOUR_VERSION = 4;
 const STORAGE_KEY = "datalex.onboarding.seen";
 
 /** The steps, in order. Each step is a driver.js PopoverStep. */
@@ -25,7 +25,34 @@ const TOUR_STEPS = [
     popover: {
       title: "Welcome to DataLex",
       description:
-        "DataLex helps analytics teams turn dbt projects into governed, AI-ready models. The goal is not extra ceremony: it is clearer meaning, better metadata, earlier gap detection, and safer semantic/agentic analytics.",
+        "DataLex helps teams turn dbt projects into governed, AI-ready analytics models.<br/><br/>The goal is better business meaning, stronger standards, and more accurate semantic and agentic analytics.",
+      side: "over",
+      align: "center",
+    },
+  },
+  {
+    popover: {
+      title: "Problem · dbt lineage is not enough",
+      description:
+        "Current dbt projects often show SQL dependencies, but they miss the business concepts, relationship meaning, model grain, ownership, quality expectations, and governance context needed for trusted reuse.",
+      side: "over",
+      align: "center",
+    },
+  },
+  {
+    popover: {
+      title: "Solution · DataLex adds the missing layer",
+      description:
+        "<ul><li>Connect business concepts to logical rules and physical dbt assets.</li><li>Review YAML standards before gaps spread.</li><li>Keep fixes reviewable through AI proposals and Git diffs.</li></ul>",
+      side: "over",
+      align: "center",
+    },
+  },
+  {
+    popover: {
+      title: "Product demo · follow the working flow",
+      description:
+        "Next, the tour walks through import, readiness review, modeling layers, relationships, validation, AI-assisted fixes, and saving approved YAML changes.",
       side: "over",
       align: "center",
     },
@@ -33,19 +60,9 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="import-dbt"]',
     popover: {
-      title: "1 · Start from the dbt repo",
+      title: "1 · Import the dbt repo",
       description:
-        "Import a local dbt folder or public Git repo. DataLex keeps the YAML visible, indexes dbt context, and runs readiness review so missing descriptions, types, tests, ownership, and relationships are visible early.",
-      side: "bottom",
-      align: "start",
-    },
-  },
-  {
-    element: '[data-tour="new-modeling-asset"]',
-    popover: {
-      title: "2 · Model by intent, not just files",
-      description:
-        "Create conceptual, logical, or physical assets when the repo needs more than raw dbt YAML. Conceptual captures business meaning, logical captures reusable rules, and physical stays grounded in dbt.",
+        "Import a local dbt folder or public Git repo. DataLex keeps the original YAML visible, indexes dbt context, and prepares the project for readiness review.",
       side: "bottom",
       align: "start",
     },
@@ -53,10 +70,20 @@ const TOUR_STEPS = [
   {
     element: '[data-tour="explorer-files"]',
     popover: {
-      title: "3 · Review the same YAML files",
+      title: "2 · See readiness on the same files",
       description:
-        "Explorer is the working tree. Imported dbt/DataLex YAML files show readiness badges, so red/yellow/green status stays attached to the file users already need to fix.",
+        "Explorer is the working tree. YAML files show red, yellow, or green readiness so users review gaps where they already work, not in a separate dashboard.",
       side: "right",
+      align: "start",
+    },
+  },
+  {
+    element: '[data-tour="new-modeling-asset"]',
+    popover: {
+      title: "3 · Add modeling intent",
+      description:
+        "Create conceptual, logical, or physical assets when dbt YAML is not enough. Conceptual captures business meaning, logical captures reusable rules, and physical stays grounded in dbt.",
+      side: "bottom",
       align: "start",
     },
   },
@@ -65,7 +92,7 @@ const TOUR_STEPS = [
     popover: {
       title: "4 · Work in the right modeling mode",
       description:
-        "The canvas changes by layer. Use conceptual mode for business language, logical mode for rules and keys, and physical mode for dbt-backed tables, constraints, tests, and SQL readiness.",
+        "Use conceptual mode for business language, logical mode for keys and rules, and physical mode for dbt-backed tables, constraints, tests, and SQL readiness.",
       side: "bottom",
       align: "center",
     },
@@ -75,7 +102,7 @@ const TOUR_STEPS = [
     popover: {
       title: "5 · Connect models to meaning",
       description:
-        "Drag dbt YAML into physical diagrams, or create conceptual/logical boxes directly. The useful part is traceability: business concept to logical structure to physical dbt asset.",
+        "Drag dbt YAML into physical diagrams, or create conceptual and logical boxes directly. The useful part is traceability from business concept to logical structure to dbt asset.",
       side: "bottom",
       align: "center",
     },
@@ -85,7 +112,7 @@ const TOUR_STEPS = [
     popover: {
       title: "6 · Make relationships explicit",
       description:
-        "Relationships are where AI and semantic layers often fail. Add business verbs, logical cardinality, and physical relationship tests so joins and answers are easier to explain.",
+        "dbt lineage shows dependencies, but not always business meaning. Add verbs, cardinality, and relationship tests so joins and answers are easier to explain.",
       side: "bottom",
       align: "center",
     },
@@ -95,7 +122,7 @@ const TOUR_STEPS = [
     popover: {
       title: "7 · Detect gaps before they spread",
       description:
-        "Validation and dbt readiness review explain what is missing and why it matters: definitions, domains, keys, types, tests, contracts, governance, and import health.",
+        "Validation and readiness review explain what is missing and why it matters: definitions, domains, keys, types, tests, contracts, governance, and import health.",
       side: "top",
       align: "start",
     },
@@ -105,7 +132,7 @@ const TOUR_STEPS = [
     popover: {
       title: "8 · Apply only reviewed changes",
       description:
-        "AI can explain gaps and propose YAML fixes, but changes stay reviewable. Save All writes local YAML so the next step is a normal Git diff and commit.",
+        "AI can explain gaps and propose YAML fixes, but changes stay reviewable. Save All writes local YAML so teams can review the Git diff before merging.",
       side: "bottom",
       align: "end",
     },
