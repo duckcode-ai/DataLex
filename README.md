@@ -38,11 +38,9 @@ datalex serve                          # opens http://localhost:3030
 ```
 
 That's it for most machines. No Docker, no database, and only one
-terminal. On Python 3.9-3.12, `[serve]` also pulls a portable Node
-runtime. On Python 3.13+ or 3.14+, install Node 20+ first because the
-portable Node wheel is not published for those Python versions yet. If
-you already have Node 20+ on PATH, plain `pip install datalex-cli`
-works too.
+terminal. The `[serve]` extra pulls a portable Node runtime. If you
+already have Node 20+ on PATH, plain `pip install datalex-cli` works
+too.
 
 **Point it at your dbt repo:**
 
@@ -204,9 +202,8 @@ pip install -U datalex-cli                          # CLI-only, no UI
 Available extras: `serve`, `duckdb`, `postgres`, `mysql`, `snowflake`,
 `bigquery`, `databricks`, `sqlserver`, `redshift`, `all`.
 
-**Prereqs:** Python 3.9+ and Git. Node 20+ is optional on Python
-3.9-3.12 because `[serve]` bundles it. Node 20+ is required on Python
-3.13+ until `nodejs-bin` publishes wheels for those versions.
+**Prereqs:** Python 3.9+ and Git. Node 20+ is optional because
+`[serve]` bundles a portable Node runtime.
 
 Verify the installed package:
 

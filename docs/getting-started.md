@@ -12,10 +12,8 @@ pip install 'datalex-cli[serve]'     # CLI + bundled Node runtime
 datalex serve                        # opens http://localhost:3030
 ```
 
-That's it for most machines. On Python 3.9-3.12, `[serve]` pulls a
-portable Node runtime so you do not need to install Node separately. On
-Python 3.13+ or 3.14+, install Node 20+ first because the portable Node
-wheel is not published for those Python versions yet. If you already
+That's it for most machines. The `[serve]` extra pulls a portable Node
+runtime so you do not need to install Node separately. If you already
 have Node 20+ on your PATH, plain `pip install datalex-cli` works too.
 
 Want your own warehouse drivers? Add a connector extra:

@@ -30,9 +30,8 @@ pip install 'datalex-cli[serve]'     # CLI + bundled Node, one command
 datalex serve                        # opens http://localhost:3030
 ```
 
-On Python 3.13+ or 3.14+, install Node 20+ first. The `[serve]` extra
-bundles Node for Python 3.9-3.12, but the portable Node wheel is not
-published for newer Python versions yet.
+The `[serve]` extra bundles a portable Node runtime. If you already
+have Node 20+ on your PATH, plain `pip install datalex-cli` works too.
 
 The first `datalex serve` call prints something like:
 
