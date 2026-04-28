@@ -283,6 +283,21 @@ export async function askAi(body = {}) {
   });
 }
 
+/**
+ * Lightweight one-shot description suggestion for the inline ✨ AI buttons
+ * in the Docs view. Bypasses the heavy /ai/ask pipeline (no BM25, no
+ * agent classification, no skills, no memory). Returns
+ * `{ description, confidence }` or throws with `code: "NO_PROVIDER"`
+ * when no LLM is configured (the UI uses that to render a tooltip
+ * instead of attempting the call).
+ */
+export async function suggestAiDescription({ projectId, target, provider }) {
+  return request("/ai/suggest", {
+    method: "POST",
+    body: JSON.stringify({ projectId, target, provider }),
+  });
+}
+
 export async function previewAiContext(body = {}) {
   return request("/ai/context/preview", {
     method: "POST",

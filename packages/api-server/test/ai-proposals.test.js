@@ -227,7 +227,13 @@ entities:
     assert.equal(ask.status, 200);
     assert.equal(ask.body.ok, true);
     assert.ok(ask.body.chatId);
-    assert.ok(ask.body.memory.added.some((item) => item.category === "user_preference"));
+    // The message mentions "bounded context" — the tightened
+    // extractModelingMemories now categorizes that as a domain decision
+    // rather than a generic user_preference. Either category is a
+    // legitimate fit; the assertion just verifies that an imperative
+    // rule with bounded-context vocabulary gets persisted.
+    assert.ok(ask.body.memory.added.some((item) =>
+      item.category === "domain_decision" || item.category === "user_preference"));
 
     const chats = await request(app)
       .get("/api/ai/chats")

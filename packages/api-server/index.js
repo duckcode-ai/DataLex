@@ -225,6 +225,15 @@ const AI_AGENT_PROFILES = {
     keywords: ["yaml", "patch", "edit", "modify", "update", "delete", "create", "fix", "proposal", "generate"],
     contract: "Produce small reviewable DataLex YAML proposals, preserve existing files, use guarded proposal change types, and include rationale and validation impact.",
   },
+  description_writer: {
+    label: "Description Writer",
+    layer: "",
+    keywords: ["description", "describe", "document", "documentation", "summary", "doc", "prose", "explain", "suggest", "what is", "what does"],
+    // Tight, prose-only contract. Used by the lightweight POST /api/ai/suggest
+    // endpoint — no JSON wrapper, no proposed_changes — to power the
+    // "✨ AI" inline buttons in the Docs view next to empty descriptions.
+    contract: "Write concise 1-2 sentence descriptions for entities, columns, and models grounded in dbt + business modeling conventions. Lead with the business concept, not the table. Reply with ONLY the description text — no preamble, no quotes, no JSON. If the target's name and surrounding fields don't justify a confident description, reply with an empty string instead of guessing.",
+  },
 };
 
 const DEFAULT_AI_SKILL_FILES = [
@@ -472,6 +481,206 @@ const DEFAULT_AI_SKILL_FILES = [
       "- Every proposal needs rationale, source_context, validation_impact, and review_summary.",
       "- Keep paths inside the DataLex workspace and use the domain-first layout.",
       "- If a proposal might delete or rename user files, describe impact clearly and require user approval.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "description-writing.md",
+    content: [
+      "---",
+      "name: \"Description Writing\"",
+      "description: \"Concise prose for entity, model, and field descriptions in dbt + DataLex YAML.\"",
+      "use_when:",
+      "  - \"description\"",
+      "  - \"document\"",
+      "  - \"summary\"",
+      "  - \"explain entity\"",
+      "  - \"what does this column mean\"",
+      "tags:",
+      "  - \"prose\"",
+      "  - \"docs\"",
+      "  - \"description\"",
+      "agent_modes:",
+      "  - \"description_writer\"",
+      "  - \"governance_reviewer\"",
+      "priority: 5",
+      "---",
+      "",
+      "# Description Writing",
+      "",
+      "Used by the `description_writer` agent and the inline ✨ AI buttons in",
+      "the Docs view. Keep prose tight, business-first, and grounded in dbt",
+      "+ DataLex modeling conventions.",
+      "",
+      "## Length and shape",
+      "",
+      "- Models / entities: 1–2 sentences. Lead with the **business concept**, follow with the **dbt source / grain** if useful.",
+      "- Fields: a single noun phrase. End with the unit / nullability hint when it isn't obvious from the type.",
+      "- Never wrap descriptions in quotes. Never start with `Description:` or `This `. Never include the entity name in its own description (`Customer is a customer record` ← bad).",
+      "",
+      "## Good examples",
+      "",
+      "- Entity: `One row per customer that has placed at least one order. Mirrors the staging customer dimension; PII fields are governed by the data-stewardship policy.`",
+      "- Entity: `Header-level order event placed by a customer. Joins to the order_line entity for product detail.`",
+      "- Field: `Surrogate key minted by the customer-master pipeline. Stable across all downstream models.`",
+      "- Field: `Total order amount in USD, gross of refunds. Not null.`",
+      "- Field: `Foreign key to dim_products. Nullable for sample / promo line items.`",
+      "",
+      "## Bad examples (and why)",
+      "",
+      "- `This is the customer table.` — restates the obvious; no business meaning.",
+      "- `id` field: `The id of the customer.` — restates the column name.",
+      "- `Description: One row per customer.` — never include the literal `Description:` prefix.",
+      "- `\"One row per customer.\"` — never wrap in quotes.",
+      "- `A customer is a customer who buys things from us as a customer.` — repetition; no information.",
+      "",
+      "## When to refuse",
+      "",
+      "If the entity / field name and surrounding fields don't justify a confident description (e.g. a single column named `flag_2` with no neighbors), reply with the empty string. The system treats that as `confidence: 0` and surfaces the field for the user to write by hand.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "dbt-naming-conventions.md",
+    content: [
+      "---",
+      "name: \"dbt Naming Conventions\"",
+      "description: \"Project-wide dbt model and field naming rules. Used by the physical_dbt_developer and yaml_patch_engineer agents.\"",
+      "use_when:",
+      "  - \"naming\"",
+      "  - \"rename\"",
+      "  - \"model name\"",
+      "  - \"column name\"",
+      "  - \"convention\"",
+      "tags:",
+      "  - \"naming\"",
+      "  - \"dbt\"",
+      "  - \"convention\"",
+      "layers:",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"physical_dbt_developer\"",
+      "  - \"yaml_patch_engineer\"",
+      "  - \"governance_reviewer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# dbt Naming Conventions",
+      "",
+      "Hard rules. Apply consistently across every model the agent proposes.",
+      "",
+      "## Model name prefixes",
+      "",
+      "- `stg_<source>__<entity>` — staging layer (one-to-one with a source table). Double underscore separates source from entity.",
+      "- `int_<purpose>` — intermediate transformations between staging and marts.",
+      "- `dim_<entity>` — dimensions in the marts layer.",
+      "- `fct_<event>` — fact tables capturing measurable business events.",
+      "- `agg_<grain>__<measure>` — aggregations / rollups.",
+      "- `bdg_<left>__<right>` — bridge tables for many-to-many.",
+      "",
+      "Anything outside these prefixes needs an explicit reason in the proposal's `rationale`.",
+      "",
+      "## Field name suffixes",
+      "",
+      "- `_id` — natural / source-system identifier (string or integer from the source).",
+      "- `_pk` — primary key on the model (often a hash or surrogate).",
+      "- `_fk` — foreign key reference into another model.",
+      "- `_sk` — surrogate key.",
+      "- `_at` — UTC timestamp (datetime / timestamp_ntz).",
+      "- `_date` — calendar date without time.",
+      "- `_amount`, `_count`, `_pct` — numeric measures with implied units.",
+      "- `is_*`, `has_*` — boolean flags. Always not-null with a clear false default.",
+      "",
+      "## General",
+      "",
+      "- snake_case everywhere. Never camelCase or PascalCase in YAML.",
+      "- Plural for source tables (`raw.customers`), singular for dimensions (`dim_customer`). dbt convention varies — pick one per project and stay consistent.",
+      "- No abbreviations a new hire would miss (`cust`, `ord`, `usr` → `customer`, `order`, `user`).",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "dbt-test-coverage.md",
+    content: [
+      "---",
+      "name: \"dbt Test Coverage\"",
+      "description: \"Required dbt tests by field role. Aligns with the readiness gate's red/yellow/green thresholds.\"",
+      "use_when:",
+      "  - \"test\"",
+      "  - \"coverage\"",
+      "  - \"unique\"",
+      "  - \"not_null\"",
+      "  - \"relationships\"",
+      "  - \"accepted_values\"",
+      "tags:",
+      "  - \"tests\"",
+      "  - \"governance\"",
+      "  - \"readiness\"",
+      "layers:",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"physical_dbt_developer\"",
+      "  - \"governance_reviewer\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# dbt Test Coverage",
+      "",
+      "Required test set by field role. The DataLex readiness gate scores",
+      "files against these expectations — missing required tests turn the",
+      "file yellow; missing PK tests turn it red.",
+      "",
+      "## Primary key columns (`*_pk`, `*_sk`, `*_id` when promoted to PK)",
+      "",
+      "Required: `unique` AND `not_null`.",
+      "",
+      "```yaml",
+      "- name: customer_pk",
+      "  tests:",
+      "    - unique",
+      "    - not_null",
+      "```",
+      "",
+      "## Foreign keys (`*_fk` and inferred FKs)",
+      "",
+      "Required: `relationships` test pointing at the parent model + column.",
+      "",
+      "```yaml",
+      "- name: customer_fk",
+      "  tests:",
+      "    - relationships:",
+      "        to: ref('dim_customers')",
+      "        field: customer_pk",
+      "```",
+      "",
+      "## Enum-shaped columns (status, type, category, …)",
+      "",
+      "Required: `accepted_values` listing the allowed set.",
+      "",
+      "```yaml",
+      "- name: order_status",
+      "  tests:",
+      "    - accepted_values:",
+      "        values: ['placed','shipped','delivered','cancelled']",
+      "```",
+      "",
+      "## Cross-field invariants",
+      "",
+      "When two columns must satisfy a relationship (e.g. `start_at < end_at`,",
+      "or `total = subtotal + tax`), use `dbt_utils.expression_is_true`.",
+      "",
+      "```yaml",
+      "tests:",
+      "  - dbt_utils.expression_is_true:",
+      "      expression: \"total_amount = subtotal + tax_amount\"",
+      "```",
+      "",
+      "## Don'ts",
+      "",
+      "- Don't propose `unique` on a non-PK column unless the user explicitly asked for it.",
+      "- Don't add `not_null` on every column reflexively — only on PKs, FKs, and required business-meaning columns.",
+      "- Don't add `relationships` tests against models that don't exist yet; flag the missing parent in `validation_impact` instead.",
       "",
     ].join("\n"),
   },
@@ -3034,11 +3243,19 @@ async function buildAiIndex(project) {
 
   const dbtArtifacts = await collectDbtArtifactRecords(records, project.path);
 
+  // Skills are read from BOTH `Skills/` (canonical, since 1.4) AND
+  // `skills/` (older previews) for backward compat. A project that has
+  // both folders ends up with the same skill listed twice with different
+  // case-only paths — we saw this in the user-reported run where
+  // `DataLex Modeling Standards` showed up as two separate cards.
+  // Track basenames as we walk and skip duplicates from the second root
+  // so the canonical (capitalized) reading wins.
   const skillRoots = [
     { dir: join(structure.modelPath, DATALEX_SKILLS_DIR), label: DATALEX_SKILLS_DIR },
     // Backward-compatible read only: older previews wrote DataLex/skills.
     { dir: join(structure.modelPath, "skills"), label: "skills" },
   ];
+  const seenSkillBasenames = new Set();
   async function walkSkills(dir, label, base = dir) {
     let entries = [];
     try { entries = await readdir(dir, { withFileTypes: true }); } catch (_err) { return; }
@@ -3049,6 +3266,11 @@ async function buildAiIndex(project) {
         await walkSkills(full, label, base);
       } else if (/\.(md|ya?ml|txt)$/i.test(entry.name)) {
         const rel = toPosixPath(join(label, relative(base, full)));
+        // Dedupe across `Skills/` and `skills/` by basename. The canonical
+        // root is walked first, so its entries win on a tie.
+        const basename = entry.name.toLowerCase();
+        if (seenSkillBasenames.has(basename)) continue;
+        seenSkillBasenames.add(basename);
         let content = "";
         try { content = await readFile(full, "utf-8"); } catch (_err) { continue; }
         const meta = parseAiSkillMetadata(content);
@@ -4245,6 +4467,175 @@ app.delete("/api/ai/memory/:memoryId", requireAdmin, async (req, res, next) => {
     const deleted = await deleteAiMemory(project, req.params.memoryId);
     if (!deleted) throw new ApiError(404, "NOT_FOUND", "AI memory not found");
     res.json({ ok: true, memoryId: req.params.memoryId });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ── Lightweight description suggestion ──────────────────────────────
+ * Powers the inline "✨ AI" buttons in the Docs view next to empty
+ * descriptions. Deliberately bypasses the heavy `/api/ai/ask` pipeline
+ * (no BM25 retrieval, no agent classification, no skill scoring,
+ * no proposal validator, no memory extraction) — just a focused
+ * description-writer call grounded in the target entity/field plus its
+ * siblings.
+ *
+ * Body: {
+ *   projectId,                          // string
+ *   target: {
+ *     kind: "model" | "entity" | "field",
+ *     path,                              // workspace-relative or absolute
+ *     entity?,                           // required for kind: entity / field
+ *     field?,                            // required for kind: field
+ *   }
+ * }
+ *
+ * Response: { description, confidence } — or 503 NO_PROVIDER when no
+ * LLM is configured (the UI uses that to disable the button).
+ */
+app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next) => {
+  try {
+    const projectId = String(req.body?.projectId || "");
+    const target = req.body?.target || {};
+    const targetKind = String(target.kind || "").toLowerCase();
+    if (!["model", "entity", "field"].includes(targetKind)) {
+      throw new ApiError(400, "VALIDATION", "target.kind must be one of: model, entity, field");
+    }
+    if (!target.path) throw new ApiError(400, "VALIDATION", "target.path is required");
+    if ((targetKind === "entity" || targetKind === "field") && !target.entity) {
+      throw new ApiError(400, "VALIDATION", "target.entity is required for entity / field suggestions");
+    }
+    if (targetKind === "field" && !target.field) {
+      throw new ApiError(400, "VALIDATION", "target.field is required for field suggestions");
+    }
+
+    const { project } = await resolveProjectAndStructure(projectId);
+
+    // Provider gate runs FIRST — it's a fast-fail that doesn't depend on
+    // file existence, and the UI uses the NO_PROVIDER code to render the
+    // inline ✨ AI buttons disabled-with-tooltip instead of clicking
+    // through to a confusing error.
+    const config = resolveAiProviderConfig(req.body?.provider || {});
+    if (!config.provider || config.provider === "local") {
+      return apiFail(
+        res,
+        503,
+        "NO_PROVIDER",
+        "No AI provider configured. Add an OpenAI, Anthropic, Gemini, or Ollama provider in Settings → AI to enable inline suggestions.",
+      );
+    }
+
+    // Resolve the file path. Accept absolute paths AND workspace-relative
+    // ones; reject anything outside the project root for safety.
+    const rawPath = String(target.path);
+    const absPath = isAbsolute(rawPath) ? rawPath : join(project.path, rawPath);
+    if (!existsSync(absPath)) {
+      throw new ApiError(404, "NOT_FOUND", `target file not found: ${target.path}`);
+    }
+    const projectRoot = realpathSync(project.path);
+    const resolvedAbs = realpathSync(absPath).replace(/\/+$/, "");
+    if (!resolvedAbs.startsWith(projectRoot)) {
+      throw new ApiError(400, "VALIDATION", "target.path must point inside the project root");
+    }
+
+    // Parse the YAML and pull out just enough metadata to ground the
+    // suggestion. Cap sibling field names at 8 — past that it's noise,
+    // not signal.
+    const yamlText = readFileSync(resolvedAbs, "utf-8");
+    let doc;
+    try {
+      doc = yaml.load(yamlText);
+    } catch (err) {
+      throw new ApiError(422, "PARSE_FAILED", `Could not parse YAML: ${err.message}`);
+    }
+    if (!doc || typeof doc !== "object") {
+      throw new ApiError(422, "PARSE_FAILED", "YAML did not parse to an object");
+    }
+
+    const meta = (doc.model && typeof doc.model === "object") ? doc.model : doc;
+    const modelName = String(meta.name || basename(resolvedAbs).replace(/\.(ya?ml)$/i, ""));
+    const domain = String(meta.domain || doc.domain || "");
+    const layer = String(doc.layer || meta.layer || "");
+    const entities = Array.isArray(doc.entities) ? doc.entities :
+      Array.isArray(doc.models) ? doc.models : [];
+
+    function findEntity(name) {
+      const lower = String(name || "").toLowerCase();
+      return entities.find((e) => String(e?.name || "").toLowerCase() === lower) || null;
+    }
+
+    let userSection = "";
+    if (targetKind === "model") {
+      const entityNames = entities.map((e) => String(e?.name || "").trim()).filter(Boolean).slice(0, 12);
+      userSection = [
+        `Target kind: model`,
+        `Model name: ${modelName}`,
+        domain ? `Business domain: ${domain}` : "",
+        layer ? `Modeling layer: ${layer}` : "",
+        entityNames.length ? `Contains entities: ${entityNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    } else if (targetKind === "entity") {
+      const ent = findEntity(target.entity);
+      if (!ent) throw new ApiError(404, "NOT_FOUND", `entity not found in YAML: ${target.entity}`);
+      const fieldNames = (Array.isArray(ent.fields) ? ent.fields : [])
+        .map((f) => f?.name).filter(Boolean).slice(0, 8);
+      userSection = [
+        `Target kind: entity`,
+        `Entity name: ${ent.name}`,
+        ent.type ? `Entity type: ${ent.type}` : "",
+        domain ? `Business domain: ${domain}` : "",
+        layer ? `Modeling layer: ${layer}` : "",
+        fieldNames.length ? `Field names on this entity: ${fieldNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    } else { // field
+      const ent = findEntity(target.entity);
+      if (!ent) throw new ApiError(404, "NOT_FOUND", `entity not found: ${target.entity}`);
+      const fields = Array.isArray(ent.fields) ? ent.fields : [];
+      const fld = fields.find((f) => String(f?.name || "").toLowerCase() === String(target.field).toLowerCase());
+      if (!fld) throw new ApiError(404, "NOT_FOUND", `field not found: ${target.field}`);
+      const flags = [];
+      if (fld.primary_key) flags.push("primary key");
+      if (fld.foreign_key && fld.foreign_key.entity) flags.push(`foreign key → ${fld.foreign_key.entity}.${fld.foreign_key.field || "?"}`);
+      if (fld.unique) flags.push("unique");
+      if (fld.nullable === false) flags.push("not null");
+      const siblingNames = fields.map((f) => f?.name).filter((n) => n && n !== fld.name).slice(0, 6);
+      userSection = [
+        `Target kind: field`,
+        `Field name: ${fld.name}`,
+        fld.type ? `Field type: ${fld.type}` : "",
+        flags.length ? `Field flags: ${flags.join(", ")}` : "",
+        `Parent entity: ${ent.name}${ent.type ? ` (${ent.type})` : ""}`,
+        domain ? `Business domain: ${domain}` : "",
+        siblingNames.length ? `Sibling fields on the same entity: ${siblingNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    const system = AI_AGENT_PROFILES.description_writer.contract;
+    const user = `${userSection}\n\nWrite the description now. Return ONLY the description text, no preamble, no quotes, no JSON.`;
+
+    let raw;
+    try {
+      raw = await callAiProvider(config, [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ]);
+    } catch (err) {
+      throw new ApiError(502, "PROVIDER_FAILED", `AI provider call failed: ${err?.message || err}`);
+    }
+
+    // Strip any preamble / quotes the model might add despite the contract.
+    const cleaned = String(raw || "")
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, "")
+      .replace(/^Description:\s*/i, "")
+      .trim();
+
+    res.json({
+      ok: true,
+      description: cleaned,
+      confidence: cleaned ? 0.7 : 0.0,
+      target: { kind: targetKind, path: target.path, entity: target.entity, field: target.field },
+    });
   } catch (err) {
     next(err);
   }

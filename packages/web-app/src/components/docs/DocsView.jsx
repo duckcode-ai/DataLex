@@ -20,19 +20,53 @@
  * No file is ever written to disk by this view. YAML stays the single
  * source of truth.
  */
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import yaml from "js-yaml";
-import { Sparkles, FileText, AlertTriangle } from "lucide-react";
+import { Sparkles, FileText, AlertTriangle, Loader2 } from "lucide-react";
 import useWorkspaceStore from "../../stores/workspaceStore";
-import useUiStore from "../../stores/uiStore";
 import {
   setModelDescription,
   setEntityDescription,
   patchField,
 } from "../../design/yamlPatch";
-import { fetchDbtReadinessReview, runDbtReadinessReview } from "../../lib/api";
+import {
+  fetchDbtReadinessReview,
+  runDbtReadinessReview,
+  suggestAiDescription,
+} from "../../lib/api";
 import EditableDescription from "./EditableDescription";
 import MermaidERD from "./MermaidERD";
+
+/* AI provider gating.
+ *
+ * The Suggest endpoint refuses to call the LLM when no real provider is
+ * configured (it 503's with code "NO_PROVIDER"). Mirror that check on
+ * the client so the inline ✨ AI buttons can render disabled-with-tooltip
+ * instead of clicking through to a confusing error.
+ *
+ * Provider config lives in localStorage (set by SettingsDialog → AI):
+ *   datalex.ai.provider  ∈ { "local", "openai", "anthropic", "gemini", "ollama" }
+ *   datalex.ai.apiKey    (the key, if applicable)
+ *
+ * "local" and unset both mean "no real LLM" — gate the button. The
+ * `local` provider passes through the readiness gate's `aiConfigured`
+ * check (which counts local as "configured"), but for actual one-shot
+ * generation we need a real LLM.
+ */
+function readAiProviderForSuggest() {
+  try {
+    const provider = (localStorage.getItem("datalex.ai.provider") || "").trim().toLowerCase();
+    if (!provider || provider === "local") return null;
+    return {
+      provider,
+      apiKey: localStorage.getItem("datalex.ai.apiKey") || "",
+      model: localStorage.getItem("datalex.ai.model") || "",
+      baseUrl: localStorage.getItem("datalex.ai.baseUrl") || "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function flagsCellFor(field) {
   const flags = [];
@@ -86,7 +120,21 @@ export default function DocsView() {
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
   const updateContent = useWorkspaceStore((s) => s.updateContent);
   const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
-  const openModal = useUiStore((s) => s.openModal);
+
+  // Refresh the provider snapshot whenever the file changes — covers the
+  // case where the user just saved their AI key in Settings and clicks
+  // back into the Docs view. This is cheap (a localStorage read).
+  const [aiProvider, setAiProvider] = useState(() => readAiProviderForSuggest());
+  useEffect(() => {
+    setAiProvider(readAiProviderForSuggest());
+  }, [activeFile?.path]);
+  const aiEnabled = Boolean(aiProvider);
+  const aiDisabledHint = "Add an OpenAI / Anthropic / Gemini / Ollama provider in Settings → AI to enable inline suggestions.";
+
+  // In-flight requests, keyed by a deterministic signature so we can show
+  // a per-button spinner without coupling to a global loading flag.
+  const [aiBusyKey, setAiBusyKey] = useState(null);
+  const [aiError, setAiError] = useState("");
 
   const doc = useMemo(() => parseYaml(activeFileContent || ""), [activeFileContent]);
 
@@ -173,19 +221,62 @@ export default function DocsView() {
     writeIfChanged(patchField(activeFileContent || "", entityName, fieldName, { description: text }));
   };
 
-  // -------- AI suggestion launcher --------
-  const askAiToSuggest = (kind, target) => {
+  // -------- One-shot inline AI suggestion --------
+  // Calls POST /api/ai/suggest with just the path + entity/field name —
+  // the server reads the YAML, builds a focused prompt, invokes ONLY the
+  // description_writer agent, returns plain text. Result is written back
+  // through the same yamlPatch helpers as inline edits, so it shows up
+  // immediately in the rendered description and the underlying YAML.
+  //
+  // No chat dialog. No memory extraction. No 4-agent run.
+  const askAiToSuggest = useCallback(async (kind, target) => {
+    if (!aiEnabled || !activeFile) return;
     const filePath = activeFile.path || activeFile.fullPath || activeFile.name;
-    let initialMessage = "";
-    if (kind === "model") {
-      initialMessage = `For the dbt + DataLex model at \`${filePath}\` (domain: ${domain || "?"}, layer: ${layer || "?"}), suggest a 1-2 sentence description that explains what business concept this model represents. Reply with ONLY the description text — no preamble, no quotes.`;
-    } else if (kind === "entity") {
-      initialMessage = `For the entity \`${target}\` in \`${filePath}\` (domain: ${domain || "?"}, layer: ${layer || "?"}), suggest a 1-2 sentence description grounded in dbt + business modeling conventions. Reply with ONLY the description text.`;
-    } else if (kind === "field") {
-      initialMessage = `For the field \`${target.field}\` on entity \`${target.entity}\` in \`${filePath}\`, suggest a one-line description. Reply with ONLY the description text.`;
+    const key = kind === "model"
+      ? `model:${filePath}`
+      : kind === "entity"
+      ? `entity:${target}`
+      : `field:${target.entity}.${target.field}`;
+    setAiBusyKey(key);
+    setAiError("");
+    try {
+      const resp = await suggestAiDescription({
+        projectId: activeProjectId,
+        provider: aiProvider,
+        target: {
+          kind,
+          path: filePath,
+          entity: kind === "entity" ? String(target) : kind === "field" ? target.entity : undefined,
+          field: kind === "field" ? target.field : undefined,
+        },
+      });
+      const text = String(resp?.description || "").trim();
+      if (!text) {
+        setAiError("AI returned an empty suggestion. Try again or write the description by hand.");
+        return;
+      }
+      // Write back through the same patch helpers an inline edit would use.
+      if (kind === "model") {
+        writeIfChanged(setModelDescription(activeFileContent || "", text));
+      } else if (kind === "entity") {
+        writeIfChanged(setEntityDescription(activeFileContent || "", String(target), text));
+      } else {
+        writeIfChanged(patchField(activeFileContent || "", target.entity, target.field, { description: text }));
+      }
+    } catch (err) {
+      // The server uses a known code when no real provider is configured.
+      // Refresh our local snapshot so the buttons disable themselves on
+      // the next render.
+      if (err?.code === "NO_PROVIDER") {
+        setAiProvider(null);
+        setAiError(err.message || aiDisabledHint);
+      } else {
+        setAiError(err?.message || "AI suggestion failed.");
+      }
+    } finally {
+      setAiBusyKey(null);
     }
-    openModal("askAi", { initialMessage });
-  };
+  }, [aiEnabled, activeFile, activeProjectId, aiProvider, activeFileContent]);
 
   const renderEntityReadiness = (entityName) => {
     if (!fileReview || !Array.isArray(fileReview.findings)) return null;
@@ -218,6 +309,9 @@ export default function DocsView() {
         color: "var(--text-primary)",
       }}
     >
+      {/* Inline `@keyframes spin` once for the AI Loader2 icons; scoped to
+          the DocsView root so we don't need a global stylesheet edit. */}
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
         {/* Header */}
         <header style={{ marginBottom: 18 }}>
@@ -286,30 +380,53 @@ export default function DocsView() {
               onSave={handleModelDescription}
               ariaLabel="model description"
             />
-            {!meta.description && (
-              <button
-                type="button"
-                onClick={() => askAiToSuggest("model")}
-                title="Ask the AI assistant to suggest a description"
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 4,
-                  padding: "4px 9px",
-                  borderRadius: 6,
-                  border: "1px solid var(--accent, #3b82f6)",
-                  background: "rgba(59,130,246,0.12)",
-                  color: "var(--accent, #3b82f6)",
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <Sparkles size={11} /> Suggest with AI
-              </button>
-            )}
+            {!meta.description && (() => {
+              const busy = aiBusyKey === `model:${activeFile.path || activeFile.fullPath || activeFile.name}`;
+              return (
+                <button
+                  type="button"
+                  onClick={() => askAiToSuggest("model")}
+                  disabled={!aiEnabled || busy}
+                  title={aiEnabled
+                    ? (busy ? "Generating…" : "Ask AI to suggest a description")
+                    : aiDisabledHint}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 4,
+                    padding: "4px 9px",
+                    borderRadius: 6,
+                    border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
+                    background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
+                    color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
+                    whiteSpace: "nowrap",
+                    opacity: aiEnabled ? 1 : 0.7,
+                  }}
+                >
+                  {busy
+                    ? <Loader2 size={11} style={{ animation: "spin 0.9s linear infinite" }} />
+                    : <Sparkles size={11} />}
+                  {busy ? "Generating…" : "Suggest with AI"}
+                </button>
+              );
+            })()}
           </div>
+          {aiError && (
+            <div style={{
+              marginTop: 8,
+              padding: "6px 10px",
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              background: "rgba(239,68,68,0.08)",
+              border: "1px solid rgba(239,68,68,0.25)",
+              borderRadius: 6,
+            }}>
+              {aiError}
+            </div>
+          )}
         </section>
 
         {/* Mermaid ERD */}
@@ -355,11 +472,16 @@ export default function DocsView() {
                   onSave={handleEntityDescription(entName)}
                   ariaLabel={`${entName} description`}
                 />
-                {!ent.description && (
+                {!ent.description && (() => {
+                  const busy = aiBusyKey === `entity:${entName}`;
+                  return (
                   <button
                     type="button"
                     onClick={() => askAiToSuggest("entity", entName)}
-                    title="Ask the AI assistant to suggest a description for this entity"
+                    disabled={!aiEnabled || busy}
+                    title={aiEnabled
+                      ? (busy ? "Generating…" : "Ask AI to suggest a description for this entity")
+                      : aiDisabledHint}
                     style={{
                       flexShrink: 0,
                       display: "inline-flex",
@@ -367,19 +489,24 @@ export default function DocsView() {
                       gap: 4,
                       padding: "4px 9px",
                       borderRadius: 6,
-                      border: "1px solid var(--accent, #3b82f6)",
-                      background: "rgba(59,130,246,0.12)",
-                      color: "var(--accent, #3b82f6)",
+                      border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
+                      background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
+                      color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
                       fontSize: 11.5,
                       fontWeight: 600,
-                      cursor: "pointer",
+                      cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
                       whiteSpace: "nowrap",
                       marginTop: 6,
+                      opacity: aiEnabled ? 1 : 0.7,
                     }}
                   >
-                    <Sparkles size={11} /> AI
+                    {busy
+                      ? <Loader2 size={11} style={{ animation: "spin 0.9s linear infinite" }} />
+                      : <Sparkles size={11} />}
+                    {busy ? "…" : "AI"}
                   </button>
-                )}
+                  );
+                })()}
               </div>
 
               {fields.length > 0 && (
@@ -426,11 +553,16 @@ export default function DocsView() {
                                   ariaLabel={`${entName}.${fname} description`}
                                 />
                               </div>
-                              {!fld.description && (
+                              {!fld.description && (() => {
+                                const busy = aiBusyKey === `field:${entName}.${fname}`;
+                                return (
                                 <button
                                   type="button"
                                   onClick={() => askAiToSuggest("field", { entity: entName, field: fname })}
-                                  title="Ask AI to suggest a description for this field"
+                                  disabled={!aiEnabled || busy}
+                                  title={aiEnabled
+                                    ? (busy ? "Generating…" : "Ask AI to suggest a description for this field")
+                                    : aiDisabledHint}
                                   style={{
                                     flexShrink: 0,
                                     display: "inline-flex",
@@ -438,17 +570,22 @@ export default function DocsView() {
                                     gap: 3,
                                     padding: "2px 6px",
                                     borderRadius: 4,
-                                    border: "1px solid var(--accent, #3b82f6)",
-                                    background: "rgba(59,130,246,0.12)",
-                                    color: "var(--accent, #3b82f6)",
+                                    border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
+                                    background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
+                                    color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
                                     fontSize: 10.5,
                                     fontWeight: 600,
-                                    cursor: "pointer",
+                                    cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
+                                    opacity: aiEnabled ? 1 : 0.7,
                                   }}
                                 >
-                                  <Sparkles size={9} /> AI
+                                  {busy
+                                    ? <Loader2 size={9} style={{ animation: "spin 0.9s linear infinite" }} />
+                                    : <Sparkles size={9} />}
+                                  {busy ? "…" : "AI"}
                                 </button>
-                              )}
+                                );
+                              })()}
                             </div>
                           </td>
                         </tr>
