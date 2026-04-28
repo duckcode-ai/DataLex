@@ -318,7 +318,7 @@ next PyPI release hasn't shipped yet. Equivalent one-liner without the
 script:
 
 ```bash
-pip install -U "git+https://github.com/duckcode-ai/DataLex.git#subdirectory=packages/cli"
+pip install -U "git+https://github.com/duckcode-ai/DataLex.git"
 ```
 
 ### Install Troubleshooting
