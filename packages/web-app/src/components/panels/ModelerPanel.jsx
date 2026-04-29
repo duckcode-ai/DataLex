@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug, X as XIcon, Eye, EyeOff } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug, X as XIcon, Eye, EyeOff, BookOpen } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -14,6 +14,7 @@ import {
   setEntityDomain,
   setEntitySubjectArea,
   setEntityTags,
+  setEntityTerms,
   setEntityVisibility,
 } from "../../design/yamlPatch";
 import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
@@ -268,6 +269,106 @@ function TagsField({ value = [], onSave, readOnly = false }) {
             fontSize: 11,
             padding: "1px 2px",
             minWidth: 80,
+            flex: 1,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* TermsField — like TagsField but every term is clickable. Clicking
+   a term jumps the user to the Dictionary tab so they can read the
+   glossary entry that matches. The Dictionary panel computes which
+   entities reference each term, closing the loop both ways. */
+function TermsField({ value = [], onSave, onJumpToTerm, readOnly = false }) {
+  const [draft, setDraft] = useState("");
+  const terms = Array.isArray(value) ? value : [];
+  const addTerm = (raw) => {
+    const cleaned = String(raw || "").trim();
+    if (!cleaned) return;
+    if (terms.includes(cleaned)) { setDraft(""); return; }
+    onSave?.([...terms, cleaned]);
+    setDraft("");
+  };
+  const removeTerm = (idx) => {
+    const next = terms.filter((_, i) => i !== idx);
+    onSave?.(next);
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+      {terms.map((term, idx) => (
+        <span
+          key={`${term}-${idx}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 3,
+            padding: "1px 4px 1px 7px",
+            borderRadius: 999,
+            background: "rgba(168,85,247,0.16)",
+            border: "1px solid rgba(168,85,247,0.4)",
+            color: "var(--text-primary)",
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onJumpToTerm?.(term)}
+            title={`Open the glossary entry for ${term}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 3,
+              background: "transparent",
+              border: "none",
+              padding: 0,
+              cursor: "pointer",
+              color: "inherit",
+              fontSize: "inherit",
+              fontWeight: "inherit",
+            }}
+          >
+            <BookOpen size={10} />
+            {term}
+          </button>
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => removeTerm(idx)}
+              title={`Remove ${term}`}
+              style={{ background: "transparent", border: "none", color: "var(--text-tertiary)", cursor: "pointer", padding: 0, lineHeight: 0 }}
+            >
+              <XIcon size={10} />
+            </button>
+          )}
+        </span>
+      ))}
+      {!readOnly && (
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              addTerm(draft);
+            } else if (e.key === "Backspace" && !draft && terms.length) {
+              e.preventDefault();
+              removeTerm(terms.length - 1);
+            }
+          }}
+          onBlur={() => addTerm(draft)}
+          placeholder={terms.length ? "Add term…" : "customer_id, email, …"}
+          style={{
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: "var(--text-primary)",
+            fontSize: 11,
+            padding: "1px 2px",
+            minWidth: 100,
             flex: 1,
           }}
         />
@@ -603,6 +704,18 @@ export default function ModelerPanel() {
                     const out = setEntityTags(activeFileContent, selectedEntity.name, nextTags);
                     if (out) updateContent(out);
                   }}
+                />
+              </PropertyCard>
+
+              <PropertyCard label="Glossary terms" fullWidth hint="Names of glossary entries this concept owns or references. Click a chip to jump to the Dictionary.">
+                <TermsField
+                  value={selectedEntity.terms || []}
+                  readOnly={!canEdit}
+                  onSave={(nextTerms) => {
+                    const out = setEntityTerms(activeFileContent, selectedEntity.name, nextTerms);
+                    if (out) updateContent(out);
+                  }}
+                  onJumpToTerm={() => setBottomPanelTab("dictionary")}
                 />
               </PropertyCard>
 

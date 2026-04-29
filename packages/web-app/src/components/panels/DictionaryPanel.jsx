@@ -21,8 +21,10 @@ import React, { useState, useMemo } from "react";
 import {
   BookOpen, Search, Table2, Eye, Layers, HardDrive, Camera,
   ChevronDown, ChevronRight, ArrowRightLeft, ListOrdered, Gauge,
+  Boxes,
 } from "lucide-react";
 import useDiagramStore from "../../stores/diagramStore";
+import useUiStore from "../../stores/uiStore";
 import {
   PanelFrame, PanelSection, PanelCard, StatusPill, PanelEmpty,
 } from "./PanelFrame";
@@ -217,7 +219,8 @@ function EntityCard({ entity, classifications, indexes, relationships, isExpande
 }
 
 export default function DictionaryPanel() {
-  const { model } = useDiagramStore();
+  const { model, selectEntity } = useDiagramStore();
+  const setBottomPanelTab = useUiStore((s) => s.setBottomPanelTab);
   const [search, setSearch] = useState("");
   const [expandedEntities, setExpandedEntities] = useState(new Set());
 
@@ -228,6 +231,37 @@ export default function DictionaryPanel() {
   const glossary = model?.glossary || [];
   const modelLayer = model?.model?.layer || "";
   const classifications = model?.governance?.classification || {};
+
+  /* Build a map term-name → entities that reference the term in their
+     `terms:` array, so each glossary card can show the concepts that
+     own/use the term. Closes the bidirectional loop:
+       Build panel  : concept.terms[]   → click term  → Dictionary tab
+       Dictionary   : term.entities[]   → click entity → selectEntity()
+  */
+  const entitiesByTerm = useMemo(() => {
+    const map = new Map();
+    for (const e of entities) {
+      const terms = Array.isArray(e?.terms) ? e.terms : [];
+      for (const t of terms) {
+        const key = String(t || "").trim();
+        if (!key) continue;
+        const list = map.get(key) || [];
+        list.push(e);
+        map.set(key, list);
+      }
+    }
+    return map;
+  }, [entities]);
+
+  const jumpToEntity = (entity) => {
+    if (!entity) return;
+    selectEntity?.(entity.name);
+    // Switching to Build (modeler) lets the user immediately edit the
+    // selected concept; if Build isn't available on the current layer
+    // the next-best landing is the Properties tab, which the bottom
+    // drawer will fall back to automatically.
+    setBottomPanelTab?.("modeler");
+  };
 
   const filtered = useMemo(() => {
     if (!search.trim()) return entities;
@@ -421,12 +455,19 @@ export default function DictionaryPanel() {
       {filteredGlossary.length > 0 && (
         <PanelSection title="Business Glossary" count={filteredGlossary.length} icon={<BookOpen size={11} />}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {filteredGlossary.map((term) => (
+            {filteredGlossary.map((term) => {
+              const referenced = entitiesByTerm.get(term.term) || [];
+              return (
               <PanelCard key={term.term} tone="accent" dense>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontSize: 12.5, fontWeight: 600, color: "var(--text-primary)" }}>{term.term}</span>
                   {term.abbreviation && (
                     <span style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>({term.abbreviation})</span>
+                  )}
+                  {referenced.length > 0 && (
+                    <StatusPill tone="info" title={`Referenced by ${referenced.length} ${referenced.length === 1 ? "concept" : "concepts"}`}>
+                      {referenced.length} {referenced.length === 1 ? "concept" : "concepts"}
+                    </StatusPill>
                   )}
                 </div>
                 {term.definition && (
@@ -450,8 +491,42 @@ export default function DictionaryPanel() {
                     ))}
                   </div>
                 )}
+                {referenced.length > 0 && (
+                  <div style={{ marginTop: 8, paddingTop: 6, borderTop: "1px dashed var(--border-default)" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginBottom: 4 }}>
+                      Used by
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                      {referenced.map((entity) => (
+                        <button
+                          key={entity.name}
+                          type="button"
+                          onClick={() => jumpToEntity(entity)}
+                          title={`Select ${entity.name} on the canvas`}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            padding: "1px 8px",
+                            borderRadius: 999,
+                            background: "rgba(34,197,94,0.14)",
+                            border: "1px solid rgba(34,197,94,0.4)",
+                            color: "var(--text-primary)",
+                            fontSize: 10.5,
+                            fontWeight: 600,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <Boxes size={10} />
+                          {entity.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </PanelCard>
-            ))}
+              );
+            })}
           </div>
         </PanelSection>
       )}
