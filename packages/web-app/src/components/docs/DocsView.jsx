@@ -29,6 +29,7 @@ import {
   setEntityDescription,
   patchField,
 } from "../../design/yamlPatch";
+import { classifyYamlDocument, YAML_DOCUMENT_KINDS } from "../../lib/yamlDocumentKind";
 import {
   fetchDbtReadinessReview,
   runDbtReadinessReview,
@@ -196,6 +197,455 @@ function ReadinessChip({ status, count, label }) {
   );
 }
 
+/* DbtShapeSections — renders dbt-native YAML shapes that DocsView used to
+ * skip past silently. A real-world dbt project file (e.g. fct_orders.yml)
+ * typically contains:
+ *
+ *   semantic_models:  one-or-more semantic models with entities/dimensions/measures
+ *   metrics:          simple/ratio/derived/cumulative metrics
+ *   saved_queries:    pre-baked metric queries with group_by + exports
+ *
+ * Plus dbt schema.yml shapes:
+ *
+ *   models:    each with columns[]
+ *   sources:   each with tables[] each with columns[]
+ *   exposures: dashboards / downstream consumers
+ *   snapshots: SCD-2 snapshot tables
+ *
+ * Each sub-renderer is read-only (no inline editing yet) — the goal here
+ * is to close the "DocsView renders blank for dbt files" gap; editing
+ * support can come later if the user asks for it.
+ */
+function pillStyle(extra = {}) {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 5,
+    padding: "2px 8px",
+    borderRadius: 999,
+    background: "var(--bg-2)",
+    border: "1px solid var(--border-default)",
+    color: "var(--text-secondary)",
+    fontSize: 11,
+    fontWeight: 600,
+    ...extra,
+  };
+}
+
+function SubTable({ headers, rows }) {
+  if (!rows.length) return null;
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 8 }}>
+      <thead>
+        <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11 }}>
+          {headers.map((h) => (
+            <th
+              key={h}
+              style={{
+                padding: "6px 10px",
+                borderBottom: "1px solid var(--border-default)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                fontWeight: 700,
+              }}
+            >
+              {h}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((cells, idx) => (
+          <tr key={idx} style={{ verticalAlign: "top" }}>
+            {cells.map((cell, cIdx) => (
+              <td
+                key={cIdx}
+                style={{
+                  padding: "6px 10px",
+                  borderBottom: "1px solid var(--border-subtle, var(--border-default))",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                {cell == null || cell === "" ? <span style={{ color: "var(--text-tertiary)" }}>—</span> : cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function SemanticModelCard({ sm }) {
+  const name = String(sm?.name || "(unnamed semantic model)");
+  const entities = Array.isArray(sm?.entities) ? sm.entities : [];
+  const dimensions = Array.isArray(sm?.dimensions) ? sm.dimensions : [];
+  const measures = Array.isArray(sm?.measures) ? sm.measures : [];
+  const modelRef = sm?.model ? String(sm.model) : null;
+  return (
+    <section className="dlx-docs-card" id={`semantic-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: "-0.005em" }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(168,85,247,0.12)", borderColor: "rgba(168,85,247,0.3)", color: "var(--text-primary)" }}>
+          semantic model
+        </span>
+        {modelRef && (
+          <span className="dlx-docs-pill" title="dbt model this semantic layer wraps">
+            <strong style={{ opacity: 0.6 }}>model</strong> <code>{modelRef}</code>
+          </span>
+        )}
+        {entities.length > 0 && <span className="dlx-docs-pill">{entities.length} entit{entities.length === 1 ? "y" : "ies"}</span>}
+        {dimensions.length > 0 && <span className="dlx-docs-pill">{dimensions.length} dimension{dimensions.length === 1 ? "" : "s"}</span>}
+        {measures.length > 0 && <span className="dlx-docs-pill">{measures.length} measure{measures.length === 1 ? "" : "s"}</span>}
+      </header>
+      {sm?.description && (
+        <p style={{ margin: "10px 0 4px", fontSize: 13.5, lineHeight: 1.6, color: "var(--text-primary)" }}>
+          {String(sm.description)}
+        </p>
+      )}
+      {entities.length > 0 && (
+        <>
+          <p className="dlx-docs-eyebrow" style={{ margin: "16px 0 4px" }}>Entities</p>
+          <SubTable
+            headers={["Name", "Type", "Expression"]}
+            rows={entities.map((e) => [
+              <code key="n">{String(e?.name || "")}</code>,
+              <code key="t">{String(e?.type || "")}</code>,
+              e?.expr ? <code key="e">{String(e.expr)}</code> : null,
+            ])}
+          />
+        </>
+      )}
+      {dimensions.length > 0 && (
+        <>
+          <p className="dlx-docs-eyebrow" style={{ margin: "16px 0 4px" }}>Dimensions</p>
+          <SubTable
+            headers={["Name", "Type", "Expression / Granularity"]}
+            rows={dimensions.map((d) => {
+              const grain = d?.type_params?.time_granularity ? `granularity: ${d.type_params.time_granularity}` : null;
+              const expr = d?.expr ? <code>{String(d.expr)}</code> : grain ? <span>{grain}</span> : null;
+              return [
+                <code key="n">{String(d?.name || "")}</code>,
+                <code key="t">{String(d?.type || "")}</code>,
+                expr,
+              ];
+            })}
+          />
+        </>
+      )}
+      {measures.length > 0 && (
+        <>
+          <p className="dlx-docs-eyebrow" style={{ margin: "16px 0 4px" }}>Measures</p>
+          <SubTable
+            headers={["Name", "Aggregation", "Expression"]}
+            rows={measures.map((m) => [
+              <code key="n">{String(m?.name || "")}</code>,
+              <code key="a">{String(m?.agg || "")}</code>,
+              m?.expr ? <code key="e">{String(m.expr)}</code> : null,
+            ])}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+function metricSummaryCell(metric) {
+  const type = String(metric?.type || "").toLowerCase();
+  const tp = metric?.type_params || {};
+  if (type === "simple" && tp.measure) {
+    const measure = typeof tp.measure === "object" ? tp.measure?.name : tp.measure;
+    return <code>measure: {String(measure)}</code>;
+  }
+  if (type === "ratio" && (tp.numerator || tp.denominator)) {
+    const num = typeof tp.numerator === "object" ? tp.numerator?.name : tp.numerator;
+    const den = typeof tp.denominator === "object" ? tp.denominator?.name : tp.denominator;
+    return <code>{String(num)} / {String(den)}</code>;
+  }
+  if (type === "derived" && tp.expr) {
+    return <code>{String(tp.expr)}</code>;
+  }
+  if (type === "cumulative" && tp.measure) {
+    const measure = typeof tp.measure === "object" ? tp.measure?.name : tp.measure;
+    const window = tp.window ? ` · window: ${tp.window}` : "";
+    return <code>cumulative({String(measure)}){window}</code>;
+  }
+  return null;
+}
+
+function MetricsBlock({ metrics }) {
+  if (!metrics.length) return null;
+  const grouped = metrics.reduce((acc, m) => {
+    const t = String(m?.type || "other").toLowerCase();
+    (acc[t] = acc[t] || []).push(m);
+    return acc;
+  }, {});
+  const order = ["simple", "ratio", "derived", "cumulative", "conversion"];
+  const groups = [
+    ...order.filter((k) => grouped[k]).map((k) => [k, grouped[k]]),
+    ...Object.entries(grouped).filter(([k]) => !order.includes(k)),
+  ];
+  return (
+    <section className="dlx-docs-card">
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Metrics</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(34,197,94,0.12)", borderColor: "rgba(34,197,94,0.3)", color: "var(--text-primary)" }}>
+          {metrics.length} total
+        </span>
+        {groups.map(([type, list]) => (
+          <span key={type} className="dlx-docs-pill" title={`${list.length} ${type} metric${list.length === 1 ? "" : "s"}`}>
+            <strong style={{ opacity: 0.6 }}>{type}</strong> <code>{list.length}</code>
+          </span>
+        ))}
+      </header>
+      {groups.map(([type, list]) => (
+        <div key={type} style={{ marginTop: 12 }}>
+          <p className="dlx-docs-eyebrow" style={{ margin: "8px 0 4px" }}>{type} metrics</p>
+          <SubTable
+            headers={["Name", "Label", "Definition", "Description"]}
+            rows={list.map((m) => [
+              <code key="n">{String(m?.name || "")}</code>,
+              m?.label ? String(m.label) : null,
+              metricSummaryCell(m),
+              m?.description ? String(m.description) : null,
+            ])}
+          />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function SavedQueryCard({ sq }) {
+  const name = String(sq?.name || "(unnamed saved query)");
+  const params = sq?.query_params || {};
+  const metricsList = Array.isArray(params.metrics) ? params.metrics : [];
+  const groupBy = Array.isArray(params.group_by) ? params.group_by : [];
+  const where = Array.isArray(params.where) ? params.where : (params.where ? [params.where] : []);
+  const exports = Array.isArray(sq?.exports) ? sq.exports : [];
+  return (
+    <section className="dlx-docs-card" id={`saved-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(245,158,11,0.12)", borderColor: "rgba(245,158,11,0.3)", color: "var(--text-primary)" }}>
+          saved query
+        </span>
+        {sq?.label && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>label</strong> <code>{String(sq.label)}</code></span>}
+        {exports.length > 0 && <span className="dlx-docs-pill">{exports.length} export{exports.length === 1 ? "" : "s"}</span>}
+      </header>
+      {sq?.description && (
+        <p style={{ margin: "10px 0 4px", fontSize: 13.5, lineHeight: 1.6, color: "var(--text-primary)" }}>
+          {String(sq.description)}
+        </p>
+      )}
+      {(metricsList.length > 0 || groupBy.length > 0 || where.length > 0) && (
+        <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+          {metricsList.length > 0 && (
+            <div>
+              <span style={pillStyle({ marginRight: 6 })}>metrics</span>
+              {metricsList.map((m, i) => (
+                <code key={i} style={{ marginRight: 6, fontSize: 12 }}>{String(m)}</code>
+              ))}
+            </div>
+          )}
+          {groupBy.length > 0 && (
+            <div>
+              <span style={pillStyle({ marginRight: 6 })}>group_by</span>
+              {groupBy.map((g, i) => (
+                <code key={i} style={{ marginRight: 6, fontSize: 12 }}>{String(g)}</code>
+              ))}
+            </div>
+          )}
+          {where.length > 0 && (
+            <div>
+              <span style={pillStyle({ marginRight: 6 })}>where</span>
+              {where.map((w, i) => (
+                <code key={i} style={{ marginRight: 6, fontSize: 12 }}>{String(w)}</code>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {exports.length > 0 && (
+        <>
+          <p className="dlx-docs-eyebrow" style={{ margin: "16px 0 4px" }}>Exports</p>
+          <SubTable
+            headers={["Name", "Type", "Schema", "Alias"]}
+            rows={exports.map((e) => [
+              <code key="n">{String(e?.name || "")}</code>,
+              <code key="t">{String(e?.config?.export_as || "")}</code>,
+              e?.config?.schema ? <code>{String(e.config.schema)}</code> : null,
+              e?.config?.alias ? <code>{String(e.config.alias)}</code> : null,
+            ])}
+          />
+        </>
+      )}
+    </section>
+  );
+}
+
+function ColumnsTable({ columns }) {
+  if (!columns?.length) return null;
+  return (
+    <SubTable
+      headers={["Column", "Type", "Tests", "Description"]}
+      rows={columns.map((c) => {
+        const tests = Array.isArray(c?.tests) ? c.tests : Array.isArray(c?.data_tests) ? c.data_tests : [];
+        const testNames = tests.map((t) => (typeof t === "string" ? t : Object.keys(t || {})[0] || "")).filter(Boolean);
+        return [
+          <code key="n">{String(c?.name || "")}</code>,
+          c?.data_type ? <code>{String(c.data_type)}</code> : null,
+          testNames.length ? <span style={{ fontSize: 11.5 }}>{testNames.join(", ")}</span> : null,
+          c?.description ? String(c.description) : null,
+        ];
+      })}
+    />
+  );
+}
+
+function DbtModelCard({ m }) {
+  const name = String(m?.name || "(unnamed model)");
+  const columns = Array.isArray(m?.columns) ? m.columns : [];
+  return (
+    <section className="dlx-docs-card" id={`dbt-model-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(59,130,246,0.12)", borderColor: "rgba(59,130,246,0.3)", color: "var(--text-primary)" }}>
+          dbt model
+        </span>
+        {columns.length > 0 && <span className="dlx-docs-pill">{columns.length} column{columns.length === 1 ? "" : "s"}</span>}
+      </header>
+      {m?.description && (
+        <p style={{ margin: "10px 0 4px", fontSize: 13.5, lineHeight: 1.6 }}>{String(m.description)}</p>
+      )}
+      <ColumnsTable columns={columns} />
+    </section>
+  );
+}
+
+function DbtSourceCard({ s }) {
+  const name = String(s?.name || "(unnamed source)");
+  const tables = Array.isArray(s?.tables) ? s.tables : [];
+  return (
+    <section className="dlx-docs-card" id={`dbt-source-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(20,184,166,0.12)", borderColor: "rgba(20,184,166,0.3)", color: "var(--text-primary)" }}>
+          source
+        </span>
+        {s?.database && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>db</strong> <code>{String(s.database)}</code></span>}
+        {s?.schema && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>schema</strong> <code>{String(s.schema)}</code></span>}
+        <span className="dlx-docs-pill">{tables.length} table{tables.length === 1 ? "" : "s"}</span>
+      </header>
+      {s?.description && (
+        <p style={{ margin: "10px 0 8px", fontSize: 13.5, lineHeight: 1.6 }}>{String(s.description)}</p>
+      )}
+      {tables.map((t, i) => (
+        <div key={(t?.name || i) + ""} style={{ marginTop: 12 }}>
+          <p className="dlx-docs-eyebrow" style={{ margin: "8px 0 2px" }}>table · {String(t?.name || `#${i + 1}`)}</p>
+          {t?.description && (
+            <p style={{ margin: "0 0 6px", fontSize: 12.5, color: "var(--text-secondary)" }}>{String(t.description)}</p>
+          )}
+          <ColumnsTable columns={Array.isArray(t?.columns) ? t.columns : []} />
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function ExposureCard({ e }) {
+  const name = String(e?.name || "(unnamed exposure)");
+  const dependsOn = Array.isArray(e?.depends_on) ? e.depends_on : [];
+  return (
+    <section className="dlx-docs-card" id={`exposure-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(236,72,153,0.12)", borderColor: "rgba(236,72,153,0.3)", color: "var(--text-primary)" }}>
+          exposure
+        </span>
+        {e?.type && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>type</strong> <code>{String(e.type)}</code></span>}
+        {e?.maturity && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>maturity</strong> <code>{String(e.maturity)}</code></span>}
+        {e?.owner?.name && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>owner</strong> <code>{String(e.owner.name)}</code></span>}
+      </header>
+      {e?.description && (
+        <p style={{ margin: "10px 0 4px", fontSize: 13.5, lineHeight: 1.6 }}>{String(e.description)}</p>
+      )}
+      {e?.url && (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+          <strong style={{ opacity: 0.6 }}>url</strong> <code>{String(e.url)}</code>
+        </p>
+      )}
+      {dependsOn.length > 0 && (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--text-secondary)" }}>
+          <strong style={{ opacity: 0.6 }}>depends_on</strong>{" "}
+          {dependsOn.map((d, i) => <code key={i} style={{ marginRight: 6 }}>{String(d)}</code>)}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function SnapshotCard({ s }) {
+  const name = String(s?.name || "(unnamed snapshot)");
+  const cfg = s?.config || {};
+  const columns = Array.isArray(s?.columns) ? s.columns : [];
+  return (
+    <section className="dlx-docs-card" id={`snapshot-${name}`}>
+      <header className="dlx-docs-card-header">
+        <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>{name}</h3>
+        <span className="dlx-docs-pill" style={{ background: "rgba(99,102,241,0.12)", borderColor: "rgba(99,102,241,0.3)", color: "var(--text-primary)" }}>
+          snapshot
+        </span>
+        {cfg.strategy && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>strategy</strong> <code>{String(cfg.strategy)}</code></span>}
+        {cfg.unique_key && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>unique_key</strong> <code>{String(cfg.unique_key)}</code></span>}
+        {cfg.updated_at && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>updated_at</strong> <code>{String(cfg.updated_at)}</code></span>}
+      </header>
+      {s?.description && (
+        <p style={{ margin: "10px 0 4px", fontSize: 13.5, lineHeight: 1.6 }}>{String(s.description)}</p>
+      )}
+      <ColumnsTable columns={columns} />
+    </section>
+  );
+}
+
+function DbtShapeSections({
+  kind,
+  semanticModels,
+  metrics,
+  savedQueries,
+  models,
+  sources,
+  exposures,
+  snapshots,
+}) {
+  const kindLabel =
+    kind === YAML_DOCUMENT_KINDS.DBT_SEMANTIC ? "dbt semantic layer"
+    : kind === YAML_DOCUMENT_KINDS.DBT_SAVED_QUERIES ? "dbt saved queries"
+    : kind === YAML_DOCUMENT_KINDS.DBT_PROPERTIES ? "dbt schema.yml"
+    : "dbt yaml";
+  return (
+    <>
+      <h2 style={{
+        fontSize: 13,
+        fontWeight: 700,
+        margin: "8px 0 12px",
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        color: "var(--text-tertiary)",
+      }}>
+        {kindLabel} · {semanticModels.length + metrics.length + savedQueries.length + models.length + sources.length + exposures.length + snapshots.length} entries
+      </h2>
+      {semanticModels.map((sm, i) => <SemanticModelCard key={(sm?.name || i) + ""} sm={sm} />)}
+      <MetricsBlock metrics={metrics} />
+      {savedQueries.map((sq, i) => <SavedQueryCard key={(sq?.name || i) + ""} sq={sq} />)}
+      {models.map((m, i) => <DbtModelCard key={(m?.name || i) + ""} m={m} />)}
+      {sources.map((s, i) => <DbtSourceCard key={(s?.name || i) + ""} s={s} />)}
+      {exposures.map((e, i) => <ExposureCard key={(e?.name || i) + ""} e={e} />)}
+      {snapshots.map((s, i) => <SnapshotCard key={(s?.name || i) + ""} s={s} />)}
+    </>
+  );
+}
+
 export default function DocsView() {
   const activeFile = useWorkspaceStore((s) => s.activeFile);
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
@@ -334,6 +784,12 @@ export default function DocsView() {
     );
   }
 
+  // Classify the YAML so we know which shape-renderer to invoke. The
+  // DataLex-native path (entities + relationships) is the rich one;
+  // the dbt-native paths (semantic_models / metrics / saved_queries /
+  // dbt models[] / sources[]) used to render as a blank page because
+  // the renderer didn't know how to surface them.
+  const yamlKind = classifyYamlDocument(doc);
   const meta = (doc.model && typeof doc.model === "object") ? doc.model : doc;
   const title = doc.title || meta.title || meta.name || activeFile.name;
   const layer = doc.layer || meta.layer || null;
@@ -341,6 +797,18 @@ export default function DocsView() {
   const owners = Array.isArray(meta.owners) ? meta.owners : [];
   const entities = Array.isArray(doc.entities) ? doc.entities : [];
   const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
+
+  // dbt-shape sections (rendered below the DataLex entities block).
+  const dbtSemanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
+  const dbtMetrics = Array.isArray(doc.metrics) ? doc.metrics : [];
+  const dbtSavedQueries = Array.isArray(doc.saved_queries) ? doc.saved_queries : [];
+  const dbtModels = Array.isArray(doc.models) ? doc.models : [];
+  const dbtSources = Array.isArray(doc.sources) ? doc.sources : [];
+  const dbtExposures = Array.isArray(doc.exposures) ? doc.exposures : [];
+  const dbtSnapshots = Array.isArray(doc.snapshots) ? doc.snapshots : [];
+  const hasDbtContent =
+    dbtSemanticModels.length || dbtMetrics.length || dbtSavedQueries.length ||
+    dbtModels.length || dbtSources.length || dbtExposures.length || dbtSnapshots.length;
 
   // Pull this file's readiness summary out of the cached review.
   const fileReview = (() => {
@@ -675,6 +1143,24 @@ export default function DocsView() {
             </section>
           );
         })}
+
+        {/* dbt-native shapes — semantic_models, metrics, saved_queries,
+            schema-yml models[], sources[], exposures[], snapshots[].
+            Rendered when the file is dbt-shaped (yamlKind detected as
+            DBT_PROPERTIES / DBT_SEMANTIC / DBT_SAVED_QUERIES) so the
+            DocsView no longer renders empty for these files. */}
+        {hasDbtContent && (
+          <DbtShapeSections
+            kind={yamlKind}
+            semanticModels={dbtSemanticModels}
+            metrics={dbtMetrics}
+            savedQueries={dbtSavedQueries}
+            models={dbtModels}
+            sources={dbtSources}
+            exposures={dbtExposures}
+            snapshots={dbtSnapshots}
+          />
+        )}
 
         {/* Relationships table (read-only for now) */}
         {relationships.length > 0 && (

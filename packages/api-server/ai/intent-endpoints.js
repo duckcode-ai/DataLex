@@ -22,6 +22,7 @@
 
 import yaml from "js-yaml";
 import { invokeTool, listTools } from "./tools.js";
+import { classifyYamlText, dbtVersionWarning, YAML_DOCUMENT_KINDS } from "./yamlDocumentKind.js";
 
 /**
  * Per-intent system prompts. Each describes the agent's job, the
@@ -32,7 +33,10 @@ export const INTENT_SYSTEM_PROMPTS = {
   validation_fix: [
     "You are the DataLex YAML Patch Engineer.",
     "Task: explain a validation finding in one sentence, then return the smallest JSON-patch that fixes it.",
-    "Output schema (strict JSON): { \"explanation\": string, \"patch\": { \"path\": string, \"ops\": [{ \"op\": \"add\"|\"replace\"|\"remove\"|\"move\"|\"copy\"|\"test\", \"path\": string, \"value\"?: any }] } }.",
+    "Allowed outcomes: patch_yaml, needs_user_input, or no_patch_needed.",
+    "Output schema for a fix (strict JSON): { \"status\": \"patch_yaml\", \"explanation\": string, \"patch\": { \"path\": string, \"ops\": [{ \"op\": \"add\"|\"replace\"|\"remove\"|\"move\"|\"copy\"|\"test\", \"path\": string, \"value\"?: any }] } }.",
+    "Output schema when the missing value cannot be safely inferred: { \"status\": \"needs_user_input\", \"explanation\": string, \"questions\": [string] }.",
+    "Output schema for a false-positive validation finding: { \"status\": \"no_patch_needed\", \"explanation\": string }.",
     "Hard rules: target the EXISTING file at the path the user gave. Use ONLY the patch_yaml shape above. Do NOT propose create_diagram, create_model, create_file, delete_file, or rename_file. If the file is missing a top-level key, ADD it via a single JSON-patch op.",
     "Reply with JSON only — no preamble, no code fences.",
   ].join(" "),
@@ -75,10 +79,65 @@ export const INTENT_SYSTEM_PROMPTS = {
 // ───────────────────────────────────────────────────────────────────────
 
 async function prefetchValidationFix(project, body, helpers) {
-  const filePath = body?.context?.filePath || body?.filePath || "";
+  const filePath = normalizeRequestPath(body?.context?.filePath || body?.filePath || "");
   if (!filePath) return { context: {}, warnings: ["no filePath provided"] };
   const file = await invokeTool("read_file", project, { path: filePath }, helpers);
-  return { context: { file }, warnings: [] };
+  const issue = body?.context?.issue || body?.issue || {};
+  const yamlDocumentKind = file?.ok ? classifyYamlText(file.content) : YAML_DOCUMENT_KINDS.UNKNOWN;
+  let parsedDoc = null;
+  if (file?.ok) {
+    try { parsedDoc = yaml.load(file.content); } catch (_err) { parsedDoc = null; }
+  }
+  const versionWarning = parsedDoc ? dbtVersionWarning(parsedDoc, yamlDocumentKind) : null;
+  const targetPointer = issue?.path || issue?.pointer || body?.context?.pointer || "";
+  const nearbyYaml = file?.ok ? extractNearbyYamlContext(file.content, targetPointer) : "";
+  return {
+    context: {
+      intent: "validation_fix",
+      file,
+      issue,
+      target_pointer: targetPointer,
+      yaml_document_kind: yamlDocumentKind,
+      dbt_version_warning: versionWarning,
+      nearby_yaml: nearbyYaml,
+      context_priority: [
+        "exact_file",
+        "json_pointer",
+        "validation_code",
+        "yaml_document_kind",
+        "nearby_yaml",
+        "memory_is_not_fact",
+      ],
+    },
+    warnings: versionWarning ? [versionWarning] : [],
+  };
+}
+
+function jsonPointerParts(pathValue) {
+  return String(pathValue || "")
+    .split("/")
+    .slice(1)
+    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
+}
+
+function extractNearbyYamlContext(content, pointer) {
+  if (!content || !pointer || pointer === "/") return String(content || "").slice(0, 5000);
+  let doc;
+  try { doc = yaml.load(content); } catch (_err) { return String(content || "").slice(0, 5000); }
+  let cursor = doc;
+  let parent = doc;
+  for (const part of jsonPointerParts(pointer)) {
+    parent = cursor;
+    if (Array.isArray(cursor)) cursor = cursor[Number(part)];
+    else if (cursor && typeof cursor === "object") cursor = cursor[part];
+    else break;
+  }
+  const focus = cursor === undefined ? parent : cursor;
+  try {
+    return yaml.dump(focus, { lineWidth: 120, noRefs: true, sortKeys: false }).slice(0, 5000);
+  } catch (_err) {
+    return String(content || "").slice(0, 5000);
+  }
 }
 
 async function prefetchExplain(project, body, helpers) {
@@ -129,6 +188,13 @@ function validateValidationFix(parsed) {
   if (typeof parsed.explanation !== "string" || !parsed.explanation.trim()) {
     return "missing/empty `explanation` string";
   }
+  const status = String(parsed.status || (parsed.patch ? "patch_yaml" : "")).trim() || "patch_yaml";
+  if (status === "needs_user_input") {
+    if (!Array.isArray(parsed.questions) || parsed.questions.length === 0) return "`needs_user_input` requires questions[]";
+    return null;
+  }
+  if (status === "no_patch_needed") return null;
+  if (status !== "patch_yaml") return "`status` must be patch_yaml, needs_user_input, or no_patch_needed";
   if (!parsed.patch || typeof parsed.patch !== "object") return "missing `patch` object";
   if (typeof parsed.patch.path !== "string" || !parsed.patch.path.trim()) {
     return "missing/empty `patch.path`";
@@ -140,6 +206,68 @@ function validateValidationFix(parsed) {
     if (!op?.op || !op?.path) return "each op needs `op` and `path`";
   }
   return null;
+}
+
+function cleanRelativePath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/^DataLex\//i, "");
+}
+
+function normalizeRequestPath(value) {
+  const text = String(value || "").trim();
+  if (/^(?:[A-Za-z]:)?[\\/]/.test(text)) return text;
+  return cleanRelativePath(text);
+}
+
+function isFalsePositiveDbtMetricFinding(issue, yamlDocumentKind) {
+  const code = String(issue?.code || "").toUpperCase();
+  return yamlDocumentKind === YAML_DOCUMENT_KINDS.DBT_SEMANTIC && /^INVALID_METRIC_/.test(code);
+}
+
+async function postProcessValidationFix(parsed, project, body, context, helpers) {
+  const issue = context?.issue || body?.context?.issue || {};
+  const filePath = normalizeRequestPath(body?.context?.filePath || body?.filePath || "");
+  if (isFalsePositiveDbtMetricFinding(issue, context?.yaml_document_kind)) {
+    return {
+      status: "no_patch_needed",
+      explanation: "This is a false-positive DataLex-native metric finding for dbt semantic layer YAML; re-run validation with the dbt-aware classifier.",
+      yaml_document_kind: context?.yaml_document_kind,
+      validation_issue: issue,
+    };
+  }
+
+  const status = String(parsed.status || (parsed.patch ? "patch_yaml" : "") || "patch_yaml");
+  if (status !== "patch_yaml") return { ...parsed, status };
+
+  const patchPath = cleanRelativePath(parsed.patch?.path || "");
+  const targetPath = filePath || patchPath;
+
+  const dryRun = await invokeTool("apply_patch_dry_run", project, {
+    path: targetPath,
+    ops: parsed.patch.ops,
+  }, helpers);
+  if (!dryRun?.ok || dryRun?.validation?.valid === false) {
+    return {
+      status: "needs_user_input",
+      explanation: dryRun?.ok
+        ? "The proposed patch applies but does not pass validation, so it was not made available for apply."
+        : `The proposed patch could not be applied: ${dryRun?.error || "unknown patch error"}`,
+      questions: ["Review the validation finding and provide the missing business value if it cannot be inferred from the YAML."],
+      dry_run: dryRun,
+      rejected_patch: parsed.patch,
+    };
+  }
+
+  return {
+    ...parsed,
+    status: "patch_yaml",
+    patch: {
+      path: targetPath,
+      ops: parsed.patch.ops,
+    },
+    targetPointer: context?.target_pointer || undefined,
+    yaml_document_kind: context?.yaml_document_kind,
+    dry_run: dryRun,
+  };
 }
 
 function validateExplain(parsed) {
@@ -275,5 +403,10 @@ export async function runIntentEndpoint(intent, args) {
     };
   }
 
-  return { ok: true, intent, response: parsed, warnings };
+  let response = parsed;
+  if (intent === "validation_fix") {
+    response = await postProcessValidationFix(parsed, project, body, context, helpers);
+  }
+
+  return { ok: true, intent, response, warnings };
 }

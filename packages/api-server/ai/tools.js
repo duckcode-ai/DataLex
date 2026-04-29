@@ -238,7 +238,13 @@ export async function validate_yaml(_project, { text, path } = {}, helpers = {})
   }
   try {
     const result = helpers.validateYamlOnSave(path, text);
-    return { ok: true, path, valid: result?.valid !== false, issues: result?.issues || [] };
+    const valid = result?.ok !== false && result?.valid !== false;
+    return {
+      ok: true,
+      path,
+      valid,
+      issues: result?.issues || (valid ? [] : [{ code: result?.code || "VALIDATION", message: result?.message || "YAML validation failed" }]),
+    };
   } catch (err) {
     return { ok: false, error: err?.message || String(err), path };
   }
@@ -270,7 +276,11 @@ export async function apply_patch_dry_run(project, { path, ops = [] } = {}, help
   if (typeof helpers.validateYamlOnSave === "function") {
     try {
       const v = helpers.validateYamlOnSave(path, resultingYaml);
-      validation = { valid: v?.valid !== false, issues: v?.issues || [] };
+      const valid = v?.ok !== false && v?.valid !== false;
+      validation = {
+        valid,
+        issues: v?.issues || (valid ? [] : [{ code: v?.code || "VALIDATION", message: v?.message || "YAML validation failed" }]),
+      };
     } catch { validation = { valid: false, issues: ["validator threw"] }; }
   }
   return { ok: true, path, resulting_yaml: resultingYaml, validation };

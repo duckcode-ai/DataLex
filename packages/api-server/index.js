@@ -7,9 +7,11 @@ import { execFileSync as rawExecFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
 import { randomBytes } from "crypto";
+import { fileURLToPath } from "url";
 import { listProviderMeta } from "./ai/providerMeta.js";
 import { classifyIntent } from "./ai/intent-router.js";
 import { runIntentEndpoint } from "./ai/intent-endpoints.js";
+import { classifyYamlDocument, isDbtYamlDocumentKind } from "./ai/yamlDocumentKind.js";
 import {
   callAiProvider as callConfiguredAiProvider,
   resolveAiProviderConfig as resolveConfiguredAiProvider,
@@ -29,6 +31,7 @@ import {
 } from "./ai/agentStore.js";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
+const jsonpatch = require("fast-json-patch");
 
 const app = express();
 const PORT = process.env.PORT || 3006;
@@ -73,7 +76,11 @@ function apiFail(res, status, code, message, details = null) {
 }
 
 
-// Project root defaults to the monorepo root (two levels up from packages/api-server)
+const API_SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+const SOURCE_REPO_ROOT = process.env.DATALEX_SOURCE_ROOT || resolve(API_SERVER_DIR, "../..");
+
+// Runtime root holds local projects/config. In tests this is a temp dir; source
+// package paths still resolve from SOURCE_REPO_ROOT.
 const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
 const CONNECTIONS_FILE = join(REPO_ROOT, ".dm-connections.json");
@@ -85,14 +92,14 @@ const CREDENTIALS_FILE = join(REPO_ROOT, ".dm-credentials.json");
 function requireAuth(_req, _res, next) { next(); }
 function requireAdmin(_req, _res, next) { next(); }
 
-const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
+const WEB_DIST = process.env.WEB_DIST || join(SOURCE_REPO_ROOT, "packages", "web-app", "dist");
 
 // Python resolution order:
 //   1. `DM_PYTHON` env var — set by `datalex serve` to its own sys.executable so
 //      the subprocess always has the same datalex_cli package the user just ran.
 //   2. `<REPO_ROOT>/.venv/bin/python3` — dev-clone convention.
 //   3. `python3` on PATH — last-resort fallback; may not have datalex_cli.
-const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
+const VENV_PYTHON = join(SOURCE_REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON =
   (process.env.DM_PYTHON && existsSync(process.env.DM_PYTHON) && process.env.DM_PYTHON) ||
   (existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3");
@@ -116,8 +123,8 @@ function execFileSync(cmd, argv, options = {}) {
 // keeps the constant name for code-level compatibility but points at the
 // current filename. `REPO_DM_LEGACY` lets a dev on a pre-rename checkout
 // still boot.
-const REPO_DM_SCRIPT = join(REPO_ROOT, "datalex");
-const REPO_DM_LEGACY = join(REPO_ROOT, "dm");
+const REPO_DM_SCRIPT = join(SOURCE_REPO_ROOT, "datalex");
+const REPO_DM_LEGACY = join(SOURCE_REPO_ROOT, "dm");
 const DM_CLI_OVERRIDE = process.env.DM_CLI || null;
 const DM_CLI_KIND = (() => {
   if (DM_CLI_OVERRIDE && existsSync(DM_CLI_OVERRIDE)) return "python-script";
@@ -235,6 +242,24 @@ const AI_AGENT_PROFILES = {
     // endpoint — no JSON wrapper, no proposed_changes — to power the
     // "✨ AI" inline buttons in the Docs view next to empty descriptions.
     contract: "Write concise 1-2 sentence descriptions for entities, columns, and models grounded in dbt + business modeling conventions. Lead with the business concept, not the table. Reply with ONLY the description text — no preamble, no quotes, no JSON. If the target's name and surrounding fields don't justify a confident description, reply with an empty string instead of guessing.",
+  },
+  dbt_semantic_layer_specialist: {
+    label: "dbt Semantic Layer Specialist",
+    layer: "semantic",
+    keywords: ["semantic", "semantic model", "semantic_models", "metric", "metrics", "measure", "dimension", "entity", "saved query", "saved_queries"],
+    contract: "Validate and improve dbt semantic_models, metrics, measures, dimensions, entities, and saved queries. Preserve dbt syntax and ask for input when metric business logic is ambiguous.",
+  },
+  dbt_readiness_engineer: {
+    label: "dbt Readiness Engineer",
+    layer: "physical",
+    keywords: ["readiness", "gate", "dbt test", "not_null", "unique", "accepted_values", "relationships", "freshness", "contract"],
+    contract: "Review dbt production readiness: tests, descriptions, sources, freshness, relationships, accepted values, uniqueness, not-null coverage, and exact file-targeted YAML patches.",
+  },
+  refactor_impact_analyst: {
+    label: "Refactor Impact Analyst",
+    layer: "",
+    keywords: ["impact", "blast radius", "rename", "move", "refactor", "lineage", "downstream", "upstream", "safe patch"],
+    contract: "Analyze lineage and blast radius before renames, moves, or model changes. Return impact reports and safe patch plans rather than unrelated artifact creation.",
   },
 };
 
@@ -1153,7 +1178,8 @@ function parseDbtDocSummary(text, relPath) {
   const sources = Array.isArray(loaded.sources) ? loaded.sources : [];
   const semanticModels = Array.isArray(loaded.semantic_models) ? loaded.semantic_models : [];
   const metrics = Array.isArray(loaded.metrics) ? loaded.metrics : [];
-  const sectionCount = models.length + sources.length + semanticModels.length + metrics.length;
+  const savedQueries = Array.isArray(loaded.saved_queries) ? loaded.saved_queries : [];
+  const sectionCount = models.length + sources.length + semanticModels.length + metrics.length + savedQueries.length;
   const looksLikeDbtFile = /(^|\/)(schema|sources)\.ya?ml$/i.test(String(relPath || ""));
 
   if (sectionCount === 0 && !looksLikeDbtFile) {
@@ -1170,6 +1196,7 @@ function parseDbtDocSummary(text, relPath) {
     sources: sources.length,
     semantic_models: semanticModels.length,
     metrics: metrics.length,
+    saved_queries: savedQueries.length,
     version: version || null,
   };
 }
@@ -2509,7 +2536,7 @@ function safeYamlLoad(content) {
 // truth for the dbt-readiness review. The api-server shells out via
 // `python -m datalex_readiness review` so the same logic powers both the
 // `/api/dbt/review` endpoint and the `datalex gate` CLI / GitHub Action.
-const READINESS_ENGINE_SRC = join(REPO_ROOT, "packages", "readiness_engine", "src");
+const READINESS_ENGINE_SRC = join(SOURCE_REPO_ROOT, "packages", "readiness_engine", "src");
 
 function readinessEnginePythonEnv() {
   const existing = process.env.PYTHONPATH || "";
@@ -2524,7 +2551,7 @@ function readinessEnginePythonEnv() {
 function spawnReadinessEngine(args) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(PYTHON, ["-m", "datalex_readiness", ...args], {
-      cwd: REPO_ROOT,
+      cwd: SOURCE_REPO_ROOT,
       env: readinessEnginePythonEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -2561,12 +2588,14 @@ async function loadDocBlockIndex(projectPath) {
   return parsed;
 }
 
-async function buildDbtReadinessReview(project, { paths = [], scope = "all" } = {}) {
+async function buildDbtReadinessReview(project, { paths = [], scope = "all", projectRoot = "" } = {}) {
+  const reviewRoot = projectRoot || project.path;
+  const cliScope = String(scope || "all").toLowerCase() === "file" ? "selected" : String(scope || "all");
   const args = [
     "review",
-    "--project", project.path,
+    "--project", reviewRoot,
     "--project-id", String(project.id || ""),
-    "--scope", String(scope || "all"),
+    "--scope", cliScope,
   ];
   const requestedPaths = (Array.isArray(paths) ? paths : [])
     .map((value) => toPosixPath(String(value || "")).replace(/^\/+/, ""))
@@ -2714,6 +2743,7 @@ function classifyAiAgents(message, context = {}) {
       if (text.includes(keyword)) score += keyword.includes(" ") ? 3 : 2;
     }
     if (profile.layer && String(context?.modelKind || context?.layer || "").toLowerCase() === profile.layer) score += 4;
+    if (id === "governance_reviewer" && ["entity", "workspace", "file"].includes(contextKind)) score += 2;
     if (id === "relationship_modeler" && (context?.kind === "relationship" || context?.relId)) score += 5;
     if (id === "yaml_patch_engineer" && /\b(create|update|modify|delete|fix|generate|propose|patch)\b/.test(text)) score += 4;
 
@@ -2726,6 +2756,8 @@ function classifyAiAgents(message, context = {}) {
     if (isFixIntent) {
       if (id === "yaml_patch_engineer") score += 20;
       if (id === "governance_reviewer") score += 15;
+      if (id === "dbt_semantic_layer_specialist" && /\b(metric|semantic|semantic_models|saved_queries)\b/.test(text)) score += 18;
+      if (id === "dbt_readiness_engineer" && contextKind === "dbt_readiness_finding") score += 18;
       if (id === "description_writer" || id === "conceptualizer" || id === "canonicalizer") {
         score = 0; // hard suppress regardless of keyword matches
       }
@@ -3217,9 +3249,23 @@ async function buildAiIndex(project) {
     if (/\.ya?ml$/i.test(file.name)) {
       const { doc } = safeYamlLoad(content);
       if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+        const yamlDocumentKind = classifyYamlDocument(doc);
         const models = Array.isArray(doc.models) ? doc.models : [];
         const sources = Array.isArray(doc.sources) ? doc.sources : [];
         const semanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
+        const metrics = Array.isArray(doc.metrics) ? doc.metrics : [];
+        const savedQueries = Array.isArray(doc.saved_queries) ? doc.saved_queries : [];
+        if (isDbtYamlDocumentKind(yamlDocumentKind)) {
+          aiAddRecord(records, {
+            kind: "dbt_yaml_document",
+            path: file.path,
+            name: file.name,
+            layer: yamlDocumentKind === "dbt_semantic" || yamlDocumentKind === "dbt_saved_queries" ? "semantic" : "physical",
+            domain: dbtDomainFromPath(file.path),
+            description: `${yamlDocumentKind} with ${models.length} models, ${sources.length} sources, ${semanticModels.length} semantic models, ${metrics.length} metrics, ${savedQueries.length} saved queries`,
+            extra: content.slice(0, 2400),
+          });
+        }
         for (const model of models) {
           const modelName = String(model?.name || "").trim();
           if (!modelName) continue;
@@ -3258,6 +3304,32 @@ async function buildAiIndex(project) {
             domain: dbtDomainFromPath(file.path),
             description: semanticModel.description || "",
             extra: JSON.stringify(semanticModel).slice(0, 2200),
+          });
+        }
+        for (const metric of metrics) {
+          const metricName = String(metric?.name || "").trim();
+          if (!metricName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_metric",
+            path: file.path,
+            name: metricName,
+            layer: "semantic",
+            domain: dbtDomainFromPath(file.path),
+            description: metric.description || metric.label || "",
+            extra: JSON.stringify(metric).slice(0, 2200),
+          });
+        }
+        for (const savedQuery of savedQueries) {
+          const queryName = String(savedQuery?.name || "").trim();
+          if (!queryName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_saved_query",
+            path: file.path,
+            name: queryName,
+            layer: "semantic",
+            domain: dbtDomainFromPath(file.path),
+            description: savedQuery.description || savedQuery.label || "",
+            extra: JSON.stringify(savedQuery).slice(0, 2200),
           });
         }
       }
@@ -3444,7 +3516,7 @@ function searchAiIndex(index, query, { limit = 20, selected = null } = {}) {
     if (selected?.fieldName && String(record.text || "").toLowerCase().includes(String(selected.fieldName).toLowerCase())) {
       score += 4;
     }
-    if (reverseIntent && ["dbt_manifest_model", "dbt_yaml_model", "dbt_sql", "dbt_source", "dbt_semantic_model", "dbt_metric"].includes(recordKind)) score += 3;
+    if (reverseIntent && ["dbt_manifest_model", "dbt_yaml_model", "dbt_sql", "dbt_source", "dbt_semantic_model", "dbt_yaml_semantic_model", "dbt_metric", "dbt_yaml_metric", "dbt_yaml_saved_query"].includes(recordKind)) score += 3;
     if (datatypeIntent && ["dbt_catalog_column", "dbt_manifest_column", "column", "field"].includes(recordKind)) score += 4;
     if (relationshipIntent && ["relationship", "dbt_lineage_edge", "dbt_test"].includes(recordKind)) score += 4;
     if (governanceIntent && ["yaml_parse_error", "dbt_test", "skill", "concept", "entity", "dbt_manifest_model"].includes(recordKind)) score += 2;
@@ -3509,7 +3581,7 @@ function isRepoWideAiRequest(message, context = {}) {
 function repoWideAiQuery(message) {
   return [
     message,
-    "dbt model models sql schema yaml manifest catalog lineage ref source sources column columns datatype tests semantic metrics exposure",
+    "dbt model models sql schema yaml manifest catalog lineage ref source sources column columns datatype tests semantic metrics saved query saved_queries exposure",
   ].filter(Boolean).join(" ");
 }
 
@@ -3533,8 +3605,11 @@ function repoWideSeedRecords(index, limit = 12) {
     ["dbt_manifest_column", 6],
     ["dbt_catalog_column", 7],
     ["dbt_semantic_model", 8],
-    ["dbt_metric", 9],
-    ["diagram_file", 10],
+    ["dbt_yaml_semantic_model", 9],
+    ["dbt_metric", 10],
+    ["dbt_yaml_metric", 11],
+    ["dbt_yaml_saved_query", 12],
+    ["diagram_file", 13],
   ]);
   return (index?.records || [])
     .filter((record) => priority.has(record.kind))
@@ -3780,8 +3855,16 @@ function normalizeAiProposalChange(rawChange) {
   if (change.content == null) {
     change.content = change.yaml_content ?? change.yamlContent ?? change.new_content ?? change.newContent ?? change.body ?? change.yaml;
   }
+  if (change.patch && typeof change.patch === "object" && !Array.isArray(change.patch)) {
+    if (!change.path) change.path = change.patch.path || change.patch.file || change.patch.filePath;
+    if (Array.isArray(change.patch.ops)) change.patch = change.patch.ops;
+    else if (Array.isArray(change.patch.operations)) change.patch = change.patch.operations;
+  }
   if (!change.patch && Array.isArray(change.operations)) change.patch = change.operations;
   if (!change.patch && Array.isArray(change.patches)) change.patch = change.patches;
+  if (!change.patch && Array.isArray(change.ops)) change.patch = change.ops;
+  if (!change.patch && Array.isArray(change.patch_ops)) change.patch = change.patch_ops;
+  if (!change.targetPointer) change.targetPointer = change.target_pointer || change.pointer || change.json_pointer;
 
   let type = aliasType;
   if (!type) {
@@ -3837,8 +3920,13 @@ function validateAiProposalChangeDryRun(structure, rawChange) {
     if (["create_file", "update_file", "patch_yaml"].includes(normalized.type)) {
       const filePath = resolveAiWorkspacePath(structure, normalized.path || normalized.fullPath);
       targetPath = relative(structure.modelPath, filePath);
+      const hasPatchOps = Array.isArray(normalized.patch) && normalized.patch.length > 0;
+      const hasContent = normalized.content != null;
+      if (normalized.type === "patch_yaml" && !hasContent && !hasPatchOps) {
+        throw new ApiError(400, "VALIDATION", "patch_yaml requires content or patch operations");
+      }
       content = String(normalized.content ?? "");
-      if (normalized.type === "patch_yaml" && content === "" && Array.isArray(normalized.patch)) {
+      if (normalized.type === "patch_yaml" && !hasContent && hasPatchOps) {
         if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${normalized.path}`);
         const current = readFileSync(filePath, "utf-8");
         const { doc, error } = safeYamlLoad(current);
@@ -4039,39 +4127,29 @@ function aiYamlContractExamples() {
     "  }],",
     "  relationships: [{ name: \"usage_events_to_customers\", from: { entity: \"fct_usage_events\", field: \"customer_id\" }, to: { entity: \"dim_customers\", field: \"customer_id\" }, cardinality: \"many_to_one\" }]",
     "}]",
+    "",
+    "Existing YAML file patch example:",
+    "proposed_changes: [{",
+    "  type: \"patch_yaml\",",
+    "  path: \"models/metrics/fct_orders.yml\",",
+    "  targetPointer: \"/metrics/0/expression\",",
+    "  patch: [{ op: \"add\", path: \"/metrics/0/expression\", value: \"order_total\" }],",
+    "  rationale: \"Adds the required field to the exact validation target.\"",
+    "}]",
   ].join("\n");
 }
 
 function applyJsonPatch(doc, patchOps) {
   const root = doc && typeof doc === "object" ? doc : {};
   const clone = JSON.parse(JSON.stringify(root));
-  const pointerParts = (pathValue) => String(pathValue || "")
-    .split("/")
-    .slice(1)
-    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-  const parentFor = (pathValue) => {
-    const parts = pointerParts(pathValue);
-    const key = parts.pop();
-    let cur = clone;
-    for (const part of parts) {
-      if (cur[part] == null || typeof cur[part] !== "object") cur[part] = {};
-      cur = cur[part];
-    }
-    return { parent: cur, key };
-  };
-  for (const op of Array.isArray(patchOps) ? patchOps : []) {
-    const { parent, key } = parentFor(op.path);
-    if (op.op === "remove") {
-      if (Array.isArray(parent)) parent.splice(Number(key), 1);
-      else delete parent[key];
-    } else if (op.op === "add" || op.op === "replace") {
-      if (Array.isArray(parent) && key === "-") parent.push(op.value);
-      else parent[key] = op.value;
-    } else {
-      throw new ApiError(400, "VALIDATION", `Unsupported JSON patch op: ${op.op}`);
-    }
+  if (!Array.isArray(patchOps) || patchOps.length === 0) {
+    throw new ApiError(400, "VALIDATION", "patch_yaml requires non-empty JSON patch operations");
   }
-  return clone;
+  try {
+    return jsonpatch.applyPatch(clone, patchOps, true, false).newDocument;
+  } catch (err) {
+    throw new ApiError(400, "VALIDATION", `JSON patch failed: ${err?.message || String(err)}`, { ops: patchOps });
+  }
 }
 
 function collectDocRefBindings(node, path = "/", out = []) {
@@ -4187,7 +4265,8 @@ async function applyAiProposalChange(project, structure, change) {
     if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${change.path}`);
     const current = await readFile(filePath, "utf-8");
     let content = change.content;
-    if (content == null && Array.isArray(change.patch)) {
+    const hasPatchOps = Array.isArray(change.patch) && change.patch.length > 0;
+    if (content == null && hasPatchOps) {
       const { doc, error } = safeYamlLoad(current);
       if (error) throw new ApiError(422, "YAML_PARSE_ERROR", error.message, error);
       content = yaml.dump(applyJsonPatch(doc, change.patch), { lineWidth: 120, noRefs: true });
@@ -4240,14 +4319,14 @@ async function applyAiProposalChange(project, structure, change) {
 
 app.post("/api/dbt/review", requireAdmin, async (req, res, next) => {
   try {
-    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
     const scope = String(req.body?.scope || "all").toLowerCase();
     if (!["all", "changed", "file"].includes(scope)) {
       throw new ApiError(400, "VALIDATION", "scope must be one of: all, changed, file");
     }
     const paths = Array.isArray(req.body?.paths) ? req.body.paths : [];
     const prior = DBT_REVIEW_CACHE.get(project.id);
-    let review = await buildDbtReadinessReview(project, { scope, paths });
+    let review = await buildDbtReadinessReview(project, { scope, paths, projectRoot: structure.modelPath });
     if (scope !== "all" && prior?.files?.length) {
       const replacement = new Map((review.files || []).map((file) => [file.path, file]));
       const mergedFiles = (prior.files || []).map((file) => replacement.get(file.path) || file);
@@ -4428,7 +4507,7 @@ app.post("/api/ai/index/rebuild", requireAdmin, async (req, res, next) => {
 
 app.post("/api/ai/context/preview", requireAdmin, async (req, res, next) => {
   try {
-    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
     const message = String(req.body?.message || "").trim();
     const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
     const preview = buildAiContextPreview(index, {
@@ -4714,7 +4793,7 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
  */
 async function intentEndpointHandler(intent, req, res, next) {
   try {
-    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
     const config = resolveAiProviderConfig(req.body?.provider || {});
     if (!config.provider || config.provider === "local") {
       return apiFail(
@@ -4734,9 +4813,12 @@ async function intentEndpointHandler(intent, req, res, next) {
       validateYamlOnSave,
       searchAiIndex,
       index,
+      modelPath: structure.modelPath,
+      projectRoot: project.path,
     };
+    const toolProject = { ...project, path: structure.modelPath, projectRoot: project.path };
     const result = await runIntentEndpoint(intent, {
-      project,
+      project: toolProject,
       body: req.body,
       providerConfig: config,
       helpers,
@@ -4767,8 +4849,8 @@ function agentLabelForIntent(intent) {
     case "validation_fix": return { id: "yaml_patch_engineer", label: "YAML Patch Engineer" };
     case "explain":         return { id: "governance_reviewer", label: "Governance Reviewer" };
     case "explore":         return { id: "governance_reviewer", label: "Governance Reviewer" };
-    case "create_artifact": return { id: "conceptualizer", label: "Conceptualizer" };
-    case "refactor":        return { id: "yaml_patch_engineer", label: "YAML Patch Engineer" };
+    case "create_artifact": return { id: "conceptual_architect", label: "Conceptual Architect" };
+    case "refactor":        return { id: "refactor_impact_analyst", label: "Refactor Impact Analyst" };
     default:                return { id: "governance_reviewer", label: "Governance Reviewer" };
   }
 }
@@ -4791,11 +4873,18 @@ function buildLegacyEnvelope(intent, response) {
       return {
         ...baseEnvelope,
         answer: response?.explanation || "",
-        proposed_changes: response?.patch ? [{
+        questions: Array.isArray(response?.questions) ? response.questions : [],
+        proposed_changes: response?.status === "patch_yaml" && response?.patch ? [{
           type: "patch_yaml",
           path: response.patch.path,
-          ops: response.patch.ops,
+          targetPointer: response.targetPointer,
+          patch: response.patch.ops,
+          validation_impact: response?.dry_run?.validation?.valid === false
+            ? "Patch dry-run applied but validation did not pass."
+            : "Patch dry-run passed and can be reviewed before apply.",
+          review_summary: "YAML Patch Engineer proposed one exact-file JSON Patch.",
         }] : [],
+        validation_impact: response?.dry_run?.validation || response?.status || "",
         requires_user_approval: true,
       };
     case "explain":
@@ -4833,7 +4922,7 @@ function buildLegacyEnvelope(intent, response) {
         proposed_changes: patches.map((p) => ({
           type: "patch_yaml",
           path: p.path,
-          ops: p.ops,
+          patch: p.ops,
         })),
         requires_user_approval: true,
       };
@@ -7138,9 +7227,10 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
         acc.sources += f.sections.sources || 0;
         acc.semantic_models += f.sections.semantic_models || 0;
         acc.metrics += f.sections.metrics || 0;
+        acc.saved_queries += f.sections.saved_queries || 0;
         return acc;
       },
-      { models: 0, sources: 0, semantic_models: 0, metrics: 0 }
+      { models: 0, sources: 0, semantic_models: 0, metrics: 0, saved_queries: 0 }
     );
 
     const warnings = dbtFiles.length === 0

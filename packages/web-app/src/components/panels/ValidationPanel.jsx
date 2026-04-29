@@ -787,7 +787,12 @@ export default function ValidationPanel() {
       autoSubmit: true,
       context: {
         kind: "validation_issue",
-        issue,
+        intent: "validation_fix",
+        issue: {
+          ...issue,
+          pointer: issue?.path || issue?.pointer || "",
+        },
+        pointer: issue?.path || issue?.pointer || "",
         filePath,
       },
     });
@@ -843,7 +848,9 @@ export default function ValidationPanel() {
       targetName: finding?.code || activeReviewFile?.path || "dbt readiness",
       context: {
         kind: "dbt_readiness_finding",
+        intent: "validation_fix",
         filePath: path,
+        issue: finding || null,
         finding,
         readiness: activeReviewFile,
       },

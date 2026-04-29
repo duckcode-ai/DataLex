@@ -2,6 +2,7 @@
    prototype's {tables, relationships, subjectAreas} shape. Falls back gracefully
    when no active document is loaded. */
 import yaml from "js-yaml";
+import { classifyYamlDocument, isDbtYamlDocumentKind } from "../lib/yamlDocumentKind.js";
 
 const CAT_CYCLE = ["users", "billing", "product", "system", "access", "audit"];
 
@@ -615,7 +616,8 @@ export function adaptDbtSchemaYaml(yamlText, projectFiles = []) {
   const sources = Array.isArray(doc.sources) ? doc.sources : null;
   const semanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : null;
   const metrics = Array.isArray(doc.metrics) ? doc.metrics : null;
-  if (!models && !sources && !semanticModels && !metrics) return null;
+  const savedQueries = Array.isArray(doc.saved_queries) ? doc.saved_queries : null;
+  if (!models && !sources && !semanticModels && !metrics && !savedQueries) return null;
   const projectEntityIndex = buildProjectEntityIndex(projectFiles);
 
   const entities = [];
@@ -710,6 +712,23 @@ export function adaptDbtSchemaYaml(yamlText, projectFiles = []) {
           type: "decimal(18,2)",
           nullable: true,
           description: String(metric.description || metric.label || `dbt metric (${String(metric.type || "").trim() || "metric"}).`),
+        }))
+        .filter((field) => field.name),
+    });
+  }
+  if ((savedQueries || []).length > 0) {
+    entities.push({
+      name: "saved_query_catalog",
+      type: "view",
+      description: "dbt saved query definitions imported from semantic layer.",
+      tags: ["SAVED_QUERY"],
+      fields: savedQueries
+        .filter((query) => query && typeof query === "object")
+        .map((query) => ({
+          name: String(query.name || "").trim(),
+          type: "string",
+          nullable: true,
+          description: String(query.description || `dbt saved query (${String(query.label || query.name || "query").trim()}).`),
         }))
         .filter((field) => field.name),
     });
@@ -891,8 +910,7 @@ export function adaptDataLexModelYaml(yamlText) {
 function isDbtSchemaLike(yamlText) {
   try {
     const doc = yaml.load(yamlText);
-    if (!doc || typeof doc !== "object") return false;
-    return Array.isArray(doc.models) || Array.isArray(doc.sources) || Array.isArray(doc.semantic_models) || Array.isArray(doc.metrics);
+    return isDbtYamlDocumentKind(classifyYamlDocument(doc));
   } catch (_e) { return false; }
 }
 

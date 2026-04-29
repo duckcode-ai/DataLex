@@ -2,6 +2,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
+import { createServer } from "http";
 import request from "supertest";
 import { getApp, createProject } from "./helpers/harness.js";
 
@@ -391,6 +392,117 @@ entities:
     assert.equal(res.body.ok, true);
     assert.equal(res.body.valid, false);
     assert.equal(res.body.results[0].errors[0].code, "SCHEMA_SHAPE");
+  });
+
+  test("normalizes patch_yaml ops and preserves the exact existing file path", async () => {
+    mkdirSync(join(project.modelPath, "models", "metrics"), { recursive: true });
+    const target = join(project.modelPath, "models", "metrics", "fct_orders.yml");
+    writeFileSync(target, [
+      "metrics:",
+      "  - name: order_total",
+      "    type: simple",
+      "    type_params:",
+      "      measure: order_total",
+      "",
+    ].join("\n"), "utf-8");
+
+    const change = {
+      type: "patch_yaml",
+      path: "models/metrics/fct_orders.yml",
+      ops: [{ op: "add", path: "/metrics/0/label", value: "Order Total" }],
+    };
+
+    const validate = await request(app)
+      .post("/api/ai/proposals/validate")
+      .send({ projectId: project.id, changes: [change] });
+    assert.equal(validate.status, 200);
+    assert.equal(validate.body.valid, true);
+    assert.equal(validate.body.results[0].type, "patch_yaml");
+    assert.equal(validate.body.results[0].path, "models/metrics/fct_orders.yml");
+    assert.deepEqual(validate.body.results[0].normalized_change.patch, change.ops);
+
+    const apply = await request(app)
+      .post("/api/ai/proposals/apply")
+      .send({ projectId: project.id, changes: [change] });
+    assert.equal(apply.status, 200);
+    assert.equal(apply.body.ok, true);
+    assert.equal(apply.body.applied[0].path, "models/metrics/fct_orders.yml");
+    assert.match(readFileSync(target, "utf-8"), /label:\s*Order Total/);
+  });
+
+  test("validation fix endpoint preserves exact file path through legacy proposal envelope", async () => {
+    const targetRel = "crm/Conceptual/missing_model.model.yaml";
+    const target = join(project.modelPath, targetRel);
+    writeFileSync(target, "entities: []\n", "utf-8");
+
+    const fakeProvider = createServer((req, res) => {
+      assert.equal(req.url, "/api/chat");
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({
+        message: {
+          content: JSON.stringify({
+            status: "patch_yaml",
+            explanation: "The file is missing the top-level model metadata object.",
+            patch: {
+              path: "/model",
+              ops: [{ op: "add", path: "/model", value: { name: "missing_model", kind: "conceptual", domain: "crm" } }],
+            },
+          }),
+        },
+      }));
+    });
+    await new Promise((resolve) => fakeProvider.listen(0, "127.0.0.1", resolve));
+    const { port } = fakeProvider.address();
+
+    try {
+      const res = await request(app)
+        .post("/api/ai/fix")
+        .send({
+          projectId: project.id,
+          message: "Fix the missing model section.",
+          provider: { provider: "ollama", model: "fake", baseUrl: `http://127.0.0.1:${port}` },
+          context: {
+            kind: "validation_issue",
+            filePath: targetRel,
+            issue: {
+              code: "MISSING_MODEL_SECTION",
+              severity: "error",
+              path: "/model",
+              pointer: "/model",
+              message: "Missing required 'model' object.",
+            },
+          },
+        });
+
+      assert.equal(res.status, 200);
+      assert.equal(res.body.ok, true);
+      assert.equal(res.body.response.status, "patch_yaml");
+      assert.equal(res.body.response.patch.path, targetRel);
+      assert.equal(res.body.proposed_changes.length, 1);
+      assert.equal(res.body.proposed_changes[0].type, "patch_yaml");
+      assert.equal(res.body.proposed_changes[0].path, targetRel);
+      assert.deepEqual(res.body.proposed_changes[0].patch, [{ op: "add", path: "/model", value: { name: "missing_model", kind: "conceptual", domain: "crm" } }]);
+    } finally {
+      await new Promise((resolve) => fakeProvider.close(resolve));
+    }
+  });
+
+  test("rejects patch_yaml without content or patch operations", async () => {
+    const res = await request(app)
+      .post("/api/ai/proposals/validate")
+      .send({
+        projectId: project.id,
+        changes: [{
+          type: "patch_yaml",
+          path: "crm/Conceptual/customer.diagram.yaml",
+        }],
+      });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.ok, true);
+    assert.equal(res.body.valid, false);
+    assert.equal(res.body.results[0].errors[0].code, "VALIDATION");
+    assert.match(res.body.results[0].errors[0].message, /patch_yaml requires content or patch operations/);
   });
 
   test("rejects invalid generated model YAML before writing", async () => {

@@ -1,10 +1,10 @@
 import React from "react";
 import { AlertTriangle, Check, ClipboardList, Send, Sparkles, Wand2 } from "lucide-react";
-import { askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
+import { aiFix, askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import AiProposalPreview from "./AiProposalPreview";
-import { aiProposalPath, proposalEditableYaml } from "./aiProposalYaml";
+import { aiProposalPath, isPatchYamlProposal, proposalEditableYaml, proposalPatchOps } from "./aiProposalYaml";
 
 const AI_WORK_STEPS = [
   "Finding the most relevant dbt and DataLex context",
@@ -33,6 +33,33 @@ function proposalTitle(change, index) {
   const type = change?.type || change?.operation || "change";
   const path = change?.path || change?.fullPath || change?.toPath || change?.name || "";
   return `${index + 1}. ${String(type).replace(/_/g, " ")}${path ? ` · ${path}` : ""}`;
+}
+
+function proposalReviewPath(change) {
+  if (isPatchYamlProposal(change)) return aiProposalPath(change, "yaml");
+  return aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram");
+}
+
+function PatchYamlSummary({ change }) {
+  const ops = proposalPatchOps(change);
+  return (
+    <div className="panel-card" style={{ padding: 8, display: "grid", gap: 6 }}>
+      <strong>YAML patch</strong>
+      <span className="muted">{change?.path || change?.fullPath || "(no path)"}</span>
+      {change?.targetPointer && <span className="muted">Target: {change.targetPointer}</span>}
+      {ops.length > 0 ? (
+        <div style={{ display: "grid", gap: 4 }}>
+          {ops.slice(0, 6).map((op, index) => (
+            <code key={`${op?.op}-${op?.path}-${index}`} className="ai-md-inline-code">
+              {op?.op || "op"} {op?.path || "/"}
+            </code>
+          ))}
+        </div>
+      ) : (
+        <span className="muted">No JSON Patch operations are attached yet.</span>
+      )}
+    </div>
+  );
 }
 
 function buildAiReviewDocument({ result, context, message }) {
@@ -123,9 +150,9 @@ function buildAiReviewDocument({ result, context, message }) {
         lines.push("Validation impact:");
         lines.push(typeof change.validation_impact === "string" ? change.validation_impact : compactJson(change.validation_impact));
       }
-      const path = aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram");
+      const path = proposalReviewPath(change);
       lines.push("");
-      lines.push(`Review path: DataLex/${path}`);
+      lines.push(isPatchYamlProposal(change) ? `Patch target: ${path}` : `Review path: DataLex/${path}`);
     });
   }
 
@@ -135,7 +162,7 @@ function buildAiReviewDocument({ result, context, message }) {
     content: lines.join("\n"),
     proposals: changes.map((change) => ({
       ...change,
-      editor_path: aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram"),
+      editor_path: proposalReviewPath(change),
       editor_yaml: proposalEditableYaml(change),
     })),
   };
@@ -375,7 +402,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
       const model = storageValue("datalex.ai.model", "");
       const baseUrl = storageValue("datalex.ai.baseUrl", "");
       const apiKey = storageValue("datalex.ai.apiKey", "");
-      const response = await askAi({
+      const requestBody = {
         projectId: activeProjectId,
         chatId: chatId || undefined,
         message: userText,
@@ -390,7 +417,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
           pinned: pinnedSkills,
           disabled: disabledSkills,
         },
-      });
+      };
+      const contextKind = String(context?.kind || "").toLowerCase();
+      const isValidationFix = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
+      const response = isValidationFix ? await aiFix(requestBody) : await askAi(requestBody);
       setChatId(response.chatId || chatId || null);
       setResult(response);
       setTurns((items) => [...items, { role: "assistant", content: response.answer || "No answer returned." }]);
@@ -671,10 +701,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>
                         <Check size={12} /> {proposalTitle(change, idx)}
                       </summary>
-                      <AiProposalPreview change={change} />
+                      {isPatchYamlProposal(change) ? <PatchYamlSummary change={change} /> : <AiProposalPreview change={change} />}
                       {change.rationale && <div className="muted ai-proposal-rationale"><MarkdownText text={change.rationale} /></div>}
                       <button className="panel-btn mini" type="button" onClick={openReviewPlan}>
-                        <ClipboardList size={12} /> Open visual editor
+                        <ClipboardList size={12} /> {isPatchYamlProposal(change) ? "Open patch editor" : "Open visual editor"}
                       </button>
                     </details>
                   ))}

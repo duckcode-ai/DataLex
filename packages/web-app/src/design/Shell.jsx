@@ -34,7 +34,7 @@ import {
 } from "../components/dialogs/ProjectModals";
 import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
 import AiProposalPreview from "../components/ai/AiProposalPreview";
-import { proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle } from "../components/ai/aiProposalYaml";
+import { isPatchYamlProposal, proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle, proposalPatchOps } from "../components/ai/aiProposalYaml";
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
@@ -307,13 +307,15 @@ function AiPlanReviewEditor({ document, onClose }) {
     setBusy("apply");
     setError("");
     try {
-      await document.onApply(draftChanges);
+      await document.onApply(activePreviewChange ? [activePreviewChange] : []);
     } catch (err) {
       setError(err?.message || String(err));
       setBusy("");
     }
   };
   if (!document) return null;
+  const activeIsPatch = isPatchYamlProposal(activeProposal);
+  const activePatchOps = proposalPatchOps(activePreviewChange || activeProposal);
   return (
     <section className="ai-plan-editor-shell" aria-label="AI review plan">
       <div className="ai-plan-editor-header">
@@ -330,7 +332,7 @@ function AiPlanReviewEditor({ document, onClose }) {
           )}
           {proposals.length > 0 && (
             <button type="button" className="panel-btn primary" onClick={applyDrafts} disabled={busy === "apply" || validation?.valid === false}>
-              {busy === "apply" ? "Applying..." : `Apply ${proposals.length}`}
+              {busy === "apply" ? "Applying..." : "Apply 1"}
             </button>
           )}
           <button type="button" className="panel-btn" onClick={copy}>
@@ -357,14 +359,33 @@ function AiPlanReviewEditor({ document, onClose }) {
           </div>
         )}
         {proposals.length > 0 ? (
-          <div className="ai-plan-review-workspace">
-            <div className="ai-plan-preview-grid">
-              {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
-            </div>
+            <div className="ai-plan-review-workspace">
+            {activeIsPatch ? (
+              <div className="ai-plan-preview-grid">
+                <div className="panel-card" style={{ padding: 12, display: "grid", gap: 8 }}>
+                  <strong>YAML Patch</strong>
+                  <span className="muted">{activePreviewChange?.path || activeProposal?.path || "(no path)"}</span>
+                  {(activePreviewChange?.targetPointer || activeProposal?.targetPointer) && (
+                    <span className="muted">Target: {activePreviewChange?.targetPointer || activeProposal?.targetPointer}</span>
+                  )}
+                  {activePatchOps.length > 0 ? activePatchOps.map((op, index) => (
+                    <code key={`${op?.op}-${op?.path}-${index}`} className="ai-md-inline-code">
+                      {op?.op || "op"} {op?.path || "/"}
+                    </code>
+                  )) : (
+                    <span className="muted">Edit the JSON Patch operations in the pane before validating.</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="ai-plan-preview-grid">
+                {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
+              </div>
+            )}
             <div className="ai-plan-yaml-pane">
               <div className="ai-plan-yaml-toolbar">
-                <strong>Editable YAML</strong>
-                <span>Modify the proposal, then validate and apply. The preview updates from this YAML.</span>
+                <strong>{activeIsPatch ? "Editable JSON Patch" : "Editable YAML"}</strong>
+                <span>{activeIsPatch ? "Modify the patch operations, then validate and apply the selected change." : "Modify the proposal, then validate and apply. The preview updates from this YAML."}</span>
               </div>
               <textarea
                 className="ai-plan-editor-text"
