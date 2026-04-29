@@ -113,7 +113,7 @@ def propose_conceptual_model(
                     "from": {"entity": from_entity, "field": col.name},
                     "to": {"entity": target_entity, "field": target_col},
                     "cardinality": cardinality,
-                    "verb": _verb_from_columns(from_entity, target_entity),
+                    "verb": _verb_from_columns(from_entity, target_entity, col.name),
                     "sources": [sm.name],
                 }
             )
@@ -159,6 +159,114 @@ def _infer_cardinality(column_name: str, is_primary_key: bool) -> str:
     return "many_to_one"
 
 
-def _verb_from_columns(from_entity: str, to_entity: str) -> str:
-    """Cheap, readable verb for the diagram label."""
-    return f"{from_entity} references {to_entity}"
+# ---------------------------------------------------------------------------
+# Business-verb generation
+#
+# The previous implementation always emitted "<from> references <to>".  That
+# read like a tautology on the diagram and offered no business meaning, so
+# downstream UIs (DocsView narrative, OSI export) had nothing useful to
+# render. This replacement combines three signals to pick a verb:
+#
+#   1. Direct entity-pair lookup — a small table of common business pairs
+#      (Customer × Order = "places", Order × Product = "contains", …).
+#   2. Column-name patterns — `created_by`, `parent_id`, `owner_id`,
+#      `manager_id` etc. carry their own implicit verb.
+#   3. Sensible default — the noun-form FK column rendered as a passive
+#      "is associated with <to>" style, which we then short-circuit to
+#      a verb in the lookup table where possible.
+#
+# Verbs use lowercase snake_case so the diagram edge label and the
+# DocsView narrative stay consistent ("Customer places Order").
+# ---------------------------------------------------------------------------
+
+# Common business-domain pairs. Looked up case-insensitively after we
+# strip a trailing 's' (in case singularization left noise behind).
+_ENTITY_PAIR_VERBS: Dict[Tuple[str, str], str] = {
+    ("customer", "order"):         "places",
+    ("customer", "account"):       "owns",
+    ("customer", "address"):       "lives_at",
+    ("customer", "subscription"):  "subscribes_to",
+    ("customer", "contract"):      "signs",
+    ("customer", "payment"):       "pays",
+    ("user", "account"):           "owns",
+    ("user", "session"):           "starts",
+    ("user", "subscription"):      "subscribes_to",
+    ("order", "orderline"):        "contains",
+    ("order", "lineitem"):         "contains",
+    ("order", "product"):          "contains",
+    ("order", "sku"):              "contains",
+    ("order", "invoice"):          "generates",
+    ("order", "payment"):          "is_paid_by",
+    ("order", "shipment"):         "ships_as",
+    ("order", "fulfillment"):      "fulfilled_by",
+    ("invoice", "payment"):        "settled_by",
+    ("invoice", "lineitem"):       "lists",
+    ("payment", "transaction"):    "issues",
+    ("transaction", "ledger"):     "posts_to",
+    ("product", "category"):       "belongs_to",
+    ("product", "supplier"):       "supplied_by",
+    ("product", "sku"):            "has",
+    ("shipment", "address"):       "ships_to",
+    ("shipment", "carrier"):       "carried_by",
+    ("employee", "department"):    "works_in",
+    ("employee", "manager"):       "reports_to",
+    ("employee", "team"):          "belongs_to",
+    ("campaign", "lead"):          "generates",
+    ("lead", "opportunity"):       "becomes",
+    ("opportunity", "deal"):       "becomes",
+    ("ticket", "customer"):        "raised_by",
+    ("ticket", "agent"):           "handled_by",
+}
+
+# Column-name patterns that imply a verb regardless of the entity pair.
+# Order matters — most specific patterns come first.
+_COLUMN_NAME_VERBS: List[Tuple[str, str]] = [
+    ("created_by",   "created_by"),
+    ("updated_by",   "last_updated_by"),
+    ("modified_by",  "modified_by"),
+    ("owner_id",     "owned_by"),
+    ("manager_id",   "managed_by"),
+    ("parent_id",    "is_child_of"),
+    ("source_id",    "sourced_from"),
+    ("target_id",    "targets"),
+    ("origin_id",    "originates_from"),
+    ("approved_by",  "approved_by"),
+]
+
+
+def _normalize_entity(name: str) -> str:
+    cleaned = (name or "").strip().lower()
+    if not cleaned:
+        return ""
+    # Strip a single trailing 's' so "Orders" → "order" without breaking
+    # words that genuinely end in 's' (we don't pluralize "address" → "addres").
+    if cleaned.endswith("s") and not cleaned.endswith("ss") and len(cleaned) > 3:
+        cleaned = cleaned[:-1]
+    return cleaned
+
+
+def _verb_from_columns(from_entity: str, to_entity: str, column_name: str = "") -> str:
+    """Return a business-meaningful verb for a relationship edge label.
+
+    Falls back to a passive "is_associated_with" form so the YAML always
+    gets *some* verb — Phase 1A inline-edit lets the user override later.
+    """
+    col = (column_name or "").strip().lower()
+
+    # 1. Column-name patterns carry their own verb.
+    for needle, verb in _COLUMN_NAME_VERBS:
+        if needle in col:
+            return verb
+
+    # 2. Direct entity-pair lookup (case-insensitive, depluralized).
+    fa = _normalize_entity(from_entity)
+    fb = _normalize_entity(to_entity)
+    if fa and fb:
+        for key, verb in (((fa, fb), True), ((fb, fa), False)):
+            verb_value = _ENTITY_PAIR_VERBS.get(key)
+            if verb_value:
+                return verb_value
+
+    # 3. Fallback. Use a passive form rather than the old tautology so
+    # diagrams read clearly even when the lookup misses.
+    return "is_associated_with"

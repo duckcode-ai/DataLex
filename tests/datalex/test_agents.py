@@ -109,6 +109,78 @@ def test_conceptualizer_extracts_relationships():
     assert rel["cardinality"] == "many_to_one"
 
 
+def test_conceptualizer_generates_business_verb_from_entity_pair():
+    """Order × Customer should resolve to a business verb, not the old
+    `references` tautology that Phase 1C is replacing."""
+    proposal = propose_conceptual_model(_staging_models())
+    rel = proposal.relationships[0]
+    # Either 'places' (Customer → Order) or 'is_paid_by' / similar — the
+    # exact verb depends on direction, but it must NOT be the legacy
+    # tautological default.
+    assert rel["verb"], "verb must be set"
+    assert rel["verb"] != "Order references Customer"
+    assert " references " not in rel["verb"]
+    # And it should be a single snake_case verb token, not a sentence.
+    assert " " not in rel["verb"], f"verb should be snake_case, got: {rel['verb']}"
+
+
+def test_conceptualizer_verb_uses_column_name_pattern():
+    """`created_by` FK columns should drive a 'created_by' verb regardless
+    of the entity-pair lookup."""
+    models = {
+        "stg_documents": {
+            "kind": "model",
+            "name": "stg_documents",
+            "columns": [
+                {"name": "doc_id", "type": "number", "primary_key": True},
+                {
+                    "name": "created_by",
+                    "type": "number",
+                    "foreign_key": {"entity": "stg_users", "field": "user_id"},
+                },
+            ],
+        },
+        "stg_users": {
+            "kind": "model",
+            "name": "stg_users",
+            "columns": [{"name": "user_id", "type": "number", "primary_key": True}],
+        },
+    }
+    proposal = propose_conceptual_model(models)
+    assert len(proposal.relationships) == 1
+    assert proposal.relationships[0]["verb"] == "created_by"
+
+
+def test_conceptualizer_verb_falls_back_for_unknown_pairs():
+    """Unknown entity pairs and column names must still emit a non-empty
+    verb so DocsView narrative and OSI export have something to render."""
+    models = {
+        "stg_widgets": {
+            "kind": "model",
+            "name": "stg_widgets",
+            "columns": [
+                {"name": "widget_id", "type": "number", "primary_key": True},
+                {
+                    "name": "thingamajig_id",
+                    "type": "number",
+                    "foreign_key": {"entity": "stg_thingamajigs", "field": "thingamajig_id"},
+                },
+            ],
+        },
+        "stg_thingamajigs": {
+            "kind": "model",
+            "name": "stg_thingamajigs",
+            "columns": [{"name": "thingamajig_id", "type": "number", "primary_key": True}],
+        },
+    }
+    proposal = propose_conceptual_model(models)
+    assert len(proposal.relationships) == 1
+    verb = proposal.relationships[0]["verb"]
+    assert verb, "fallback verb must not be empty"
+    # Falls back to the passive form, not the old "references" tautology.
+    assert verb == "is_associated_with"
+
+
 def test_conceptualizer_empty_project():
     proposal = propose_conceptual_model({})
     assert proposal.entities == []
