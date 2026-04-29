@@ -11,6 +11,7 @@
  */
 import React, { useState } from "react";
 import { GitBranch, AlertCircle, Link2, ArrowRightLeft } from "lucide-react";
+import yaml from "js-yaml";
 import Modal from "./Modal";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -18,6 +19,35 @@ import { addRelationship } from "../../lib/yamlRoundTrip";
 import { patchRelationship, addDiagramRelationship } from "../../design/yamlPatch";
 import { relationCardinalityValue } from "../../design/relationshipEditor";
 import { conceptualRelationshipSentence } from "../../lib/conceptualModeling";
+
+/* Common conceptual-modeling verbs we suggest first when the user has
+   no relationships in the active file yet. Tracks the EventStorming /
+   DDD flavor — choose verbs that name a business behavior. */
+const COMMON_VERBS = [
+  "places", "owns", "contains", "generates", "produces", "manages",
+  "depends_on", "requires", "references", "approves", "fulfills",
+  "issues", "receives", "subscribes_to", "ships", "pays_for",
+  "tracks", "audits", "supersedes",
+];
+
+/* Scan the active file for verbs already used on relationships, plus
+   common defaults so the user has suggestions even on day one. */
+function useVerbSuggestions() {
+  return React.useMemo(() => {
+    try {
+      const content = useWorkspaceStore.getState().activeFileContent || "";
+      const doc = yaml.load(content);
+      const rels = (doc && Array.isArray(doc.relationships)) ? doc.relationships : [];
+      const used = rels
+        .map((r) => String(r?.verb || "").trim())
+        .filter(Boolean);
+      // De-duplicate, used verbs first (more relevant), defaults after.
+      return Array.from(new Set([...used, ...COMMON_VERBS]));
+    } catch {
+      return COMMON_VERBS;
+    }
+  }, []);
+}
 
 const CARDINALITIES = [
   { id: "one_to_one",   label: "One-to-one",   sub: "1 : 1" },
@@ -134,6 +164,7 @@ export default function NewRelationshipDialog() {
   const [onDelete, setOnDelete] = useState(String(modalPayload?.onDelete || ""));
   const [description, setDescription] = useState(String(modalPayload?.description || editingRelationship?.description || ""));
   const [verb, setVerb] = useState(String(modalPayload?.verb || editingRelationship?.verb || ""));
+  const verbSuggestions = useVerbSuggestions();
   const [relationshipType, setRelationshipType] = useState(String(modalPayload?.relationshipType || editingRelationship?.relationshipType || ""));
   const [fromRole, setFromRole] = useState(String(modalPayload?.fromRole || editingRelationship?.fromRole || ""));
   const [toRole, setToRole] = useState(String(modalPayload?.toRole || editingRelationship?.toRole || ""));
@@ -644,7 +675,19 @@ export default function NewRelationshipDialog() {
               value={verb}
               onChange={(e) => setVerb(e.target.value)}
               placeholder="places, owns, depends_on"
+              list="datalex-verb-suggestions"
+              autoComplete="off"
             />
+            <datalist id="datalex-verb-suggestions">
+              {verbSuggestions.map((suggestion) => (
+                <option key={suggestion} value={suggestion} />
+              ))}
+            </datalist>
+            <div style={{ marginTop: 4, fontSize: 11, color: "var(--text-tertiary)", lineHeight: 1.5 }}>
+              Pick one of the suggestions or type your own. Verbs sourced from
+              this file's existing relationships, plus common conceptual-modeling
+              verbs.
+            </div>
           </div>
         )}
 

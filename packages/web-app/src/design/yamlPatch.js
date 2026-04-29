@@ -320,6 +320,86 @@ export function setEntityDescription(yamlText, entityName, description) {
   return dump(doc);
 }
 
+/* Set an entity's owner. Empty/whitespace deletes the field. */
+export function setEntityOwner(yamlText, entityName, owner) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const trimmed = String(owner ?? "").trim();
+  if (trimmed) entity.owner = trimmed;
+  else delete entity.owner;
+  return dump(doc);
+}
+
+/* Set an entity's domain. Empty/whitespace deletes the field. */
+export function setEntityDomain(yamlText, entityName, domain) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const trimmed = String(domain ?? "").trim();
+  if (trimmed) entity.domain = trimmed;
+  else delete entity.domain;
+  return dump(doc);
+}
+
+/* Set an entity's subject_area. Empty/whitespace deletes the field. */
+export function setEntitySubjectArea(yamlText, entityName, subjectArea) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const trimmed = String(subjectArea ?? "").trim();
+  if (trimmed) entity.subject_area = trimmed;
+  else delete entity.subject_area;
+  return dump(doc);
+}
+
+/* Replace the entity's tags array. Empty array deletes the field. */
+export function setEntityTags(yamlText, entityName, tags) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const cleaned = Array.isArray(tags)
+    ? Array.from(new Set(tags.map((t) => String(t || "").trim()).filter(Boolean)))
+    : [];
+  if (cleaned.length) entity.tags = cleaned;
+  else delete entity.tags;
+  return dump(doc);
+}
+
+/* Replace the entity's terms array (glossary cross-links). Empty array
+   deletes the field. */
+export function setEntityTerms(yamlText, entityName, terms) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const cleaned = Array.isArray(terms)
+    ? Array.from(new Set(terms.map((t) => String(t || "").trim()).filter(Boolean)))
+    : [];
+  if (cleaned.length) entity.terms = cleaned;
+  else delete entity.terms;
+  return dump(doc);
+}
+
+/* Set the entity's visibility (internal | shared | public). Reserved
+   for the OSI export gate in Phase 2a — set on the schema now so we
+   don't break YAML compatibility when the export honors it. */
+export function setEntityVisibility(yamlText, entityName, visibility) {
+  const doc = loadDoc(yamlText);
+  if (!doc) return null;
+  const entity = findEntity(doc, entityName);
+  if (!entity) return null;
+  const value = String(visibility ?? "").trim().toLowerCase();
+  const allowed = new Set(["internal", "shared", "public"]);
+  if (allowed.has(value)) entity.visibility = value;
+  else delete entity.visibility;
+  return dump(doc);
+}
+
 /* Rename an entity; renames foreign-key references pointing at it too. */
 export function renameEntity(yamlText, oldName, newName) {
   const doc = loadDoc(yamlText);
