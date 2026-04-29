@@ -1159,11 +1159,19 @@ export default function DocsView() {
               {title}
             </h1>
             <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+              {/* "Run readiness gate" — same scan that the GitHub Action
+                  enforces in CI. Runs across the whole project and writes
+                  the per-file score back into the Validation tab's
+                  "dbt Readiness" section. Distinct from the per-file
+                  Validation tab itself, which always runs locally as you
+                  type. The label was previously "Run readiness check"
+                  which sounded like a different *kind* of check than
+                  the Validation tab; renamed for clarity. */}
               <button
                 type="button"
                 onClick={runReview}
                 disabled={reviewing || !activeProjectId}
-                title="Run the dbt readiness gate over this project"
+                title="Re-runs the dbt readiness gate (same one CI enforces). Per-file scores show in the Validation tab's 'dbt Readiness' section."
                 style={{
                   padding: "7px 13px",
                   borderRadius: 8,
@@ -1176,7 +1184,7 @@ export default function DocsView() {
                   whiteSpace: "nowrap",
                 }}
               >
-                {reviewing ? "Running readiness…" : "Run readiness check"}
+                {reviewing ? "Running CI gate…" : "Run CI readiness gate"}
               </button>
               {/* Export OSI bundle — Open Semantic Interchange v0.1.1 (Jan 2026
                   vendor-neutral context format). Browser hits the api-server
