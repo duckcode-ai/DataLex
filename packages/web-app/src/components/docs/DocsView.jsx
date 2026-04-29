@@ -251,6 +251,67 @@ export default function DocsView() {
     }
   };
 
+  // -------- One-shot inline AI suggestion / rewrite --------
+  // useCallback MUST live above the early returns below — otherwise
+  // when activeFile is null or YAML parse fails, the early return
+  // skips this hook and React throws "Rendered more hooks than during
+  // the previous render" on the next valid render.
+  //
+  // The body itself short-circuits when `activeFile` is missing.
+  //
+  // `mode` ∈ "suggest" | "rewrite" | "tighter":
+  //   - suggest  → empty descriptions; produces a fresh one-shot
+  //   - rewrite  → existing descriptions; produces a clearer replacement
+  //   - tighter  → existing descriptions; compresses while keeping meaning
+  const askAiToSuggest = useCallback(async (kind, target, mode = "suggest") => {
+    if (!aiEnabled || !activeFile) return;
+    const filePath = activeFile.path || activeFile.fullPath || activeFile.name;
+    const key = (kind === "model"
+      ? `model:${filePath}`
+      : kind === "entity"
+      ? `entity:${target}`
+      : `field:${target.entity}.${target.field}`) + `:${mode}`;
+    setAiBusyKey(key);
+    setAiError("");
+    try {
+      const resp = await suggestAiDescription({
+        projectId: activeProjectId,
+        provider: aiProvider,
+        mode,
+        target: {
+          kind,
+          path: filePath,
+          entity: kind === "entity" ? String(target) : kind === "field" ? target.entity : undefined,
+          field: kind === "field" ? target.field : undefined,
+        },
+      });
+      const text = String(resp?.description || "").trim();
+      if (!text) {
+        setAiError("AI returned an empty suggestion. Try again or write the description by hand.");
+        return;
+      }
+      const yamlNow = activeFileContent || "";
+      // Write back through the same patch helpers an inline edit would use.
+      let next = null;
+      if (kind === "model") next = setModelDescription(yamlNow, text);
+      else if (kind === "entity") next = setEntityDescription(yamlNow, String(target), text);
+      else next = patchField(yamlNow, target.entity, target.field, { description: text });
+      if (next && next !== yamlNow) updateContent(next);
+    } catch (err) {
+      // The server uses a known code when no real provider is configured.
+      // Refresh our local snapshot so the buttons disable themselves on
+      // the next render.
+      if (err?.code === "NO_PROVIDER") {
+        setAiProvider(null);
+        setAiError(err.message || aiDisabledHint);
+      } else {
+        setAiError(err?.message || "AI suggestion failed.");
+      }
+    } finally {
+      setAiBusyKey(null);
+    }
+  }, [aiEnabled, activeFile, activeProjectId, aiProvider, activeFileContent, updateContent]);
+
   if (!activeFile) {
     return (
       <div className="shell-view" style={{ padding: 32, color: "var(--text-tertiary)", fontSize: 14 }}>
@@ -301,66 +362,6 @@ export default function DocsView() {
   const handleFieldDescription = (entityName, fieldName) => (text) => {
     writeIfChanged(patchField(activeFileContent || "", entityName, fieldName, { description: text }));
   };
-
-  // -------- One-shot inline AI suggestion / rewrite --------
-  // Calls POST /api/ai/suggest with just the path + entity/field name —
-  // the server reads the YAML, builds a focused prompt, invokes ONLY the
-  // description_writer agent, returns plain text. Result is written back
-  // through the same yamlPatch helpers as inline edits.
-  //
-  // `mode` ∈ "suggest" | "rewrite" | "tighter":
-  //   - suggest  → empty descriptions; produces a fresh one-shot
-  //   - rewrite  → existing descriptions; produces a clearer replacement
-  //   - tighter  → existing descriptions; compresses while keeping meaning
-  const askAiToSuggest = useCallback(async (kind, target, mode = "suggest") => {
-    if (!aiEnabled || !activeFile) return;
-    const filePath = activeFile.path || activeFile.fullPath || activeFile.name;
-    const key = (kind === "model"
-      ? `model:${filePath}`
-      : kind === "entity"
-      ? `entity:${target}`
-      : `field:${target.entity}.${target.field}`) + `:${mode}`;
-    setAiBusyKey(key);
-    setAiError("");
-    try {
-      const resp = await suggestAiDescription({
-        projectId: activeProjectId,
-        provider: aiProvider,
-        mode,
-        target: {
-          kind,
-          path: filePath,
-          entity: kind === "entity" ? String(target) : kind === "field" ? target.entity : undefined,
-          field: kind === "field" ? target.field : undefined,
-        },
-      });
-      const text = String(resp?.description || "").trim();
-      if (!text) {
-        setAiError("AI returned an empty suggestion. Try again or write the description by hand.");
-        return;
-      }
-      // Write back through the same patch helpers an inline edit would use.
-      if (kind === "model") {
-        writeIfChanged(setModelDescription(activeFileContent || "", text));
-      } else if (kind === "entity") {
-        writeIfChanged(setEntityDescription(activeFileContent || "", String(target), text));
-      } else {
-        writeIfChanged(patchField(activeFileContent || "", target.entity, target.field, { description: text }));
-      }
-    } catch (err) {
-      // The server uses a known code when no real provider is configured.
-      // Refresh our local snapshot so the buttons disable themselves on
-      // the next render.
-      if (err?.code === "NO_PROVIDER") {
-        setAiProvider(null);
-        setAiError(err.message || aiDisabledHint);
-      } else {
-        setAiError(err?.message || "AI suggestion failed.");
-      }
-    } finally {
-      setAiBusyKey(null);
-    }
-  }, [aiEnabled, activeFile, activeProjectId, aiProvider, activeFileContent]);
 
   const renderEntityReadiness = (entityName) => {
     if (!fileReview || !Array.isArray(fileReview.findings)) return null;
