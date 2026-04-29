@@ -1,12 +1,21 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug, X as XIcon, Eye, EyeOff } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
 import useUiStore from "../../stores/uiStore";
 import useAuthStore from "../../stores/authStore";
 import { addEntityWithOptions, addRelationship } from "../../lib/yamlRoundTrip";
-import { addDiagramRelationship, addInlineDiagramEntity } from "../../design/yamlPatch";
+import {
+  addDiagramRelationship,
+  addInlineDiagramEntity,
+  setEntityDescription,
+  setEntityOwner,
+  setEntityDomain,
+  setEntitySubjectArea,
+  setEntityTags,
+  setEntityVisibility,
+} from "../../design/yamlPatch";
 import { PanelFrame, PanelSection, PanelEmpty } from "./PanelFrame";
 
 const VIEW_MODES = [
@@ -46,6 +55,252 @@ function allowedTypes(viewMode) {
   if (viewMode === "conceptual") return ["concept"];
   if (viewMode === "logical") return ["logical_entity", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
   return ["table", "view", "materialized_view", "fact_table", "dimension_table", "bridge_table", "hub", "link", "satellite"];
+}
+
+const VISIBILITY_OPTIONS = [
+  { value: "internal", label: "Internal", hint: "Stays inside the team. Skipped from OSI export." },
+  { value: "shared",   label: "Shared",   hint: "Visible across teams. Included in OSI export by default." },
+  { value: "public",   label: "Public",   hint: "Anyone in the org. Always included in OSI export." },
+];
+
+/* InlineField — click-to-edit single-line text input for a Build-panel
+   property card. Mirrors EditableDescription's commit-on-blur /
+   Enter-to-save / Esc-to-cancel UX so concept editing in the Build
+   panel feels like the docs view inline edits.
+
+   Props:
+     - value:    current value (string)
+     - placeholder: shown when empty / not editing
+     - onSave:   (next) => void; called when user commits a different value
+     - readOnly: render the value but don't allow edits
+*/
+function InlineField({ value = "", placeholder = "Click to add", onSave, readOnly = false }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef(null);
+  useEffect(() => { if (!editing) setDraft(value || ""); }, [value, editing]);
+  useEffect(() => {
+    if (editing && ref.current) {
+      ref.current.focus();
+      ref.current.setSelectionRange(ref.current.value.length, ref.current.value.length);
+    }
+  }, [editing]);
+  const commit = () => {
+    const trimmed = String(draft || "").trim();
+    if (trimmed !== String(value || "").trim()) onSave?.(trimmed);
+    setEditing(false);
+  };
+  const cancel = () => { setDraft(value || ""); setEditing(false); };
+
+  if (editing) {
+    return (
+      <input
+        ref={ref}
+        type="text"
+        className="panel-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        }}
+        style={{ width: "100%", fontSize: 12, padding: "3px 6px" }}
+      />
+    );
+  }
+  const display = String(value || "").trim();
+  return (
+    <button
+      type="button"
+      onClick={() => !readOnly && setEditing(true)}
+      disabled={readOnly}
+      title={readOnly ? "Read-only" : "Click to edit"}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        padding: "3px 0",
+        cursor: readOnly ? "default" : "text",
+        fontSize: 12,
+        color: display ? "var(--text-primary)" : "var(--text-tertiary)",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        fontStyle: display ? "normal" : "italic",
+      }}
+    >
+      {display || placeholder}
+    </button>
+  );
+}
+
+/* InlineTextArea — multi-line click-to-edit for the Definition card. */
+function InlineTextArea({ value = "", placeholder = "No business definition yet — click to add.", onSave, readOnly = false }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const ref = useRef(null);
+  useEffect(() => { if (!editing) setDraft(value || ""); }, [value, editing]);
+  useEffect(() => {
+    if (editing && ref.current) {
+      ref.current.focus();
+      ref.current.setSelectionRange(ref.current.value.length, ref.current.value.length);
+    }
+  }, [editing]);
+  const commit = () => {
+    const trimmed = String(draft || "").trim();
+    if (trimmed !== String(value || "").trim()) onSave?.(trimmed);
+    setEditing(false);
+  };
+  const cancel = () => { setDraft(value || ""); setEditing(false); };
+
+  if (editing) {
+    return (
+      <textarea
+        ref={ref}
+        className="panel-input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { e.preventDefault(); cancel(); }
+        }}
+        rows={3}
+        style={{ width: "100%", fontSize: 12, padding: "6px 8px", lineHeight: 1.5, resize: "vertical" }}
+      />
+    );
+  }
+  const display = String(value || "").trim();
+  return (
+    <button
+      type="button"
+      onClick={() => !readOnly && setEditing(true)}
+      disabled={readOnly}
+      title={readOnly ? "Read-only" : "Click to edit (⌘/Ctrl+Enter to save)"}
+      style={{
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        padding: "3px 0",
+        cursor: readOnly ? "default" : "text",
+        fontSize: 12,
+        lineHeight: 1.45,
+        color: display ? "var(--text-secondary)" : "var(--text-tertiary)",
+        whiteSpace: "pre-wrap",
+        fontStyle: display ? "normal" : "italic",
+      }}
+    >
+      {display || placeholder}
+    </button>
+  );
+}
+
+/* TagsField — chip-style multi-value editor. Adds on Enter, removes on
+   chip-X click. Empty string → field deleted from YAML. */
+function TagsField({ value = [], onSave, readOnly = false }) {
+  const [draft, setDraft] = useState("");
+  const tags = Array.isArray(value) ? value : [];
+  const addTag = (raw) => {
+    const cleaned = String(raw || "").trim();
+    if (!cleaned) return;
+    if (tags.includes(cleaned)) { setDraft(""); return; }
+    onSave?.([...tags, cleaned]);
+    setDraft("");
+  };
+  const removeTag = (idx) => {
+    const next = tags.filter((_, i) => i !== idx);
+    onSave?.(next);
+  };
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+      {tags.map((tag, idx) => (
+        <span
+          key={`${tag}-${idx}`}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 3,
+            padding: "1px 6px",
+            borderRadius: 999,
+            background: "rgba(34,197,94,0.16)",
+            color: "var(--text-primary)",
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          {tag}
+          {!readOnly && (
+            <button
+              type="button"
+              onClick={() => removeTag(idx)}
+              title={`Remove ${tag}`}
+              style={{ background: "transparent", border: "none", color: "var(--text-tertiary)", cursor: "pointer", padding: 0, lineHeight: 0 }}
+            >
+              <XIcon size={10} />
+            </button>
+          )}
+        </span>
+      ))}
+      {!readOnly && (
+        <input
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              addTag(draft);
+            } else if (e.key === "Backspace" && !draft && tags.length) {
+              e.preventDefault();
+              removeTag(tags.length - 1);
+            }
+          }}
+          onBlur={() => addTag(draft)}
+          placeholder={tags.length ? "Add tag…" : "tag, another-tag"}
+          style={{
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: "var(--text-primary)",
+            fontSize: 11,
+            padding: "1px 2px",
+            minWidth: 80,
+            flex: 1,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* PropertyCard — common chrome for one editable field in the Selected
+   Concept block. */
+function PropertyCard({ label, hint, fullWidth = false, children }) {
+  return (
+    <div
+      style={{
+        gridColumn: fullWidth ? "1 / -1" : "auto",
+        border: "1px solid var(--border-default)",
+        borderRadius: 8,
+        padding: "8px 10px",
+        background: "var(--bg-1)",
+        minWidth: 0,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+        <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+        {hint && (
+          <span style={{ fontSize: 9, color: "var(--text-tertiary)", opacity: 0.7 }} title={hint}>
+            <Info size={10} />
+          </span>
+        )}
+      </div>
+      <div style={{ marginTop: 3 }}>{children}</div>
+    </div>
+  );
 }
 
 export default function ModelerPanel() {
@@ -136,6 +391,61 @@ export default function ModelerPanel() {
   const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || activeFile?.path || "");
   const hasWorkspaceFiles = (projectFiles || []).length > 0;
 
+  /* handleCreateEntity used to live below all the layer-specific
+     returns; moved up here so the conceptual quick-add form (which
+     calls it from its onSubmit) doesn't hit the temporal dead zone. */
+  const handleCreateEntity = () => {
+    if (!entityName.trim()) {
+      addToast?.({ type: "error", message: "Entity name is required." });
+      return;
+    }
+    if (activeIsDiagram) {
+      const cleanName = entityName.trim();
+      const result = addInlineDiagramEntity(activeFileContent, {
+        name: cleanName,
+        type: entityType,
+        domain: entitySubjectArea.trim() || model?.model?.domain || "core",
+        subject_area: entitySubjectArea.trim(),
+        fields: [{
+          name: "id",
+          type: "identifier",
+          primary_key: true,
+          nullable: false,
+        }],
+        candidate_keys: [["id"]],
+        x: 120 + entities.length * 32,
+        y: 120 + entities.length * 24,
+        width: 320,
+      });
+      if (!result) {
+        addToast?.({ type: "error", message: "Could not add this entity to the active diagram." });
+        return;
+      }
+      if (result === activeFileContent) {
+        addToast?.({ type: "info", message: `${cleanName} already exists in this diagram.` });
+        return;
+      }
+      updateContent(result);
+      requestLayoutRefresh();
+      setEntityName("");
+      addToast?.({ type: "success", message: `Added ${ENTITY_TYPES[entityType]?.label || entityType} to the diagram.` });
+      return;
+    }
+    const result = addEntityWithOptions(activeFileContent, {
+      name: entityName.trim(),
+      type: entityType,
+      subjectArea: entitySubjectArea.trim(),
+    });
+    if (result.error) {
+      addToast?.({ type: "error", message: result.error });
+      return;
+    }
+    updateContent(result.yaml);
+    requestLayoutRefresh();
+    setEntityName("");
+    addToast?.({ type: "success", message: `Added ${ENTITY_TYPES[entityType]?.label || entityType}.` });
+  };
+
   if (modelKind === "conceptual") {
     const relationshipCount = Array.isArray(model?.relationships) ? model.relationships.length : 0;
     return (
@@ -164,62 +474,192 @@ export default function ModelerPanel() {
         </PanelSection>
 
         <PanelSection title="Actions" icon={<Plus size={11} />}>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              className="panel-btn primary"
-              disabled={!canEdit}
-              onClick={() => openModal("newConcept")}
+          <div style={{ display: "grid", gap: 10 }}>
+            {/* Inline quick-add — no dialog round-trip. Type a name + Enter
+                and the concept lands on the canvas with sensible defaults
+                (type: concept, domain inherited from the active model).
+                For richer fields the "More options" link still opens the
+                full dialog. */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const cleanName = entityName.trim();
+                if (!cleanName) return;
+                handleCreateEntity();
+              }}
+              style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}
             >
-              <Plus size={12} /> Add Concept
-            </button>
-            <button
-              className="panel-btn"
-              disabled={!canEdit || entities.length < 2}
-              onClick={() => openModal("newRelationship", {
-                modelKind: "conceptual",
-                conceptualLevel: true,
-                tables: entities.map((entity) => ({ id: entity.name, name: entity.name, columns: [] })),
-                fromEntity: entities[0]?.name || "",
-                toEntity: entities[1]?.name || "",
-              })}
-            >
-              <ArrowRightLeft size={12} /> Add Relationship
-            </button>
-            {!activeIsDiagram && (
+              <input
+                type="text"
+                value={entityName}
+                onChange={(e) => setEntityName(e.target.value)}
+                placeholder="New concept name (e.g. Customer)"
+                disabled={!canEdit}
+                aria-label="Quick add concept name"
+                style={{
+                  flex: "1 1 200px",
+                  minWidth: 0,
+                  padding: "6px 8px",
+                  fontSize: 12,
+                  borderRadius: 6,
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-1)",
+                  color: "var(--text-primary)",
+                }}
+              />
               <button
+                type="submit"
+                className="panel-btn primary"
+                disabled={!canEdit || !entityName.trim()}
+                title="Add concept (Enter)"
+              >
+                <Plus size={12} /> Add
+              </button>
+              <button
+                type="button"
                 className="panel-btn"
                 disabled={!canEdit}
-                onClick={() => openModal("newFile")}
+                onClick={() => openModal("newConcept")}
+                title="Open the full new-concept dialog with all options"
               >
-                <Boxes size={12} /> New Layer Asset
+                More options…
               </button>
-            )}
+            </form>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                className="panel-btn"
+                disabled={!canEdit || entities.length < 2}
+                onClick={() => openModal("newRelationship", {
+                  modelKind: "conceptual",
+                  conceptualLevel: true,
+                  tables: entities.map((entity) => ({ id: entity.name, name: entity.name, columns: [] })),
+                  fromEntity: entities[0]?.name || "",
+                  toEntity: entities[1]?.name || "",
+                })}
+              >
+                <ArrowRightLeft size={12} /> Add Relationship
+              </button>
+              {!activeIsDiagram && (
+                <button
+                  className="panel-btn"
+                  disabled={!canEdit}
+                  onClick={() => openModal("newFile")}
+                >
+                  <Boxes size={12} /> New Layer Asset
+                </button>
+              )}
+            </div>
           </div>
         </PanelSection>
 
         <PanelSection title="Selected Concept" icon={<Info size={11} />}>
           {selectedEntity ? (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 8 }}>
-              {[
-                ["Name", selectedEntity.logical_name || selectedEntity.name],
-                ["Domain", selectedEntity.domain || selectedEntity.subject_area || "unassigned"],
-                ["Owner", selectedEntity.owner || "unassigned"],
-                ["Tags", (selectedEntity.tags || []).join(", ") || "none"],
-              ].map(([label, value]) => (
-                <div key={label} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)", minWidth: 0 }}>
-                  <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
-                  <div style={{ marginTop: 3, fontSize: 12, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</div>
+              <PropertyCard label="Name">
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {selectedEntity.logical_name || selectedEntity.name}
                 </div>
-              ))}
-              <div style={{ gridColumn: "1 / -1", border: "1px solid var(--border-default)", borderRadius: 8, padding: "8px 10px", background: "var(--bg-1)" }}>
-                <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>Definition</div>
-                <div style={{ marginTop: 3, fontSize: 12, lineHeight: 1.45, color: "var(--text-secondary)" }}>
-                  {selectedEntity.description || "No business definition yet. Open Details to add one."}
+              </PropertyCard>
+              <PropertyCard label="Domain" hint="Bounded context this concept belongs to (DDD-style).">
+                <InlineField
+                  value={selectedEntity.domain || ""}
+                  placeholder="unassigned"
+                  readOnly={!canEdit}
+                  onSave={(next) => {
+                    const out = setEntityDomain(activeFileContent, selectedEntity.name, next);
+                    if (out) updateContent(out);
+                  }}
+                />
+              </PropertyCard>
+              <PropertyCard label="Owner" hint="Team or person who owns this concept end-to-end.">
+                <InlineField
+                  value={selectedEntity.owner || ""}
+                  placeholder="unassigned"
+                  readOnly={!canEdit}
+                  onSave={(next) => {
+                    const out = setEntityOwner(activeFileContent, selectedEntity.name, next);
+                    if (out) updateContent(out);
+                  }}
+                />
+              </PropertyCard>
+              <PropertyCard label="Subject area" hint="Higher-level grouping for capability mapping.">
+                <InlineField
+                  value={selectedEntity.subject_area || ""}
+                  placeholder="unassigned"
+                  readOnly={!canEdit}
+                  onSave={(next) => {
+                    const out = setEntitySubjectArea(activeFileContent, selectedEntity.name, next);
+                    if (out) updateContent(out);
+                  }}
+                />
+              </PropertyCard>
+
+              <PropertyCard label="Tags" fullWidth>
+                <TagsField
+                  value={selectedEntity.tags || []}
+                  readOnly={!canEdit}
+                  onSave={(nextTags) => {
+                    const out = setEntityTags(activeFileContent, selectedEntity.name, nextTags);
+                    if (out) updateContent(out);
+                  }}
+                />
+              </PropertyCard>
+
+              <PropertyCard
+                label="Visibility"
+                fullWidth
+                hint="Reserved for OSI export (Phase 2a). 'internal' stays in the team; 'shared' and 'public' are surfaced to AI agents."
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                  {VISIBILITY_OPTIONS.map((opt) => {
+                    const current = selectedEntity.visibility || "shared";
+                    const isActive = current === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={!canEdit}
+                        title={opt.hint}
+                        onClick={() => {
+                          const out = setEntityVisibility(activeFileContent, selectedEntity.name, opt.value);
+                          if (out) updateContent(out);
+                        }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "2px 8px",
+                          borderRadius: 999,
+                          border: `1px solid ${isActive ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
+                          background: isActive ? "rgba(59,130,246,0.14)" : "transparent",
+                          color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: canEdit ? "pointer" : "not-allowed",
+                        }}
+                      >
+                        {opt.value === "internal" ? <EyeOff size={10} /> : <Eye size={10} />}
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                 </div>
-              </div>
+              </PropertyCard>
+
+              <PropertyCard label="Definition" fullWidth>
+                <InlineTextArea
+                  value={selectedEntity.description || ""}
+                  readOnly={!canEdit}
+                  onSave={(next) => {
+                    const out = setEntityDescription(activeFileContent, selectedEntity.name, next);
+                    if (out) updateContent(out);
+                  }}
+                />
+              </PropertyCard>
             </div>
           ) : (
-            <PanelEmpty icon={Boxes} title="No concept selected" description="Select a concept on the canvas to inspect its business details here." />
+            <PanelEmpty icon={Boxes} title="No concept selected" description="Select a concept on the canvas to inspect and edit its business details here." />
           )}
         </PanelSection>
 
@@ -536,58 +976,6 @@ export default function ModelerPanel() {
       </PanelFrame>
     );
   }
-
-  const handleCreateEntity = () => {
-    if (!entityName.trim()) {
-      addToast?.({ type: "error", message: "Entity name is required." });
-      return;
-    }
-    if (activeIsDiagram) {
-      const cleanName = entityName.trim();
-      const result = addInlineDiagramEntity(activeFileContent, {
-        name: cleanName,
-        type: entityType,
-        domain: entitySubjectArea.trim() || model?.model?.domain || "core",
-        subject_area: entitySubjectArea.trim(),
-        fields: [{
-          name: "id",
-          type: "identifier",
-          primary_key: true,
-          nullable: false,
-        }],
-        candidate_keys: [["id"]],
-        x: 120 + entities.length * 32,
-        y: 120 + entities.length * 24,
-        width: 320,
-      });
-      if (!result) {
-        addToast?.({ type: "error", message: "Could not add this entity to the active diagram." });
-        return;
-      }
-      if (result === activeFileContent) {
-        addToast?.({ type: "info", message: `${cleanName} already exists in this diagram.` });
-        return;
-      }
-      updateContent(result);
-      requestLayoutRefresh();
-      setEntityName("");
-      addToast?.({ type: "success", message: `Added ${ENTITY_TYPES[entityType]?.label || entityType} to the diagram.` });
-      return;
-    }
-    const result = addEntityWithOptions(activeFileContent, {
-      name: entityName.trim(),
-      type: entityType,
-      subjectArea: entitySubjectArea.trim(),
-    });
-    if (result.error) {
-      addToast?.({ type: "error", message: result.error });
-      return;
-    }
-    updateContent(result.yaml);
-    requestLayoutRefresh();
-    setEntityName("");
-    addToast?.({ type: "success", message: `Added ${ENTITY_TYPES[entityType]?.label || entityType}.` });
-  };
 
   const handleCreateRelationship = () => {
     if (!fromEntity || !fromField || !toEntity || !toField) {
