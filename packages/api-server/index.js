@@ -4564,8 +4564,19 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
       return entities.find((e) => String(e?.name || "").toLowerCase() === lower) || null;
     }
 
+    // Mode controls the variant prompt suffix. Empty descriptions use
+    // `suggest`; existing descriptions can be `rewrite` (full replacement)
+    // or `tighter` (compress while keeping meaning). Same endpoint, same
+    // agent, same context — just a different ask at the end.
+    const mode = (() => {
+      const m = String(req.body?.mode || "suggest").toLowerCase();
+      return ["suggest", "rewrite", "tighter"].includes(m) ? m : "suggest";
+    })();
+
+    let existingDescription = "";
     let userSection = "";
     if (targetKind === "model") {
+      existingDescription = String(meta.description || "").trim();
       const entityNames = entities.map((e) => String(e?.name || "").trim()).filter(Boolean).slice(0, 12);
       userSection = [
         `Target kind: model`,
@@ -4577,6 +4588,7 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
     } else if (targetKind === "entity") {
       const ent = findEntity(target.entity);
       if (!ent) throw new ApiError(404, "NOT_FOUND", `entity not found in YAML: ${target.entity}`);
+      existingDescription = String(ent.description || "").trim();
       const fieldNames = (Array.isArray(ent.fields) ? ent.fields : [])
         .map((f) => f?.name).filter(Boolean).slice(0, 8);
       userSection = [
@@ -4593,6 +4605,7 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
       const fields = Array.isArray(ent.fields) ? ent.fields : [];
       const fld = fields.find((f) => String(f?.name || "").toLowerCase() === String(target.field).toLowerCase());
       if (!fld) throw new ApiError(404, "NOT_FOUND", `field not found: ${target.field}`);
+      existingDescription = String(fld.description || "").trim();
       const flags = [];
       if (fld.primary_key) flags.push("primary key");
       if (fld.foreign_key && fld.foreign_key.entity) flags.push(`foreign key → ${fld.foreign_key.entity}.${fld.foreign_key.field || "?"}`);
@@ -4610,8 +4623,14 @@ app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next)
       ].filter(Boolean).join("\n");
     }
 
+    const modeSuffix = mode === "rewrite" && existingDescription
+      ? `An existing description is shown below. Write a complete REPLACEMENT that's clearer, more specific, and grounded in the metadata above. Keep all factual content; tighten the language.\n\nExisting description:\n${existingDescription}\n\nReturn ONLY the replacement text, no preamble, no quotes, no JSON.`
+      : mode === "tighter" && existingDescription
+      ? `An existing description is shown below. Compress it to a single tight sentence WITHOUT losing meaning. If it's already as tight as it can get, return it unchanged.\n\nExisting description:\n${existingDescription}\n\nReturn ONLY the tightened text, no preamble, no quotes, no JSON.`
+      : `Write the description now. Return ONLY the description text, no preamble, no quotes, no JSON.`;
+
     const system = AI_AGENT_PROFILES.description_writer.contract;
-    const user = `${userSection}\n\nWrite the description now. Return ONLY the description text, no preamble, no quotes, no JSON.`;
+    const user = `${userSection}\n\n${modeSuffix}`;
 
     let raw;
     try {

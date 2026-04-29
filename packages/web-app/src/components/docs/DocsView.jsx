@@ -80,6 +80,87 @@ function flagsCellFor(field) {
   return flags.length ? flags.join(" ") : "—";
 }
 
+/**
+ * AiActionButtons — renders the inline ✨ AI controls next to a description.
+ *
+ *  - Empty description → single "Suggest" button (mode=suggest)
+ *  - Existing description → two compact buttons: "Rewrite" + "Tighter"
+ *  - All disabled (with tooltip) when no AI provider is configured
+ *  - Per-button spinner when that exact (target, mode) is in flight
+ *
+ * Three sizes for the three call sites (model = lg, entity = md, field = sm).
+ */
+function AiActionButtons({
+  aiEnabled,
+  aiDisabledHint,
+  hasDescription,
+  busyKey,         // current global busy key from DocsView state
+  baseKey,         // unique-per-target prefix (e.g. "model:foo.yml" or "entity:Customer")
+  size = "md",     // "lg" | "md" | "sm"
+  onAsk,           // (mode) => void
+}) {
+  const sz = size === "lg"
+    ? { icon: 11, fs: 11.5, py: 4, px: 9 }
+    : size === "sm"
+    ? { icon: 9, fs: 10.5, py: 2, px: 6 }
+    : { icon: 11, fs: 11.5, py: 4, px: 9 };
+
+  const baseStyle = (active) => ({
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 4,
+    padding: `${sz.py}px ${sz.px}px`,
+    borderRadius: size === "sm" ? 4 : 6,
+    border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
+    background: aiEnabled
+      ? (active ? "var(--accent, #3b82f6)" : "rgba(59,130,246,0.12)")
+      : "var(--bg-2)",
+    color: aiEnabled
+      ? (active ? "#fff" : "var(--accent, #3b82f6)")
+      : "var(--text-tertiary)",
+    fontSize: sz.fs,
+    fontWeight: 600,
+    cursor: aiEnabled ? "pointer" : "not-allowed",
+    whiteSpace: "nowrap",
+    opacity: aiEnabled ? 1 : 0.7,
+  });
+
+  const renderBtn = (mode, label, primary = false) => {
+    const busy = busyKey === `${baseKey}:${mode}`;
+    return (
+      <button
+        key={mode}
+        type="button"
+        onClick={() => onAsk(mode)}
+        disabled={!aiEnabled || busy}
+        title={aiEnabled
+          ? (busy ? "Generating…" : `${label} with AI`)
+          : aiDisabledHint}
+        style={{
+          ...baseStyle(primary),
+          cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
+        }}
+      >
+        {busy
+          ? <Loader2 size={sz.icon} style={{ animation: "spin 0.9s linear infinite" }} />
+          : <Sparkles size={sz.icon} />}
+        {size === "sm" && busy ? "…" : label}
+      </button>
+    );
+  };
+
+  if (!hasDescription) {
+    return renderBtn("suggest", size === "sm" ? "AI" : "Suggest with AI", true);
+  }
+  return (
+    <>
+      {renderBtn("rewrite", size === "sm" ? "AI" : "Rewrite", false)}
+      {size !== "sm" && renderBtn("tighter", "Tighter", false)}
+    </>
+  );
+}
+
 function parseYaml(text) {
   try {
     const doc = yaml.load(text);
@@ -221,28 +302,31 @@ export default function DocsView() {
     writeIfChanged(patchField(activeFileContent || "", entityName, fieldName, { description: text }));
   };
 
-  // -------- One-shot inline AI suggestion --------
+  // -------- One-shot inline AI suggestion / rewrite --------
   // Calls POST /api/ai/suggest with just the path + entity/field name —
   // the server reads the YAML, builds a focused prompt, invokes ONLY the
   // description_writer agent, returns plain text. Result is written back
-  // through the same yamlPatch helpers as inline edits, so it shows up
-  // immediately in the rendered description and the underlying YAML.
+  // through the same yamlPatch helpers as inline edits.
   //
-  // No chat dialog. No memory extraction. No 4-agent run.
-  const askAiToSuggest = useCallback(async (kind, target) => {
+  // `mode` ∈ "suggest" | "rewrite" | "tighter":
+  //   - suggest  → empty descriptions; produces a fresh one-shot
+  //   - rewrite  → existing descriptions; produces a clearer replacement
+  //   - tighter  → existing descriptions; compresses while keeping meaning
+  const askAiToSuggest = useCallback(async (kind, target, mode = "suggest") => {
     if (!aiEnabled || !activeFile) return;
     const filePath = activeFile.path || activeFile.fullPath || activeFile.name;
-    const key = kind === "model"
+    const key = (kind === "model"
       ? `model:${filePath}`
       : kind === "entity"
       ? `entity:${target}`
-      : `field:${target.entity}.${target.field}`;
+      : `field:${target.entity}.${target.field}`) + `:${mode}`;
     setAiBusyKey(key);
     setAiError("");
     try {
       const resp = await suggestAiDescription({
         projectId: activeProjectId,
         provider: aiProvider,
+        mode,
         target: {
           kind,
           path: filePath,
@@ -309,110 +393,147 @@ export default function DocsView() {
         color: "var(--text-primary)",
       }}
     >
-      {/* Inline `@keyframes spin` once for the AI Loader2 icons; scoped to
-          the DocsView root so we don't need a global stylesheet edit. */}
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      {/* Inline `@keyframes spin` once for the AI Loader2 icons + a couple
+          of utility classes so the prose surface feels like a real docs
+          page, not a YAML dump. Scoped via a single <style> so we don't
+          touch the global stylesheet. */}
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .dlx-docs-pill {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 3px 9px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: 600;
+          letter-spacing: 0.01em;
+          background: var(--bg-2);
+          border: 1px solid var(--border-default);
+          color: var(--text-secondary);
+        }
+        .dlx-docs-pill code { font-size: 11px; color: var(--text-primary); background: transparent; padding: 0; }
+        .dlx-docs-eyebrow {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--text-tertiary);
+          margin: 0 0 8px;
+        }
+        .dlx-docs-card {
+          padding: 18px 20px 20px;
+          border-radius: 12px;
+          border: 1px solid var(--border-default);
+          background: var(--bg-1);
+          margin-bottom: 18px;
+          transition: border-color 0.15s;
+        }
+        .dlx-docs-card:hover { border-color: var(--border-strong); }
+        .dlx-docs-card-header {
+          display: flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-bottom: 6px;
+          padding-bottom: 12px;
+          border-bottom: 1px solid var(--border-subtle, var(--border-default));
+        }
+        .dlx-docs-fields-table tr:hover td {
+          background: var(--bg-2);
+        }
+        .dlx-docs-fields-table td { transition: background 0.1s; }
+      `}</style>
       <div style={{ maxWidth: 980, margin: "0 auto" }}>
-        {/* Header */}
-        <header style={{ marginBottom: 18 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-            <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em" }}>
+        {/* Hero header */}
+        <header style={{ marginBottom: 24 }}>
+          <p className="dlx-docs-eyebrow" style={{ marginBottom: 4 }}>
+            {layer ? `${layer} model` : "Model"}{domain ? ` · ${domain}` : ""}
+          </p>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+            <h1 style={{
+              margin: 0,
+              fontSize: 28,
+              fontWeight: 700,
+              letterSpacing: "-0.015em",
+              lineHeight: 1.15,
+              flex: 1,
+              minWidth: 0,
+            }}>
               {title}
             </h1>
-            {fileReview && fileReview.status && (
-              <ReadinessChip
-                status={fileReview.status}
-                count={fileReview.score ?? 0}
-                label={`/100 readiness · ${(fileReview.counts?.total ?? 0)} findings`}
-              />
-            )}
             <button
               type="button"
               onClick={runReview}
               disabled={reviewing || !activeProjectId}
               title="Run the dbt readiness gate over this project"
               style={{
-                marginLeft: "auto",
-                padding: "5px 11px",
-                borderRadius: 6,
+                padding: "7px 13px",
+                borderRadius: 8,
                 border: "1px solid var(--border-default)",
                 background: "var(--bg-2)",
                 color: "var(--text-secondary)",
-                fontSize: 11.5,
+                fontSize: 12,
                 fontWeight: 600,
                 cursor: reviewing || !activeProjectId ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+                marginTop: 4,
               }}
             >
               {reviewing ? "Running readiness…" : "Run readiness check"}
             </button>
           </div>
-          <div
-            style={{
-              marginTop: 6,
-              display: "flex",
-              gap: 12,
-              flexWrap: "wrap",
-              fontSize: 12,
-              color: "var(--text-secondary)",
-            }}
-          >
-            {layer && <span><strong>Layer:</strong> <code>{layer}</code></span>}
-            {domain && <span><strong>Domain:</strong> <code>{domain}</code></span>}
-            {meta.version && <span><strong>Version:</strong> <code>{meta.version}</code></span>}
-            {owners.length > 0 && (
-              <span><strong>Owners:</strong> {owners.map((o) => <code key={o} style={{ marginLeft: 4 }}>{o}</code>)}</span>
+          {/* Meta pills row */}
+          <div style={{ marginTop: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {fileReview && fileReview.status && (
+              <ReadinessChip
+                status={fileReview.status}
+                count={fileReview.score ?? 0}
+                label={`/100 · ${(fileReview.counts?.total ?? 0)} findings`}
+              />
             )}
-            <span><strong>Source:</strong> <code>{activeFile.path || activeFile.name}</code></span>
+            {layer && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>Layer</strong> <code>{layer}</code></span>}
+            {domain && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>Domain</strong> <code>{domain}</code></span>}
+            {meta.version && <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>Version</strong> <code>{meta.version}</code></span>}
+            {owners.length > 0 && (
+              <span className="dlx-docs-pill" title={owners.join(", ")}>
+                <strong style={{ opacity: 0.6 }}>Owners</strong> <code>{owners[0]}{owners.length > 1 ? ` +${owners.length - 1}` : ""}</code>
+              </span>
+            )}
+            <span className="dlx-docs-pill" title={activeFile.path || activeFile.name}>
+              <strong style={{ opacity: 0.6 }}>Source</strong> <code>{(activeFile.path || activeFile.name).split("/").slice(-2).join("/")}</code>
+            </span>
           </div>
           {reviewError && (
-            <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-tertiary)" }}>
+            <div style={{ marginTop: 10, fontSize: 12, color: "var(--text-tertiary)" }}>
               Readiness check failed: {reviewError}
             </div>
           )}
         </header>
 
-        {/* Model description */}
-        <section style={{ marginBottom: 22 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <EditableDescription
-              value={meta.description || ""}
-              placeholder="Add a short summary of what this model represents."
-              onSave={handleModelDescription}
-              ariaLabel="model description"
+        {/* Model description card */}
+        <section className="dlx-docs-card" style={{ marginBottom: 24 }}>
+          <p className="dlx-docs-eyebrow">Overview</p>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0, fontSize: 14, lineHeight: 1.65 }}>
+              <EditableDescription
+                value={meta.description || ""}
+                placeholder="Add a short summary of what this model represents."
+                onSave={handleModelDescription}
+                ariaLabel="model description"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 6, flexShrink: 0, marginTop: 4 }}>
+            <AiActionButtons
+              aiEnabled={aiEnabled}
+              aiDisabledHint={aiDisabledHint}
+              hasDescription={Boolean(meta.description)}
+              busyKey={aiBusyKey}
+              baseKey={`model:${activeFile.path || activeFile.fullPath || activeFile.name}`}
+              size="lg"
+              onAsk={(mode) => askAiToSuggest("model", null, mode)}
             />
-            {!meta.description && (() => {
-              const busy = aiBusyKey === `model:${activeFile.path || activeFile.fullPath || activeFile.name}`;
-              return (
-                <button
-                  type="button"
-                  onClick={() => askAiToSuggest("model")}
-                  disabled={!aiEnabled || busy}
-                  title={aiEnabled
-                    ? (busy ? "Generating…" : "Ask AI to suggest a description")
-                    : aiDisabledHint}
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: 4,
-                    padding: "4px 9px",
-                    borderRadius: 6,
-                    border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
-                    background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
-                    color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
-                    whiteSpace: "nowrap",
-                    opacity: aiEnabled ? 1 : 0.7,
-                  }}
-                >
-                  {busy
-                    ? <Loader2 size={11} style={{ animation: "spin 0.9s linear infinite" }} />
-                    : <Sparkles size={11} />}
-                  {busy ? "Generating…" : "Suggest with AI"}
-                </button>
-              );
-            })()}
+            </div>
           </div>
           {aiError && (
             <div style={{
@@ -447,83 +568,61 @@ export default function DocsView() {
           return (
             <section
               key={entName + idx}
-              style={{
-                marginBottom: 22,
-                padding: "14px 18px 16px",
-                borderRadius: 10,
-                border: "1px solid var(--border-default)",
-                background: "var(--bg-1)",
-              }}
+              className="dlx-docs-card"
+              id={`entity-${entName}`}
             >
-              <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>{entName}</h3>
-                  <span style={{ fontSize: 11.5, color: "var(--text-tertiary)" }}>
-                    <code>{ent.type || "entity"}</code>
+              <header className="dlx-docs-card-header">
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700, letterSpacing: "-0.005em" }}>{entName}</h3>
+                <span className="dlx-docs-pill" style={{ background: "var(--bg-3, rgba(59,130,246,0.08))", borderColor: "rgba(59,130,246,0.25)", color: "var(--text-primary)" }}>
+                  {ent.type || "entity"}
+                </span>
+                {fields.length > 0 && (
+                  <span className="dlx-docs-pill" style={{ opacity: 0.8 }}>
+                    {fields.length} field{fields.length === 1 ? "" : "s"}
                   </span>
-                  {renderEntityReadiness(entName)}
-                </div>
+                )}
+                {renderEntityReadiness(entName)}
               </header>
 
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                <EditableDescription
-                  value={ent.description || ""}
-                  placeholder={`Describe the ${entName} entity.`}
-                  onSave={handleEntityDescription(entName)}
-                  ariaLabel={`${entName} description`}
-                />
-                {!ent.description && (() => {
-                  const busy = aiBusyKey === `entity:${entName}`;
-                  return (
-                  <button
-                    type="button"
-                    onClick={() => askAiToSuggest("entity", entName)}
-                    disabled={!aiEnabled || busy}
-                    title={aiEnabled
-                      ? (busy ? "Generating…" : "Ask AI to suggest a description for this entity")
-                      : aiDisabledHint}
-                    style={{
-                      flexShrink: 0,
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 4,
-                      padding: "4px 9px",
-                      borderRadius: 6,
-                      border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
-                      background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
-                      color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
-                      fontSize: 11.5,
-                      fontWeight: 600,
-                      cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
-                      whiteSpace: "nowrap",
-                      marginTop: 6,
-                      opacity: aiEnabled ? 1 : 0.7,
-                    }}
-                  >
-                    {busy
-                      ? <Loader2 size={11} style={{ animation: "spin 0.9s linear infinite" }} />
-                      : <Sparkles size={11} />}
-                    {busy ? "…" : "AI"}
-                  </button>
-                  );
-                })()}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                <div style={{ flex: "1 1 240px", minWidth: 0, fontSize: 13.5, lineHeight: 1.6 }}>
+                  <EditableDescription
+                    value={ent.description || ""}
+                    placeholder={`Describe the ${entName} entity.`}
+                    onSave={handleEntityDescription(entName)}
+                    ariaLabel={`${entName} description`}
+                  />
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0, marginTop: 4 }}>
+                  <AiActionButtons
+                    aiEnabled={aiEnabled}
+                    aiDisabledHint={aiDisabledHint}
+                    hasDescription={Boolean(ent.description)}
+                    busyKey={aiBusyKey}
+                    baseKey={`entity:${entName}`}
+                    size="md"
+                    onAsk={(mode) => askAiToSuggest("entity", entName, mode)}
+                  />
+                </div>
               </div>
 
               {fields.length > 0 && (
+                <>
+                <p className="dlx-docs-eyebrow" style={{ margin: "16px 0 6px" }}>Fields</p>
                 <table
+                  className="dlx-docs-fields-table"
                   style={{
                     width: "100%",
                     borderCollapse: "collapse",
-                    marginTop: 12,
                     fontSize: 12.5,
                   }}
                 >
                   <thead>
-                    <tr style={{ textAlign: "left", color: "var(--text-secondary)" }}>
-                      <th style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)", width: "20%" }}>Field</th>
-                      <th style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)", width: "14%" }}>Type</th>
-                      <th style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)", width: "20%" }}>Flags</th>
-                      <th style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)" }}>Description</th>
+                    <tr style={{ textAlign: "left", color: "var(--text-tertiary)", fontSize: 11 }}>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", width: "22%", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Field</th>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", width: "14%", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Type</th>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", width: "20%", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Flags</th>
+                      <th style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-default)", textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 700 }}>Description</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -531,18 +630,19 @@ export default function DocsView() {
                       if (!fld || typeof fld !== "object") return null;
                       const fname = String(fld.name || "");
                       if (!fname) return null;
+                      const isPk = !!fld.primary_key;
                       return (
                         <tr key={fname + fIdx} style={{ verticalAlign: "top" }}>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)" }}>
-                            <code>{fname}</code>
+                          <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-subtle, var(--border-default))" }}>
+                            <code style={{ fontWeight: isPk ? 700 : 500 }}>{fname}</code>
                           </td>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)" }}>
+                          <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-subtle, var(--border-default))", color: "var(--text-secondary)" }}>
                             <code>{String(fld.type || "string")}</code>
                           </td>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border-default)", color: "var(--text-secondary)" }}>
+                          <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border-subtle, var(--border-default))", color: "var(--text-secondary)", fontSize: 11.5 }}>
                             {flagsCellFor(fld)}
                           </td>
-                          <td style={{ padding: "2px 8px", borderBottom: "1px solid var(--border-default)" }}>
+                          <td style={{ padding: "4px 10px", borderBottom: "1px solid var(--border-subtle, var(--border-default))" }}>
                             <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                               <div style={{ flex: 1, minWidth: 0 }}>
                                 <EditableDescription
@@ -553,39 +653,15 @@ export default function DocsView() {
                                   ariaLabel={`${entName}.${fname} description`}
                                 />
                               </div>
-                              {!fld.description && (() => {
-                                const busy = aiBusyKey === `field:${entName}.${fname}`;
-                                return (
-                                <button
-                                  type="button"
-                                  onClick={() => askAiToSuggest("field", { entity: entName, field: fname })}
-                                  disabled={!aiEnabled || busy}
-                                  title={aiEnabled
-                                    ? (busy ? "Generating…" : "Ask AI to suggest a description for this field")
-                                    : aiDisabledHint}
-                                  style={{
-                                    flexShrink: 0,
-                                    display: "inline-flex",
-                                    alignItems: "center",
-                                    gap: 3,
-                                    padding: "2px 6px",
-                                    borderRadius: 4,
-                                    border: `1px solid ${aiEnabled ? "var(--accent, #3b82f6)" : "var(--border-default)"}`,
-                                    background: aiEnabled ? "rgba(59,130,246,0.12)" : "var(--bg-2)",
-                                    color: aiEnabled ? "var(--accent, #3b82f6)" : "var(--text-tertiary)",
-                                    fontSize: 10.5,
-                                    fontWeight: 600,
-                                    cursor: aiEnabled && !busy ? "pointer" : "not-allowed",
-                                    opacity: aiEnabled ? 1 : 0.7,
-                                  }}
-                                >
-                                  {busy
-                                    ? <Loader2 size={9} style={{ animation: "spin 0.9s linear infinite" }} />
-                                    : <Sparkles size={9} />}
-                                  {busy ? "…" : "AI"}
-                                </button>
-                                );
-                              })()}
+                              <AiActionButtons
+                                aiEnabled={aiEnabled}
+                                aiDisabledHint={aiDisabledHint}
+                                hasDescription={Boolean(fld.description)}
+                                busyKey={aiBusyKey}
+                                baseKey={`field:${entName}.${fname}`}
+                                size="sm"
+                                onAsk={(mode) => askAiToSuggest("field", { entity: entName, field: fname }, mode)}
+                              />
                             </div>
                           </td>
                         </tr>
@@ -593,6 +669,7 @@ export default function DocsView() {
                     })}
                   </tbody>
                 </table>
+                </>
               )}
             </section>
           );

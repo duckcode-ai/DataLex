@@ -284,6 +284,16 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     setTurns([]);
     setValidation(null);
     setError("");
+    // Caller can request the message be sent immediately. Used by the
+    // Validation panel's "Ask AI" buttons so a click feels like an
+    // action, not a "now type your prompt" handoff. We pass the text
+    // explicitly because the setMessage above hasn't flushed yet.
+    if (payload?.autoSubmit && payload?.initialMessage) {
+      queueMicrotask(() => { submit(payload.initialMessage); });
+    }
+    // submit is intentionally omitted from deps — we only re-trigger on
+    // a new payload, not on submit's own identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload]);
 
   React.useEffect(() => {
@@ -335,12 +345,17 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     };
   }, [payload, activeFile, activeFileContent]);
 
-  const submit = async () => {
-    if (loading || !activeProjectId || !message.trim()) return;
+  // `overrideText` lets callers (notably the payload-auto-submit path)
+  // skip the React state round-trip — `setMessage(...)` doesn't reach
+  // the next read of `message` synchronously, so an immediate submit
+  // would otherwise see the old empty string.
+  const submit = async (overrideText) => {
+    const messageText = (typeof overrideText === "string" ? overrideText : message).trim();
+    if (loading || !activeProjectId || !messageText) return;
     setLoading(true);
     setError("");
     setResult(null);
-    const userText = message.trim();
+    const userText = messageText;
     setLastRequest(userText);
     setMessage("");
     setTurns((items) => [...items, { role: "user", content: userText }]);

@@ -291,10 +291,10 @@ export async function askAi(body = {}) {
  * when no LLM is configured (the UI uses that to render a tooltip
  * instead of attempting the call).
  */
-export async function suggestAiDescription({ projectId, target, provider }) {
+export async function suggestAiDescription({ projectId, target, provider, mode = "suggest" }) {
   return request("/ai/suggest", {
     method: "POST",
-    body: JSON.stringify({ projectId, target, provider }),
+    body: JSON.stringify({ projectId, target, provider, mode }),
   });
 }
 

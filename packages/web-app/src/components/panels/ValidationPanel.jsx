@@ -761,13 +761,30 @@ export default function ValidationPanel() {
   };
 
   const handleAskAiIssue = (issue) => {
+    const filePath = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
+    // Build a focused prompt the AI can act on immediately rather than
+    // dumping the user into a blank chat with the issue in context.
+    // Auto-submit so the click feels like an action.
+    const prompt = [
+      "Explain this DataLex validation finding in one plain-English sentence, then propose the smallest YAML patch that resolves it.",
+      "",
+      `Code: ${issue?.code || "(no code)"}`,
+      `Severity: ${issue?.severity || "warn"}`,
+      filePath ? `File: ${filePath}` : "",
+      issue?.path ? `Target: ${issue.path}` : "",
+      issue?.message ? `Message: ${issue.message}` : "",
+      "",
+      "Use the `patch_yaml` change type with explicit JSON-patch ops where possible.",
+    ].filter(Boolean).join("\n");
     openAiPanel({
       source: "validation",
       targetName: issue?.code || "validation issue",
+      initialMessage: prompt,
+      autoSubmit: true,
       context: {
         kind: "validation_issue",
         issue,
-        filePath: activeFile?.path || activeFile?.fullPath || activeFile?.name || "",
+        filePath,
       },
     });
   };
@@ -793,6 +810,23 @@ export default function ValidationPanel() {
 
   const handleAskAiReadiness = (finding = null) => {
     const path = activeFile?.path || activeFile?.fullPath || activeFile?.name || "";
+    // Auto-submit ground the AI in dbt-naming + dbt-test-coverage skills.
+    const initialMessage = finding
+      ? [
+          `Explain this dbt readiness finding in one plain-English sentence, then propose the smallest YAML patch that resolves it.`,
+          ``,
+          `File: ${path}`,
+          `Code: ${finding.code || "(no code)"}`,
+          `Severity: ${finding.severity || "warn"}`,
+          `Message: ${finding.message || "(no message)"}`,
+          ``,
+          `Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth. Use \`patch_yaml\` change type.`,
+        ].join("\n")
+      : [
+          `Review the file at ${path} against the dbt readiness gate. List every gap and propose focused YAML patches that bring it from yellow / red to green.`,
+          ``,
+          `Use the dbt-naming-conventions and dbt-test-coverage skills as ground truth. One \`patch_yaml\` change per gap.`,
+        ].join("\n");
     openAiPanel({
       source: "dbt-readiness",
       targetName: finding?.code || activeReviewFile?.path || "dbt readiness",
@@ -802,9 +836,8 @@ export default function ValidationPanel() {
         finding,
         readiness: activeReviewFile,
       },
-      initialMessage: finding
-        ? `Propose a focused YAML fix for this dbt readiness finding in ${path}: ${finding.message}`
-        : `Review ${path} and propose focused YAML fixes for the dbt readiness gaps.`,
+      initialMessage,
+      autoSubmit: true,
     });
   };
 
