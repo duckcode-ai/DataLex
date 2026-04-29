@@ -44,9 +44,12 @@ const DiffPanel           = React.lazy(() => import("../components/panels/DiffPa
 const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
 const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
 // P1.B — read-only panels for non-model dbt resources surfaced from the active YAML.
+// Still routed in BottomPanelContent for direct access (URL / palette), but
+// the bottom-tab strip funnels everything through the consolidated DbtPanel.
 const SnapshotsPanel      = React.lazy(() => import("../components/panels/SnapshotsPanel"));
 const ExposuresPanel      = React.lazy(() => import("../components/panels/ExposuresPanel"));
 const UnitTestsPanel      = React.lazy(() => import("../components/panels/UnitTestsPanel"));
+const DbtPanel            = React.lazy(() => import("../components/panels/DbtPanel"));
 // P0.3 — custom policy pack editor for <project>/.datalex/policies/.
 const PolicyPacksPanel    = React.lazy(() => import("../components/panels/PolicyPacksPanel"));
 const SelectionSummaryPanel = React.lazy(() => import("../components/panels/SelectionSummaryPanel"));
@@ -171,16 +174,18 @@ const LOGICAL_BOTTOM_TABS = [
   { id: "history",       label: "History",       icon: Clock },
 ];
 
+/* PHYSICAL layer was 10 tabs; six of them either rendered as
+   placeholder LayerSupportPanel cards (SQL Preview, dbt YAML,
+   Constraints) or only fired for one specific YAML key
+   (Snapshots / Exposures / Unit Tests). The new "dbt" tab folds all
+   the dbt-shape readers behind a single panel that adapts to the
+   active file, so nothing is ever blank. The legacy ids are still
+   routed in BottomPanelContent — they're just not in the strip. */
 const PHYSICAL_BOTTOM_TABS = [
   { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
-  { id: "unit_tests",    label: "Unit Tests",    icon: FlaskConical },
   { id: "diff",          label: "Diff",          icon: GitCompare },
   { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "dbt",           label: "dbt YAML",      icon: Braces },
-  { id: "constraints",   label: "Constraints",   icon: Database },
-  { id: "snapshots",     label: "Snapshots",     icon: Camera },
-  { id: "exposures",     label: "Exposures",     icon: Eye },
+  { id: "dbt",           label: "dbt",           icon: Braces },
   { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
 ];
 
@@ -512,9 +517,7 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
     case "relationships":
       node = <LayerSupportPanel title="Relationships" eyebrow={schema?.modelKind || "Model"} description="Review relationship meaning, role names, cardinality, optionality, identifying status, and diagram-scoped edges." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
-    case "dbt":
-      node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
-      break;
+    case "dbt":           node = <DbtPanel />; break;
     case "sql":
       node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under generated-sql/ and the active domain folder." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
