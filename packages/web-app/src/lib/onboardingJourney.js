@@ -30,8 +30,12 @@ export const JOURNEY_STEPS = [
   {
     id: "welcome",
     title: "Welcome to DataLex",
+    /* The welcome step renders a custom WelcomeIntro component
+       (three-pillar value layout) instead of `body`. The string is
+       still here as a graceful fallback for any consumer that doesn't
+       know about the special case. */
     body:
-      "Turn your dbt project into a governed, AI-ready model. Business meaning on top, dbt files underneath, reviewable diffs in between — every step lands as YAML in the repo your team already owns.",
+      "Turn your dbt project into a governed, AI-ready model — without leaving Git.",
     cta: "Let's go",
     completeOn: null,
   },
