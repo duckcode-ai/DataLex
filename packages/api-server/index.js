@@ -4747,9 +4747,99 @@ async function intentEndpointHandler(intent, req, res, next) {
       const status = code === "PROVIDER_FAILED" ? 502 : code === "PARSE_FAILED" || code === "SCHEMA_INVALID" ? 422 : 500;
       return apiFail(res, status, code, result.error?.message || "intent endpoint failed", result.error?.raw);
     }
-    res.json(result);
+    // Wrap the typed response in a legacy-compatible envelope so the
+    // existing AiAssistantSurface (which renders `answer` +
+    // `proposed_changes` + `agent_run`) keeps working when /api/ai/ask
+    // routes through one of these endpoints.
+    res.json({
+      ok: true,
+      intent: result.intent,
+      response: result.response,
+      ...buildLegacyEnvelope(intent, result.response),
+    });
   } catch (err) {
     next(err);
+  }
+}
+
+function agentLabelForIntent(intent) {
+  switch (intent) {
+    case "validation_fix": return { id: "yaml_patch_engineer", label: "YAML Patch Engineer" };
+    case "explain":         return { id: "governance_reviewer", label: "Governance Reviewer" };
+    case "explore":         return { id: "governance_reviewer", label: "Governance Reviewer" };
+    case "create_artifact": return { id: "conceptualizer", label: "Conceptualizer" };
+    case "refactor":        return { id: "yaml_patch_engineer", label: "YAML Patch Engineer" };
+    default:                return { id: "governance_reviewer", label: "Governance Reviewer" };
+  }
+}
+
+function buildLegacyEnvelope(intent, response) {
+  const agent = agentLabelForIntent(intent);
+  const baseEnvelope = {
+    answer: "",
+    sources: [],
+    proposed_changes: [],
+    questions: [],
+    commands_to_run: [],
+    risks: [],
+    confidence: 0.7,
+    requires_user_approval: false,
+    agent_run: { agents: [agent], skills_used: [] },
+  };
+  switch (intent) {
+    case "validation_fix":
+      return {
+        ...baseEnvelope,
+        answer: response?.explanation || "",
+        proposed_changes: response?.patch ? [{
+          type: "patch_yaml",
+          path: response.patch.path,
+          ops: response.patch.ops,
+        }] : [],
+        requires_user_approval: true,
+      };
+    case "explain":
+      return {
+        ...baseEnvelope,
+        answer: response?.answer || "",
+        sources: Array.isArray(response?.sources) ? response.sources : [],
+      };
+    case "explore": {
+      const matches = Array.isArray(response?.matches) ? response.matches : [];
+      const summary = response?.summary || `Found ${matches.length} matches.`;
+      const bulletList = matches.slice(0, 8).map((m) => `- \`${m.path}\` — ${m.snippet || ""}`).join("\n");
+      return {
+        ...baseEnvelope,
+        answer: bulletList ? `${summary}\n\n${bulletList}` : summary,
+        sources: matches,
+      };
+    }
+    case "create_artifact":
+      return {
+        ...baseEnvelope,
+        answer: `Proposed a new ${response?.change?.type || "artifact"} at ${response?.change?.path || "(no path)"}`,
+        proposed_changes: response?.change ? [{
+          type: response.change.type,
+          path: response.change.path,
+          content: response.change.content,
+        }] : [],
+        requires_user_approval: true,
+      };
+    case "refactor": {
+      const patches = Array.isArray(response?.patches) ? response.patches : [];
+      return {
+        ...baseEnvelope,
+        answer: `Proposed ${patches.length} focused patch${patches.length === 1 ? "" : "es"}.`,
+        proposed_changes: patches.map((p) => ({
+          type: "patch_yaml",
+          path: p.path,
+          ops: p.ops,
+        })),
+        requires_user_approval: true,
+      };
+    }
+    default:
+      return baseEnvelope;
   }
 }
 
