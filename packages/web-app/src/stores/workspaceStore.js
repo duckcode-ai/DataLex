@@ -36,6 +36,7 @@ import useHistoryStore, { fileKeyOf } from "./historyStore";
 // tested without the full zustand + API surface. See that file for
 // normalization rules.
 import { matchesRenameSource, rewriteRenameTarget } from "../lib/renamePaths";
+import { classifyYamlDocument, isDbtYamlDocumentKind } from "../lib/yamlDocumentKind.js";
 
 // Read a project file and return the names of entities defined inside it.
 // Returns [] for non-model files, unreadable files, or parse errors — the
@@ -423,15 +424,11 @@ function ensurePlaceholderEntityForEmptyModel(yamlText) {
 function isLikelyDbtSchema(text, sourceName = "") {
   const doc = parseYamlObjectSafe(text);
   if (!doc) return false;
-  const hasDbtSections =
-    Array.isArray(doc.models) ||
-    Array.isArray(doc.sources) ||
-    Array.isArray(doc.semantic_models) ||
-    Array.isArray(doc.metrics);
-  if (!hasDbtSections) return false;
+  const kind = classifyYamlDocument(doc);
+  if (!isDbtYamlDocumentKind(kind)) return false;
   const version = String(doc.version ?? "").trim();
-  const looksLikeSchemaFile = /(^|\/)schema\.ya?ml$/i.test(String(sourceName || ""));
-  return version === "2" || version === "2.0" || looksLikeSchemaFile;
+  const looksLikeSchemaFile = /(^|\/)(schema|sources)\.ya?ml$/i.test(String(sourceName || ""));
+  return version === "2" || version === "2.0" || looksLikeSchemaFile || isDbtYamlDocumentKind(kind);
 }
 
 function joinPath(basePath, childPath) {

@@ -1,10 +1,10 @@
 import React from "react";
 import { AlertTriangle, Check, ClipboardList, Send, Sparkles, Wand2 } from "lucide-react";
-import { askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
+import { aiFix, askAi, fetchAiChat, fetchAiChats, validateAiProposal } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import AiProposalPreview from "./AiProposalPreview";
-import { aiProposalPath, proposalEditableYaml } from "./aiProposalYaml";
+import { aiProposalPath, isPatchYamlProposal, proposalEditableYaml, proposalPatchOps } from "./aiProposalYaml";
 
 const AI_WORK_STEPS = [
   "Finding the most relevant dbt and DataLex context",
@@ -33,6 +33,33 @@ function proposalTitle(change, index) {
   const type = change?.type || change?.operation || "change";
   const path = change?.path || change?.fullPath || change?.toPath || change?.name || "";
   return `${index + 1}. ${String(type).replace(/_/g, " ")}${path ? ` · ${path}` : ""}`;
+}
+
+function proposalReviewPath(change) {
+  if (isPatchYamlProposal(change)) return aiProposalPath(change, "yaml");
+  return aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram");
+}
+
+function PatchYamlSummary({ change }) {
+  const ops = proposalPatchOps(change);
+  return (
+    <div className="panel-card" style={{ padding: 8, display: "grid", gap: 6 }}>
+      <strong>YAML patch</strong>
+      <span className="muted">{change?.path || change?.fullPath || "(no path)"}</span>
+      {change?.targetPointer && <span className="muted">Target: {change.targetPointer}</span>}
+      {ops.length > 0 ? (
+        <div style={{ display: "grid", gap: 4 }}>
+          {ops.slice(0, 6).map((op, index) => (
+            <code key={`${op?.op}-${op?.path}-${index}`} className="ai-md-inline-code">
+              {op?.op || "op"} {op?.path || "/"}
+            </code>
+          ))}
+        </div>
+      ) : (
+        <span className="muted">No JSON Patch operations are attached yet.</span>
+      )}
+    </div>
+  );
 }
 
 function buildAiReviewDocument({ result, context, message }) {
@@ -123,9 +150,9 @@ function buildAiReviewDocument({ result, context, message }) {
         lines.push("Validation impact:");
         lines.push(typeof change.validation_impact === "string" ? change.validation_impact : compactJson(change.validation_impact));
       }
-      const path = aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram");
+      const path = proposalReviewPath(change);
       lines.push("");
-      lines.push(`Review path: DataLex/${path}`);
+      lines.push(isPatchYamlProposal(change) ? `Patch target: ${path}` : `Review path: DataLex/${path}`);
     });
   }
 
@@ -135,7 +162,7 @@ function buildAiReviewDocument({ result, context, message }) {
     content: lines.join("\n"),
     proposals: changes.map((change) => ({
       ...change,
-      editor_path: aiProposalPath(change, String(change?.type || "").includes("model") ? "model" : "diagram"),
+      editor_path: proposalReviewPath(change),
       editor_yaml: proposalEditableYaml(change),
     })),
   };
@@ -276,6 +303,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
   const [workStepIndex, setWorkStepIndex] = React.useState(0);
   const [lastRequest, setLastRequest] = React.useState("");
   const scrollRef = React.useRef(null);
+  // Tracks which payload identity we've already auto-submitted for.
+  // React 18 StrictMode runs effects twice in dev, so without this guard
+  // the autoSubmit fires twice and produces two identical AI responses.
+  const autoSubmittedPayloadRef = React.useRef(null);
 
   React.useEffect(() => {
     setMessage(payload?.initialMessage || "");
@@ -284,6 +315,23 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     setTurns([]);
     setValidation(null);
     setError("");
+    // Caller can request the message be sent immediately. Used by the
+    // Validation panel's "Ask AI" buttons so a click feels like an
+    // action, not a "now type your prompt" handoff. We pass the text
+    // explicitly because the setMessage above hasn't flushed yet, and
+    // we ref-guard against StrictMode's double-invoke so the same
+    // payload doesn't submit twice.
+    if (
+      payload?.autoSubmit
+      && payload?.initialMessage
+      && autoSubmittedPayloadRef.current !== payload
+    ) {
+      autoSubmittedPayloadRef.current = payload;
+      queueMicrotask(() => { submit(payload.initialMessage); });
+    }
+    // submit is intentionally omitted from deps — we only re-trigger on
+    // a new payload, not on submit's own identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [payload]);
 
   React.useEffect(() => {
@@ -335,12 +383,17 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
     };
   }, [payload, activeFile, activeFileContent]);
 
-  const submit = async () => {
-    if (loading || !activeProjectId || !message.trim()) return;
+  // `overrideText` lets callers (notably the payload-auto-submit path)
+  // skip the React state round-trip — `setMessage(...)` doesn't reach
+  // the next read of `message` synchronously, so an immediate submit
+  // would otherwise see the old empty string.
+  const submit = async (overrideText) => {
+    const messageText = (typeof overrideText === "string" ? overrideText : message).trim();
+    if (loading || !activeProjectId || !messageText) return;
     setLoading(true);
     setError("");
     setResult(null);
-    const userText = message.trim();
+    const userText = messageText;
     setLastRequest(userText);
     setMessage("");
     setTurns((items) => [...items, { role: "user", content: userText }]);
@@ -349,7 +402,7 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
       const model = storageValue("datalex.ai.model", "");
       const baseUrl = storageValue("datalex.ai.baseUrl", "");
       const apiKey = storageValue("datalex.ai.apiKey", "");
-      const response = await askAi({
+      const requestBody = {
         projectId: activeProjectId,
         chatId: chatId || undefined,
         message: userText,
@@ -364,7 +417,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
           pinned: pinnedSkills,
           disabled: disabledSkills,
         },
-      });
+      };
+      const contextKind = String(context?.kind || "").toLowerCase();
+      const isValidationFix = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
+      const response = isValidationFix ? await aiFix(requestBody) : await askAi(requestBody);
       setChatId(response.chatId || chatId || null);
       setResult(response);
       setTurns((items) => [...items, { role: "assistant", content: response.answer || "No answer returned." }]);
@@ -645,10 +701,10 @@ export default function AiAssistantSurface({ payload = null, onClose, compact = 
                       <summary style={{ cursor: "pointer", fontWeight: 700 }}>
                         <Check size={12} /> {proposalTitle(change, idx)}
                       </summary>
-                      <AiProposalPreview change={change} />
+                      {isPatchYamlProposal(change) ? <PatchYamlSummary change={change} /> : <AiProposalPreview change={change} />}
                       {change.rationale && <div className="muted ai-proposal-rationale"><MarkdownText text={change.rationale} /></div>}
                       <button className="panel-btn mini" type="button" onClick={openReviewPlan}>
-                        <ClipboardList size={12} /> Open visual editor
+                        <ClipboardList size={12} /> {isPatchYamlProposal(change) ? "Open patch editor" : "Open visual editor"}
                       </button>
                     </details>
                   ))}

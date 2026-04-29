@@ -7,7 +7,11 @@ import { execFileSync as rawExecFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
 import { randomBytes } from "crypto";
+import { fileURLToPath } from "url";
 import { listProviderMeta } from "./ai/providerMeta.js";
+import { classifyIntent } from "./ai/intent-router.js";
+import { runIntentEndpoint } from "./ai/intent-endpoints.js";
+import { classifyYamlDocument, isDbtYamlDocumentKind } from "./ai/yamlDocumentKind.js";
 import {
   callAiProvider as callConfiguredAiProvider,
   resolveAiProviderConfig as resolveConfiguredAiProvider,
@@ -27,6 +31,7 @@ import {
 } from "./ai/agentStore.js";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
+const jsonpatch = require("fast-json-patch");
 
 const app = express();
 const PORT = process.env.PORT || 3006;
@@ -71,7 +76,11 @@ function apiFail(res, status, code, message, details = null) {
 }
 
 
-// Project root defaults to the monorepo root (two levels up from packages/api-server)
+const API_SERVER_DIR = dirname(fileURLToPath(import.meta.url));
+const SOURCE_REPO_ROOT = process.env.DATALEX_SOURCE_ROOT || resolve(API_SERVER_DIR, "../..");
+
+// Runtime root holds local projects/config. In tests this is a temp dir; source
+// package paths still resolve from SOURCE_REPO_ROOT.
 const REPO_ROOT = process.env.REPO_ROOT || join(process.cwd(), "../..");
 const PROJECTS_FILE = join(REPO_ROOT, ".dm-projects.json");
 const CONNECTIONS_FILE = join(REPO_ROOT, ".dm-connections.json");
@@ -83,14 +92,14 @@ const CREDENTIALS_FILE = join(REPO_ROOT, ".dm-credentials.json");
 function requireAuth(_req, _res, next) { next(); }
 function requireAdmin(_req, _res, next) { next(); }
 
-const WEB_DIST = process.env.WEB_DIST || join(REPO_ROOT, "packages", "web-app", "dist");
+const WEB_DIST = process.env.WEB_DIST || join(SOURCE_REPO_ROOT, "packages", "web-app", "dist");
 
 // Python resolution order:
 //   1. `DM_PYTHON` env var — set by `datalex serve` to its own sys.executable so
 //      the subprocess always has the same datalex_cli package the user just ran.
 //   2. `<REPO_ROOT>/.venv/bin/python3` — dev-clone convention.
 //   3. `python3` on PATH — last-resort fallback; may not have datalex_cli.
-const VENV_PYTHON = join(REPO_ROOT, ".venv", "bin", "python3");
+const VENV_PYTHON = join(SOURCE_REPO_ROOT, ".venv", "bin", "python3");
 const PYTHON =
   (process.env.DM_PYTHON && existsSync(process.env.DM_PYTHON) && process.env.DM_PYTHON) ||
   (existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3");
@@ -114,8 +123,8 @@ function execFileSync(cmd, argv, options = {}) {
 // keeps the constant name for code-level compatibility but points at the
 // current filename. `REPO_DM_LEGACY` lets a dev on a pre-rename checkout
 // still boot.
-const REPO_DM_SCRIPT = join(REPO_ROOT, "datalex");
-const REPO_DM_LEGACY = join(REPO_ROOT, "dm");
+const REPO_DM_SCRIPT = join(SOURCE_REPO_ROOT, "datalex");
+const REPO_DM_LEGACY = join(SOURCE_REPO_ROOT, "dm");
 const DM_CLI_OVERRIDE = process.env.DM_CLI || null;
 const DM_CLI_KIND = (() => {
   if (DM_CLI_OVERRIDE && existsSync(DM_CLI_OVERRIDE)) return "python-script";
@@ -224,6 +233,33 @@ const AI_AGENT_PROFILES = {
     layer: "",
     keywords: ["yaml", "patch", "edit", "modify", "update", "delete", "create", "fix", "proposal", "generate"],
     contract: "Produce small reviewable DataLex YAML proposals, preserve existing files, use guarded proposal change types, and include rationale and validation impact.",
+  },
+  description_writer: {
+    label: "Description Writer",
+    layer: "",
+    keywords: ["description", "describe", "document", "documentation", "summary", "doc", "prose", "explain", "suggest", "what is", "what does"],
+    // Tight, prose-only contract. Used by the lightweight POST /api/ai/suggest
+    // endpoint — no JSON wrapper, no proposed_changes — to power the
+    // "✨ AI" inline buttons in the Docs view next to empty descriptions.
+    contract: "Write concise 1-2 sentence descriptions for entities, columns, and models grounded in dbt + business modeling conventions. Lead with the business concept, not the table. Reply with ONLY the description text — no preamble, no quotes, no JSON. If the target's name and surrounding fields don't justify a confident description, reply with an empty string instead of guessing.",
+  },
+  dbt_semantic_layer_specialist: {
+    label: "dbt Semantic Layer Specialist",
+    layer: "semantic",
+    keywords: ["semantic", "semantic model", "semantic_models", "metric", "metrics", "measure", "dimension", "entity", "saved query", "saved_queries"],
+    contract: "Validate and improve dbt semantic_models, metrics, measures, dimensions, entities, and saved queries. Preserve dbt syntax and ask for input when metric business logic is ambiguous.",
+  },
+  dbt_readiness_engineer: {
+    label: "dbt Readiness Engineer",
+    layer: "physical",
+    keywords: ["readiness", "gate", "dbt test", "not_null", "unique", "accepted_values", "relationships", "freshness", "contract"],
+    contract: "Review dbt production readiness: tests, descriptions, sources, freshness, relationships, accepted values, uniqueness, not-null coverage, and exact file-targeted YAML patches.",
+  },
+  refactor_impact_analyst: {
+    label: "Refactor Impact Analyst",
+    layer: "",
+    keywords: ["impact", "blast radius", "rename", "move", "refactor", "lineage", "downstream", "upstream", "safe patch"],
+    contract: "Analyze lineage and blast radius before renames, moves, or model changes. Return impact reports and safe patch plans rather than unrelated artifact creation.",
   },
 };
 
@@ -472,6 +508,206 @@ const DEFAULT_AI_SKILL_FILES = [
       "- Every proposal needs rationale, source_context, validation_impact, and review_summary.",
       "- Keep paths inside the DataLex workspace and use the domain-first layout.",
       "- If a proposal might delete or rename user files, describe impact clearly and require user approval.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "description-writing.md",
+    content: [
+      "---",
+      "name: \"Description Writing\"",
+      "description: \"Concise prose for entity, model, and field descriptions in dbt + DataLex YAML.\"",
+      "use_when:",
+      "  - \"description\"",
+      "  - \"document\"",
+      "  - \"summary\"",
+      "  - \"explain entity\"",
+      "  - \"what does this column mean\"",
+      "tags:",
+      "  - \"prose\"",
+      "  - \"docs\"",
+      "  - \"description\"",
+      "agent_modes:",
+      "  - \"description_writer\"",
+      "  - \"governance_reviewer\"",
+      "priority: 5",
+      "---",
+      "",
+      "# Description Writing",
+      "",
+      "Used by the `description_writer` agent and the inline ✨ AI buttons in",
+      "the Docs view. Keep prose tight, business-first, and grounded in dbt",
+      "+ DataLex modeling conventions.",
+      "",
+      "## Length and shape",
+      "",
+      "- Models / entities: 1–2 sentences. Lead with the **business concept**, follow with the **dbt source / grain** if useful.",
+      "- Fields: a single noun phrase. End with the unit / nullability hint when it isn't obvious from the type.",
+      "- Never wrap descriptions in quotes. Never start with `Description:` or `This `. Never include the entity name in its own description (`Customer is a customer record` ← bad).",
+      "",
+      "## Good examples",
+      "",
+      "- Entity: `One row per customer that has placed at least one order. Mirrors the staging customer dimension; PII fields are governed by the data-stewardship policy.`",
+      "- Entity: `Header-level order event placed by a customer. Joins to the order_line entity for product detail.`",
+      "- Field: `Surrogate key minted by the customer-master pipeline. Stable across all downstream models.`",
+      "- Field: `Total order amount in USD, gross of refunds. Not null.`",
+      "- Field: `Foreign key to dim_products. Nullable for sample / promo line items.`",
+      "",
+      "## Bad examples (and why)",
+      "",
+      "- `This is the customer table.` — restates the obvious; no business meaning.",
+      "- `id` field: `The id of the customer.` — restates the column name.",
+      "- `Description: One row per customer.` — never include the literal `Description:` prefix.",
+      "- `\"One row per customer.\"` — never wrap in quotes.",
+      "- `A customer is a customer who buys things from us as a customer.` — repetition; no information.",
+      "",
+      "## When to refuse",
+      "",
+      "If the entity / field name and surrounding fields don't justify a confident description (e.g. a single column named `flag_2` with no neighbors), reply with the empty string. The system treats that as `confidence: 0` and surfaces the field for the user to write by hand.",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "dbt-naming-conventions.md",
+    content: [
+      "---",
+      "name: \"dbt Naming Conventions\"",
+      "description: \"Project-wide dbt model and field naming rules. Used by the physical_dbt_developer and yaml_patch_engineer agents.\"",
+      "use_when:",
+      "  - \"naming\"",
+      "  - \"rename\"",
+      "  - \"model name\"",
+      "  - \"column name\"",
+      "  - \"convention\"",
+      "tags:",
+      "  - \"naming\"",
+      "  - \"dbt\"",
+      "  - \"convention\"",
+      "layers:",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"physical_dbt_developer\"",
+      "  - \"yaml_patch_engineer\"",
+      "  - \"governance_reviewer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# dbt Naming Conventions",
+      "",
+      "Hard rules. Apply consistently across every model the agent proposes.",
+      "",
+      "## Model name prefixes",
+      "",
+      "- `stg_<source>__<entity>` — staging layer (one-to-one with a source table). Double underscore separates source from entity.",
+      "- `int_<purpose>` — intermediate transformations between staging and marts.",
+      "- `dim_<entity>` — dimensions in the marts layer.",
+      "- `fct_<event>` — fact tables capturing measurable business events.",
+      "- `agg_<grain>__<measure>` — aggregations / rollups.",
+      "- `bdg_<left>__<right>` — bridge tables for many-to-many.",
+      "",
+      "Anything outside these prefixes needs an explicit reason in the proposal's `rationale`.",
+      "",
+      "## Field name suffixes",
+      "",
+      "- `_id` — natural / source-system identifier (string or integer from the source).",
+      "- `_pk` — primary key on the model (often a hash or surrogate).",
+      "- `_fk` — foreign key reference into another model.",
+      "- `_sk` — surrogate key.",
+      "- `_at` — UTC timestamp (datetime / timestamp_ntz).",
+      "- `_date` — calendar date without time.",
+      "- `_amount`, `_count`, `_pct` — numeric measures with implied units.",
+      "- `is_*`, `has_*` — boolean flags. Always not-null with a clear false default.",
+      "",
+      "## General",
+      "",
+      "- snake_case everywhere. Never camelCase or PascalCase in YAML.",
+      "- Plural for source tables (`raw.customers`), singular for dimensions (`dim_customer`). dbt convention varies — pick one per project and stay consistent.",
+      "- No abbreviations a new hire would miss (`cust`, `ord`, `usr` → `customer`, `order`, `user`).",
+      "",
+    ].join("\n"),
+  },
+  {
+    path: "dbt-test-coverage.md",
+    content: [
+      "---",
+      "name: \"dbt Test Coverage\"",
+      "description: \"Required dbt tests by field role. Aligns with the readiness gate's red/yellow/green thresholds.\"",
+      "use_when:",
+      "  - \"test\"",
+      "  - \"coverage\"",
+      "  - \"unique\"",
+      "  - \"not_null\"",
+      "  - \"relationships\"",
+      "  - \"accepted_values\"",
+      "tags:",
+      "  - \"tests\"",
+      "  - \"governance\"",
+      "  - \"readiness\"",
+      "layers:",
+      "  - \"physical\"",
+      "agent_modes:",
+      "  - \"physical_dbt_developer\"",
+      "  - \"governance_reviewer\"",
+      "  - \"yaml_patch_engineer\"",
+      "priority: 4",
+      "---",
+      "",
+      "# dbt Test Coverage",
+      "",
+      "Required test set by field role. The DataLex readiness gate scores",
+      "files against these expectations — missing required tests turn the",
+      "file yellow; missing PK tests turn it red.",
+      "",
+      "## Primary key columns (`*_pk`, `*_sk`, `*_id` when promoted to PK)",
+      "",
+      "Required: `unique` AND `not_null`.",
+      "",
+      "```yaml",
+      "- name: customer_pk",
+      "  tests:",
+      "    - unique",
+      "    - not_null",
+      "```",
+      "",
+      "## Foreign keys (`*_fk` and inferred FKs)",
+      "",
+      "Required: `relationships` test pointing at the parent model + column.",
+      "",
+      "```yaml",
+      "- name: customer_fk",
+      "  tests:",
+      "    - relationships:",
+      "        to: ref('dim_customers')",
+      "        field: customer_pk",
+      "```",
+      "",
+      "## Enum-shaped columns (status, type, category, …)",
+      "",
+      "Required: `accepted_values` listing the allowed set.",
+      "",
+      "```yaml",
+      "- name: order_status",
+      "  tests:",
+      "    - accepted_values:",
+      "        values: ['placed','shipped','delivered','cancelled']",
+      "```",
+      "",
+      "## Cross-field invariants",
+      "",
+      "When two columns must satisfy a relationship (e.g. `start_at < end_at`,",
+      "or `total = subtotal + tax`), use `dbt_utils.expression_is_true`.",
+      "",
+      "```yaml",
+      "tests:",
+      "  - dbt_utils.expression_is_true:",
+      "      expression: \"total_amount = subtotal + tax_amount\"",
+      "```",
+      "",
+      "## Don'ts",
+      "",
+      "- Don't propose `unique` on a non-PK column unless the user explicitly asked for it.",
+      "- Don't add `not_null` on every column reflexively — only on PKs, FKs, and required business-meaning columns.",
+      "- Don't add `relationships` tests against models that don't exist yet; flag the missing parent in `validation_impact` instead.",
       "",
     ].join("\n"),
   },
@@ -942,7 +1178,8 @@ function parseDbtDocSummary(text, relPath) {
   const sources = Array.isArray(loaded.sources) ? loaded.sources : [];
   const semanticModels = Array.isArray(loaded.semantic_models) ? loaded.semantic_models : [];
   const metrics = Array.isArray(loaded.metrics) ? loaded.metrics : [];
-  const sectionCount = models.length + sources.length + semanticModels.length + metrics.length;
+  const savedQueries = Array.isArray(loaded.saved_queries) ? loaded.saved_queries : [];
+  const sectionCount = models.length + sources.length + semanticModels.length + metrics.length + savedQueries.length;
   const looksLikeDbtFile = /(^|\/)(schema|sources)\.ya?ml$/i.test(String(relPath || ""));
 
   if (sectionCount === 0 && !looksLikeDbtFile) {
@@ -959,6 +1196,7 @@ function parseDbtDocSummary(text, relPath) {
     sources: sources.length,
     semantic_models: semanticModels.length,
     metrics: metrics.length,
+    saved_queries: savedQueries.length,
     version: version || null,
   };
 }
@@ -2298,7 +2536,7 @@ function safeYamlLoad(content) {
 // truth for the dbt-readiness review. The api-server shells out via
 // `python -m datalex_readiness review` so the same logic powers both the
 // `/api/dbt/review` endpoint and the `datalex gate` CLI / GitHub Action.
-const READINESS_ENGINE_SRC = join(REPO_ROOT, "packages", "readiness_engine", "src");
+const READINESS_ENGINE_SRC = join(SOURCE_REPO_ROOT, "packages", "readiness_engine", "src");
 
 function readinessEnginePythonEnv() {
   const existing = process.env.PYTHONPATH || "";
@@ -2313,7 +2551,7 @@ function readinessEnginePythonEnv() {
 function spawnReadinessEngine(args) {
   return new Promise((resolvePromise, rejectPromise) => {
     const child = spawn(PYTHON, ["-m", "datalex_readiness", ...args], {
-      cwd: REPO_ROOT,
+      cwd: SOURCE_REPO_ROOT,
       env: readinessEnginePythonEnv(),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -2350,12 +2588,14 @@ async function loadDocBlockIndex(projectPath) {
   return parsed;
 }
 
-async function buildDbtReadinessReview(project, { paths = [], scope = "all" } = {}) {
+async function buildDbtReadinessReview(project, { paths = [], scope = "all", projectRoot = "" } = {}) {
+  const reviewRoot = projectRoot || project.path;
+  const cliScope = String(scope || "all").toLowerCase() === "file" ? "selected" : String(scope || "all");
   const args = [
     "review",
-    "--project", project.path,
+    "--project", reviewRoot,
     "--project-id", String(project.id || ""),
-    "--scope", String(scope || "all"),
+    "--scope", cliScope,
   ];
   const requestedPaths = (Array.isArray(paths) ? paths : [])
     .map((value) => toPosixPath(String(value || "")).replace(/^\/+/, ""))
@@ -2493,6 +2733,9 @@ function classifyAiAgents(message, context = {}) {
     context?.selectedText,
     context?.filePath,
   ].filter(Boolean).join(" ").toLowerCase();
+  const contextKind = String(context?.kind || "").toLowerCase();
+  const isFixIntent = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
+
   const selected = [];
   for (const [id, profile] of Object.entries(AI_AGENT_PROFILES)) {
     let score = 0;
@@ -2500,8 +2743,26 @@ function classifyAiAgents(message, context = {}) {
       if (text.includes(keyword)) score += keyword.includes(" ") ? 3 : 2;
     }
     if (profile.layer && String(context?.modelKind || context?.layer || "").toLowerCase() === profile.layer) score += 4;
+    if (id === "governance_reviewer" && ["entity", "workspace", "file"].includes(contextKind)) score += 2;
     if (id === "relationship_modeler" && (context?.kind === "relationship" || context?.relId)) score += 5;
     if (id === "yaml_patch_engineer" && /\b(create|update|modify|delete|fix|generate|propose|patch)\b/.test(text)) score += 4;
+
+    // Fix-intent overrides: a "validation_issue" / "dbt_readiness_finding"
+    // task is structurally a YAML patch — the agent set must reflect that.
+    // Boost the patch + governance agents hard; suppress agents whose
+    // contract doesn't apply (description_writer is for prose, the
+    // conceptualizer / canonicalizer infer entities from staging,
+    // none of which is what "fix this finding" means).
+    if (isFixIntent) {
+      if (id === "yaml_patch_engineer") score += 20;
+      if (id === "governance_reviewer") score += 15;
+      if (id === "dbt_semantic_layer_specialist" && /\b(metric|semantic|semantic_models|saved_queries)\b/.test(text)) score += 18;
+      if (id === "dbt_readiness_engineer" && contextKind === "dbt_readiness_finding") score += 18;
+      if (id === "description_writer" || id === "conceptualizer" || id === "canonicalizer") {
+        score = 0; // hard suppress regardless of keyword matches
+      }
+    }
+
     if (score > 0) selected.push({ id, ...profile, score });
   }
   if (!selected.length) {
@@ -2510,9 +2771,12 @@ function classifyAiAgents(message, context = {}) {
   if (!selected.some((agent) => agent.id === "yaml_patch_engineer") && /\b(yaml|file|change|proposal|apply)\b/.test(text)) {
     selected.push({ id: "yaml_patch_engineer", ...AI_AGENT_PROFILES.yaml_patch_engineer, score: 2 });
   }
+  // Fix-intent caps the agent set to 2 specialists — extra agents on a
+  // YAML-patch task add noise to the prompt without changing the answer.
+  const cap = isFixIntent ? 2 : 4;
   return selected
     .sort((a, b) => b.score - a.score)
-    .slice(0, 4)
+    .slice(0, cap)
     .map((agent) => ({
       id: agent.id,
       label: agent.label,
@@ -2985,9 +3249,23 @@ async function buildAiIndex(project) {
     if (/\.ya?ml$/i.test(file.name)) {
       const { doc } = safeYamlLoad(content);
       if (doc && typeof doc === "object" && !Array.isArray(doc)) {
+        const yamlDocumentKind = classifyYamlDocument(doc);
         const models = Array.isArray(doc.models) ? doc.models : [];
         const sources = Array.isArray(doc.sources) ? doc.sources : [];
         const semanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
+        const metrics = Array.isArray(doc.metrics) ? doc.metrics : [];
+        const savedQueries = Array.isArray(doc.saved_queries) ? doc.saved_queries : [];
+        if (isDbtYamlDocumentKind(yamlDocumentKind)) {
+          aiAddRecord(records, {
+            kind: "dbt_yaml_document",
+            path: file.path,
+            name: file.name,
+            layer: yamlDocumentKind === "dbt_semantic" || yamlDocumentKind === "dbt_saved_queries" ? "semantic" : "physical",
+            domain: dbtDomainFromPath(file.path),
+            description: `${yamlDocumentKind} with ${models.length} models, ${sources.length} sources, ${semanticModels.length} semantic models, ${metrics.length} metrics, ${savedQueries.length} saved queries`,
+            extra: content.slice(0, 2400),
+          });
+        }
         for (const model of models) {
           const modelName = String(model?.name || "").trim();
           if (!modelName) continue;
@@ -3028,17 +3306,51 @@ async function buildAiIndex(project) {
             extra: JSON.stringify(semanticModel).slice(0, 2200),
           });
         }
+        for (const metric of metrics) {
+          const metricName = String(metric?.name || "").trim();
+          if (!metricName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_metric",
+            path: file.path,
+            name: metricName,
+            layer: "semantic",
+            domain: dbtDomainFromPath(file.path),
+            description: metric.description || metric.label || "",
+            extra: JSON.stringify(metric).slice(0, 2200),
+          });
+        }
+        for (const savedQuery of savedQueries) {
+          const queryName = String(savedQuery?.name || "").trim();
+          if (!queryName) continue;
+          aiAddRecord(records, {
+            kind: "dbt_yaml_saved_query",
+            path: file.path,
+            name: queryName,
+            layer: "semantic",
+            domain: dbtDomainFromPath(file.path),
+            description: savedQuery.description || savedQuery.label || "",
+            extra: JSON.stringify(savedQuery).slice(0, 2200),
+          });
+        }
       }
     }
   }
 
   const dbtArtifacts = await collectDbtArtifactRecords(records, project.path);
 
+  // Skills are read from BOTH `Skills/` (canonical, since 1.4) AND
+  // `skills/` (older previews) for backward compat. A project that has
+  // both folders ends up with the same skill listed twice with different
+  // case-only paths — we saw this in the user-reported run where
+  // `DataLex Modeling Standards` showed up as two separate cards.
+  // Track basenames as we walk and skip duplicates from the second root
+  // so the canonical (capitalized) reading wins.
   const skillRoots = [
     { dir: join(structure.modelPath, DATALEX_SKILLS_DIR), label: DATALEX_SKILLS_DIR },
     // Backward-compatible read only: older previews wrote DataLex/skills.
     { dir: join(structure.modelPath, "skills"), label: "skills" },
   ];
+  const seenSkillBasenames = new Set();
   async function walkSkills(dir, label, base = dir) {
     let entries = [];
     try { entries = await readdir(dir, { withFileTypes: true }); } catch (_err) { return; }
@@ -3049,6 +3361,11 @@ async function buildAiIndex(project) {
         await walkSkills(full, label, base);
       } else if (/\.(md|ya?ml|txt)$/i.test(entry.name)) {
         const rel = toPosixPath(join(label, relative(base, full)));
+        // Dedupe across `Skills/` and `skills/` by basename. The canonical
+        // root is walked first, so its entries win on a tie.
+        const basename = entry.name.toLowerCase();
+        if (seenSkillBasenames.has(basename)) continue;
+        seenSkillBasenames.add(basename);
         let content = "";
         try { content = await readFile(full, "utf-8"); } catch (_err) { continue; }
         const meta = parseAiSkillMetadata(content);
@@ -3199,7 +3516,7 @@ function searchAiIndex(index, query, { limit = 20, selected = null } = {}) {
     if (selected?.fieldName && String(record.text || "").toLowerCase().includes(String(selected.fieldName).toLowerCase())) {
       score += 4;
     }
-    if (reverseIntent && ["dbt_manifest_model", "dbt_yaml_model", "dbt_sql", "dbt_source", "dbt_semantic_model", "dbt_metric"].includes(recordKind)) score += 3;
+    if (reverseIntent && ["dbt_manifest_model", "dbt_yaml_model", "dbt_sql", "dbt_source", "dbt_semantic_model", "dbt_yaml_semantic_model", "dbt_metric", "dbt_yaml_metric", "dbt_yaml_saved_query"].includes(recordKind)) score += 3;
     if (datatypeIntent && ["dbt_catalog_column", "dbt_manifest_column", "column", "field"].includes(recordKind)) score += 4;
     if (relationshipIntent && ["relationship", "dbt_lineage_edge", "dbt_test"].includes(recordKind)) score += 4;
     if (governanceIntent && ["yaml_parse_error", "dbt_test", "skill", "concept", "entity", "dbt_manifest_model"].includes(recordKind)) score += 2;
@@ -3264,7 +3581,7 @@ function isRepoWideAiRequest(message, context = {}) {
 function repoWideAiQuery(message) {
   return [
     message,
-    "dbt model models sql schema yaml manifest catalog lineage ref source sources column columns datatype tests semantic metrics exposure",
+    "dbt model models sql schema yaml manifest catalog lineage ref source sources column columns datatype tests semantic metrics saved query saved_queries exposure",
   ].filter(Boolean).join(" ");
 }
 
@@ -3288,8 +3605,11 @@ function repoWideSeedRecords(index, limit = 12) {
     ["dbt_manifest_column", 6],
     ["dbt_catalog_column", 7],
     ["dbt_semantic_model", 8],
-    ["dbt_metric", 9],
-    ["diagram_file", 10],
+    ["dbt_yaml_semantic_model", 9],
+    ["dbt_metric", 10],
+    ["dbt_yaml_metric", 11],
+    ["dbt_yaml_saved_query", 12],
+    ["diagram_file", 13],
   ]);
   return (index?.records || [])
     .filter((record) => priority.has(record.kind))
@@ -3305,6 +3625,8 @@ function selectAiSkills(index, { message, context = {}, agents = [], sources = [
   const disabled = new Set(normalizeAiArray(skillControls.disabled || skillControls.disabledPaths).map((v) => v.toLowerCase()));
   const pinned = new Set(normalizeAiArray(skillControls.pinned || skillControls.pinnedPaths).map((v) => v.toLowerCase()));
   const agentIds = new Set((agents || []).map((agent) => agent.id));
+  const contextKind = String(context?.kind || "").toLowerCase();
+  const isFixIntent = contextKind === "validation_issue" || contextKind === "dbt_readiness_finding";
   const queryText = [
     message,
     context?.kind,
@@ -3330,9 +3652,25 @@ function selectAiSkills(index, { message, context = {}, agents = [], sources = [
     for (const token of aiTokens([record.name, record.tags, record.use_when, record.description].join(" "))) {
       if (queryText.includes(token)) score += 1;
     }
+
+    // Fix-intent: prose / conceptual skills are noise on a YAML-patch
+    // task. Boost the patch-relevant ones; suppress description-writing,
+    // conceptual-business-modeling, and any layer-mismatched skills so
+    // they don't crowd the system prompt.
+    if (isFixIntent) {
+      const fileName = String(record.path || record.name || "").toLowerCase();
+      if (/yaml-proposal-safety|governance|dbt-test-coverage|dbt-naming-conventions/.test(fileName)) score += 25;
+      if (/description-writing|conceptual-business-modeling/.test(fileName)) score = 0;
+    }
+
     if (score > 0) skills.push({ ...record, score });
   }
-  return skills.sort((a, b) => b.score - a.score).slice(0, 8).map(redactAiRecord);
+  // Fix-intent caps to 3 skills (was 8) — patch tasks need a tight
+  // contract, not a kitchen sink. Keeps the system prompt focused and
+  // matches what the user actually expects to see in the "Skills used"
+  // panel for a "fix this finding" click.
+  const cap = isFixIntent ? 3 : 8;
+  return skills.sort((a, b) => b.score - a.score).slice(0, cap).map(redactAiRecord);
 }
 
 function buildAiContextPreview(index, { message = "", context = {}, skillControls = {} } = {}) {
@@ -3517,8 +3855,16 @@ function normalizeAiProposalChange(rawChange) {
   if (change.content == null) {
     change.content = change.yaml_content ?? change.yamlContent ?? change.new_content ?? change.newContent ?? change.body ?? change.yaml;
   }
+  if (change.patch && typeof change.patch === "object" && !Array.isArray(change.patch)) {
+    if (!change.path) change.path = change.patch.path || change.patch.file || change.patch.filePath;
+    if (Array.isArray(change.patch.ops)) change.patch = change.patch.ops;
+    else if (Array.isArray(change.patch.operations)) change.patch = change.patch.operations;
+  }
   if (!change.patch && Array.isArray(change.operations)) change.patch = change.operations;
   if (!change.patch && Array.isArray(change.patches)) change.patch = change.patches;
+  if (!change.patch && Array.isArray(change.ops)) change.patch = change.ops;
+  if (!change.patch && Array.isArray(change.patch_ops)) change.patch = change.patch_ops;
+  if (!change.targetPointer) change.targetPointer = change.target_pointer || change.pointer || change.json_pointer;
 
   let type = aliasType;
   if (!type) {
@@ -3574,8 +3920,13 @@ function validateAiProposalChangeDryRun(structure, rawChange) {
     if (["create_file", "update_file", "patch_yaml"].includes(normalized.type)) {
       const filePath = resolveAiWorkspacePath(structure, normalized.path || normalized.fullPath);
       targetPath = relative(structure.modelPath, filePath);
+      const hasPatchOps = Array.isArray(normalized.patch) && normalized.patch.length > 0;
+      const hasContent = normalized.content != null;
+      if (normalized.type === "patch_yaml" && !hasContent && !hasPatchOps) {
+        throw new ApiError(400, "VALIDATION", "patch_yaml requires content or patch operations");
+      }
       content = String(normalized.content ?? "");
-      if (normalized.type === "patch_yaml" && content === "" && Array.isArray(normalized.patch)) {
+      if (normalized.type === "patch_yaml" && !hasContent && hasPatchOps) {
         if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${normalized.path}`);
         const current = readFileSync(filePath, "utf-8");
         const { doc, error } = safeYamlLoad(current);
@@ -3776,39 +4127,29 @@ function aiYamlContractExamples() {
     "  }],",
     "  relationships: [{ name: \"usage_events_to_customers\", from: { entity: \"fct_usage_events\", field: \"customer_id\" }, to: { entity: \"dim_customers\", field: \"customer_id\" }, cardinality: \"many_to_one\" }]",
     "}]",
+    "",
+    "Existing YAML file patch example:",
+    "proposed_changes: [{",
+    "  type: \"patch_yaml\",",
+    "  path: \"models/metrics/fct_orders.yml\",",
+    "  targetPointer: \"/metrics/0/expression\",",
+    "  patch: [{ op: \"add\", path: \"/metrics/0/expression\", value: \"order_total\" }],",
+    "  rationale: \"Adds the required field to the exact validation target.\"",
+    "}]",
   ].join("\n");
 }
 
 function applyJsonPatch(doc, patchOps) {
   const root = doc && typeof doc === "object" ? doc : {};
   const clone = JSON.parse(JSON.stringify(root));
-  const pointerParts = (pathValue) => String(pathValue || "")
-    .split("/")
-    .slice(1)
-    .map((part) => part.replace(/~1/g, "/").replace(/~0/g, "~"));
-  const parentFor = (pathValue) => {
-    const parts = pointerParts(pathValue);
-    const key = parts.pop();
-    let cur = clone;
-    for (const part of parts) {
-      if (cur[part] == null || typeof cur[part] !== "object") cur[part] = {};
-      cur = cur[part];
-    }
-    return { parent: cur, key };
-  };
-  for (const op of Array.isArray(patchOps) ? patchOps : []) {
-    const { parent, key } = parentFor(op.path);
-    if (op.op === "remove") {
-      if (Array.isArray(parent)) parent.splice(Number(key), 1);
-      else delete parent[key];
-    } else if (op.op === "add" || op.op === "replace") {
-      if (Array.isArray(parent) && key === "-") parent.push(op.value);
-      else parent[key] = op.value;
-    } else {
-      throw new ApiError(400, "VALIDATION", `Unsupported JSON patch op: ${op.op}`);
-    }
+  if (!Array.isArray(patchOps) || patchOps.length === 0) {
+    throw new ApiError(400, "VALIDATION", "patch_yaml requires non-empty JSON patch operations");
   }
-  return clone;
+  try {
+    return jsonpatch.applyPatch(clone, patchOps, true, false).newDocument;
+  } catch (err) {
+    throw new ApiError(400, "VALIDATION", `JSON patch failed: ${err?.message || String(err)}`, { ops: patchOps });
+  }
 }
 
 function collectDocRefBindings(node, path = "/", out = []) {
@@ -3924,7 +4265,8 @@ async function applyAiProposalChange(project, structure, change) {
     if (!existsSync(filePath)) throw new ApiError(404, "NOT_FOUND", `File not found: ${change.path}`);
     const current = await readFile(filePath, "utf-8");
     let content = change.content;
-    if (content == null && Array.isArray(change.patch)) {
+    const hasPatchOps = Array.isArray(change.patch) && change.patch.length > 0;
+    if (content == null && hasPatchOps) {
       const { doc, error } = safeYamlLoad(current);
       if (error) throw new ApiError(422, "YAML_PARSE_ERROR", error.message, error);
       content = yaml.dump(applyJsonPatch(doc, change.patch), { lineWidth: 120, noRefs: true });
@@ -3977,14 +4319,14 @@ async function applyAiProposalChange(project, structure, change) {
 
 app.post("/api/dbt/review", requireAdmin, async (req, res, next) => {
   try {
-    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
     const scope = String(req.body?.scope || "all").toLowerCase();
     if (!["all", "changed", "file"].includes(scope)) {
       throw new ApiError(400, "VALIDATION", "scope must be one of: all, changed, file");
     }
     const paths = Array.isArray(req.body?.paths) ? req.body.paths : [];
     const prior = DBT_REVIEW_CACHE.get(project.id);
-    let review = await buildDbtReadinessReview(project, { scope, paths });
+    let review = await buildDbtReadinessReview(project, { scope, paths, projectRoot: structure.modelPath });
     if (scope !== "all" && prior?.files?.length) {
       const replacement = new Map((review.files || []).map((file) => [file.path, file]));
       const mergedFiles = (prior.files || []).map((file) => replacement.get(file.path) || file);
@@ -4165,7 +4507,7 @@ app.post("/api/ai/index/rebuild", requireAdmin, async (req, res, next) => {
 
 app.post("/api/ai/context/preview", requireAdmin, async (req, res, next) => {
   try {
-    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
     const message = String(req.body?.message || "").trim();
     const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
     const preview = buildAiContextPreview(index, {
@@ -4250,11 +4592,393 @@ app.delete("/api/ai/memory/:memoryId", requireAdmin, async (req, res, next) => {
   }
 });
 
+/* ── Lightweight description suggestion ──────────────────────────────
+ * Powers the inline "✨ AI" buttons in the Docs view next to empty
+ * descriptions. Deliberately bypasses the heavy `/api/ai/ask` pipeline
+ * (no BM25 retrieval, no agent classification, no skill scoring,
+ * no proposal validator, no memory extraction) — just a focused
+ * description-writer call grounded in the target entity/field plus its
+ * siblings.
+ *
+ * Body: {
+ *   projectId,                          // string
+ *   target: {
+ *     kind: "model" | "entity" | "field",
+ *     path,                              // workspace-relative or absolute
+ *     entity?,                           // required for kind: entity / field
+ *     field?,                            // required for kind: field
+ *   }
+ * }
+ *
+ * Response: { description, confidence } — or 503 NO_PROVIDER when no
+ * LLM is configured (the UI uses that to disable the button).
+ */
+app.post("/api/ai/suggest", requireAdmin, express.json(), async (req, res, next) => {
+  try {
+    const projectId = String(req.body?.projectId || "");
+    const target = req.body?.target || {};
+    const targetKind = String(target.kind || "").toLowerCase();
+    if (!["model", "entity", "field"].includes(targetKind)) {
+      throw new ApiError(400, "VALIDATION", "target.kind must be one of: model, entity, field");
+    }
+    if (!target.path) throw new ApiError(400, "VALIDATION", "target.path is required");
+    if ((targetKind === "entity" || targetKind === "field") && !target.entity) {
+      throw new ApiError(400, "VALIDATION", "target.entity is required for entity / field suggestions");
+    }
+    if (targetKind === "field" && !target.field) {
+      throw new ApiError(400, "VALIDATION", "target.field is required for field suggestions");
+    }
+
+    const { project } = await resolveProjectAndStructure(projectId);
+
+    // Provider gate runs FIRST — it's a fast-fail that doesn't depend on
+    // file existence, and the UI uses the NO_PROVIDER code to render the
+    // inline ✨ AI buttons disabled-with-tooltip instead of clicking
+    // through to a confusing error.
+    const config = resolveAiProviderConfig(req.body?.provider || {});
+    if (!config.provider || config.provider === "local") {
+      return apiFail(
+        res,
+        503,
+        "NO_PROVIDER",
+        "No AI provider configured. Add an OpenAI, Anthropic, Gemini, or Ollama provider in Settings → AI to enable inline suggestions.",
+      );
+    }
+
+    // Resolve the file path. Accept absolute paths AND workspace-relative
+    // ones; reject anything outside the project root for safety.
+    const rawPath = String(target.path);
+    const absPath = isAbsolute(rawPath) ? rawPath : join(project.path, rawPath);
+    if (!existsSync(absPath)) {
+      throw new ApiError(404, "NOT_FOUND", `target file not found: ${target.path}`);
+    }
+    const projectRoot = realpathSync(project.path);
+    const resolvedAbs = realpathSync(absPath).replace(/\/+$/, "");
+    if (!resolvedAbs.startsWith(projectRoot)) {
+      throw new ApiError(400, "VALIDATION", "target.path must point inside the project root");
+    }
+
+    // Parse the YAML and pull out just enough metadata to ground the
+    // suggestion. Cap sibling field names at 8 — past that it's noise,
+    // not signal.
+    const yamlText = readFileSync(resolvedAbs, "utf-8");
+    let doc;
+    try {
+      doc = yaml.load(yamlText);
+    } catch (err) {
+      throw new ApiError(422, "PARSE_FAILED", `Could not parse YAML: ${err.message}`);
+    }
+    if (!doc || typeof doc !== "object") {
+      throw new ApiError(422, "PARSE_FAILED", "YAML did not parse to an object");
+    }
+
+    const meta = (doc.model && typeof doc.model === "object") ? doc.model : doc;
+    const modelName = String(meta.name || basename(resolvedAbs).replace(/\.(ya?ml)$/i, ""));
+    const domain = String(meta.domain || doc.domain || "");
+    const layer = String(doc.layer || meta.layer || "");
+    const entities = Array.isArray(doc.entities) ? doc.entities :
+      Array.isArray(doc.models) ? doc.models : [];
+
+    function findEntity(name) {
+      const lower = String(name || "").toLowerCase();
+      return entities.find((e) => String(e?.name || "").toLowerCase() === lower) || null;
+    }
+
+    // Mode controls the variant prompt suffix. Empty descriptions use
+    // `suggest`; existing descriptions can be `rewrite` (full replacement)
+    // or `tighter` (compress while keeping meaning). Same endpoint, same
+    // agent, same context — just a different ask at the end.
+    const mode = (() => {
+      const m = String(req.body?.mode || "suggest").toLowerCase();
+      return ["suggest", "rewrite", "tighter"].includes(m) ? m : "suggest";
+    })();
+
+    let existingDescription = "";
+    let userSection = "";
+    if (targetKind === "model") {
+      existingDescription = String(meta.description || "").trim();
+      const entityNames = entities.map((e) => String(e?.name || "").trim()).filter(Boolean).slice(0, 12);
+      userSection = [
+        `Target kind: model`,
+        `Model name: ${modelName}`,
+        domain ? `Business domain: ${domain}` : "",
+        layer ? `Modeling layer: ${layer}` : "",
+        entityNames.length ? `Contains entities: ${entityNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    } else if (targetKind === "entity") {
+      const ent = findEntity(target.entity);
+      if (!ent) throw new ApiError(404, "NOT_FOUND", `entity not found in YAML: ${target.entity}`);
+      existingDescription = String(ent.description || "").trim();
+      const fieldNames = (Array.isArray(ent.fields) ? ent.fields : [])
+        .map((f) => f?.name).filter(Boolean).slice(0, 8);
+      userSection = [
+        `Target kind: entity`,
+        `Entity name: ${ent.name}`,
+        ent.type ? `Entity type: ${ent.type}` : "",
+        domain ? `Business domain: ${domain}` : "",
+        layer ? `Modeling layer: ${layer}` : "",
+        fieldNames.length ? `Field names on this entity: ${fieldNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    } else { // field
+      const ent = findEntity(target.entity);
+      if (!ent) throw new ApiError(404, "NOT_FOUND", `entity not found: ${target.entity}`);
+      const fields = Array.isArray(ent.fields) ? ent.fields : [];
+      const fld = fields.find((f) => String(f?.name || "").toLowerCase() === String(target.field).toLowerCase());
+      if (!fld) throw new ApiError(404, "NOT_FOUND", `field not found: ${target.field}`);
+      existingDescription = String(fld.description || "").trim();
+      const flags = [];
+      if (fld.primary_key) flags.push("primary key");
+      if (fld.foreign_key && fld.foreign_key.entity) flags.push(`foreign key → ${fld.foreign_key.entity}.${fld.foreign_key.field || "?"}`);
+      if (fld.unique) flags.push("unique");
+      if (fld.nullable === false) flags.push("not null");
+      const siblingNames = fields.map((f) => f?.name).filter((n) => n && n !== fld.name).slice(0, 6);
+      userSection = [
+        `Target kind: field`,
+        `Field name: ${fld.name}`,
+        fld.type ? `Field type: ${fld.type}` : "",
+        flags.length ? `Field flags: ${flags.join(", ")}` : "",
+        `Parent entity: ${ent.name}${ent.type ? ` (${ent.type})` : ""}`,
+        domain ? `Business domain: ${domain}` : "",
+        siblingNames.length ? `Sibling fields on the same entity: ${siblingNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n");
+    }
+
+    const modeSuffix = mode === "rewrite" && existingDescription
+      ? `An existing description is shown below. Write a complete REPLACEMENT that's clearer, more specific, and grounded in the metadata above. Keep all factual content; tighten the language.\n\nExisting description:\n${existingDescription}\n\nReturn ONLY the replacement text, no preamble, no quotes, no JSON.`
+      : mode === "tighter" && existingDescription
+      ? `An existing description is shown below. Compress it to a single tight sentence WITHOUT losing meaning. If it's already as tight as it can get, return it unchanged.\n\nExisting description:\n${existingDescription}\n\nReturn ONLY the tightened text, no preamble, no quotes, no JSON.`
+      : `Write the description now. Return ONLY the description text, no preamble, no quotes, no JSON.`;
+
+    const system = AI_AGENT_PROFILES.description_writer.contract;
+    const user = `${userSection}\n\n${modeSuffix}`;
+
+    let raw;
+    try {
+      raw = await callAiProvider(config, [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ]);
+    } catch (err) {
+      throw new ApiError(502, "PROVIDER_FAILED", `AI provider call failed: ${err?.message || err}`);
+    }
+
+    // Strip any preamble / quotes the model might add despite the contract.
+    const cleaned = String(raw || "")
+      .trim()
+      .replace(/^["'`]+|["'`]+$/g, "")
+      .replace(/^Description:\s*/i, "")
+      .trim();
+
+    res.json({
+      ok: true,
+      description: cleaned,
+      confidence: cleaned ? 0.7 : 0.0,
+      target: { kind: targetKind, path: target.path, entity: target.entity, field: target.field },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/* ── Per-intent AI endpoints (Path B Phases 3-5) ────────────────────
+ * Each endpoint is a thin wrapper that:
+ *   1. Resolves the project + provider config (with NO_PROVIDER guard)
+ *   2. Calls runIntentEndpoint(intent, ...) which prefetches deterministic
+ *      tool context, calls the LLM with a focused per-intent prompt, and
+ *      validates the response against the intent's schema
+ *   3. Returns the typed payload to the UI
+ *
+ * Compared to /api/ai/ask: no 4-agent run, no 8-skill dump, no 7-key
+ * generic JSON, no memory pollution. Tools fetch real content.
+ */
+async function intentEndpointHandler(intent, req, res, next) {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const config = resolveAiProviderConfig(req.body?.provider || {});
+    if (!config.provider || config.provider === "local") {
+      return apiFail(
+        res,
+        503,
+        "NO_PROVIDER",
+        "No AI provider configured. Add an OpenAI, Anthropic, Gemini, or Ollama provider in Settings → AI to enable per-intent AI endpoints.",
+      );
+    }
+    if (!String(req.body?.message || "").trim()) {
+      throw new ApiError(400, "VALIDATION", "message is required");
+    }
+    // Build the AI index once per call so search_records / lineage_lookup
+    // tools have something to query against.
+    const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
+    const helpers = {
+      validateYamlOnSave,
+      searchAiIndex,
+      index,
+      modelPath: structure.modelPath,
+      projectRoot: project.path,
+    };
+    const toolProject = { ...project, path: structure.modelPath, projectRoot: project.path };
+    const result = await runIntentEndpoint(intent, {
+      project: toolProject,
+      body: req.body,
+      providerConfig: config,
+      helpers,
+      callAiProvider,
+    });
+    if (!result.ok) {
+      const code = result.error?.code || "INTERNAL";
+      const status = code === "PROVIDER_FAILED" ? 502 : code === "PARSE_FAILED" || code === "SCHEMA_INVALID" ? 422 : 500;
+      return apiFail(res, status, code, result.error?.message || "intent endpoint failed", result.error?.raw);
+    }
+    // Wrap the typed response in a legacy-compatible envelope so the
+    // existing AiAssistantSurface (which renders `answer` +
+    // `proposed_changes` + `agent_run`) keeps working when /api/ai/ask
+    // routes through one of these endpoints.
+    res.json({
+      ok: true,
+      intent: result.intent,
+      response: result.response,
+      ...buildLegacyEnvelope(intent, result.response),
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+function agentLabelForIntent(intent) {
+  switch (intent) {
+    case "validation_fix": return { id: "yaml_patch_engineer", label: "YAML Patch Engineer" };
+    case "explain":         return { id: "governance_reviewer", label: "Governance Reviewer" };
+    case "explore":         return { id: "governance_reviewer", label: "Governance Reviewer" };
+    case "create_artifact": return { id: "conceptual_architect", label: "Conceptual Architect" };
+    case "refactor":        return { id: "refactor_impact_analyst", label: "Refactor Impact Analyst" };
+    default:                return { id: "governance_reviewer", label: "Governance Reviewer" };
+  }
+}
+
+function buildLegacyEnvelope(intent, response) {
+  const agent = agentLabelForIntent(intent);
+  const baseEnvelope = {
+    answer: "",
+    sources: [],
+    proposed_changes: [],
+    questions: [],
+    commands_to_run: [],
+    risks: [],
+    confidence: 0.7,
+    requires_user_approval: false,
+    agent_run: { agents: [agent], skills_used: [] },
+  };
+  switch (intent) {
+    case "validation_fix":
+      return {
+        ...baseEnvelope,
+        answer: response?.explanation || "",
+        questions: Array.isArray(response?.questions) ? response.questions : [],
+        proposed_changes: response?.status === "patch_yaml" && response?.patch ? [{
+          type: "patch_yaml",
+          path: response.patch.path,
+          targetPointer: response.targetPointer,
+          patch: response.patch.ops,
+          validation_impact: response?.dry_run?.validation?.valid === false
+            ? "Patch dry-run applied but validation did not pass."
+            : "Patch dry-run passed and can be reviewed before apply.",
+          review_summary: "YAML Patch Engineer proposed one exact-file JSON Patch.",
+        }] : [],
+        validation_impact: response?.dry_run?.validation || response?.status || "",
+        requires_user_approval: true,
+      };
+    case "explain":
+      return {
+        ...baseEnvelope,
+        answer: response?.answer || "",
+        sources: Array.isArray(response?.sources) ? response.sources : [],
+      };
+    case "explore": {
+      const matches = Array.isArray(response?.matches) ? response.matches : [];
+      const summary = response?.summary || `Found ${matches.length} matches.`;
+      const bulletList = matches.slice(0, 8).map((m) => `- \`${m.path}\` — ${m.snippet || ""}`).join("\n");
+      return {
+        ...baseEnvelope,
+        answer: bulletList ? `${summary}\n\n${bulletList}` : summary,
+        sources: matches,
+      };
+    }
+    case "create_artifact":
+      return {
+        ...baseEnvelope,
+        answer: `Proposed a new ${response?.change?.type || "artifact"} at ${response?.change?.path || "(no path)"}`,
+        proposed_changes: response?.change ? [{
+          type: response.change.type,
+          path: response.change.path,
+          content: response.change.content,
+        }] : [],
+        requires_user_approval: true,
+      };
+    case "refactor": {
+      const patches = Array.isArray(response?.patches) ? response.patches : [];
+      return {
+        ...baseEnvelope,
+        answer: `Proposed ${patches.length} focused patch${patches.length === 1 ? "" : "es"}.`,
+        proposed_changes: patches.map((p) => ({
+          type: "patch_yaml",
+          path: p.path,
+          patch: p.ops,
+        })),
+        requires_user_approval: true,
+      };
+    }
+    default:
+      return baseEnvelope;
+  }
+}
+
+app.post("/api/ai/fix",      requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("validation_fix",  req, res, next));
+app.post("/api/ai/explain",  requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("explain",          req, res, next));
+app.post("/api/ai/explore",  requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("explore",          req, res, next));
+app.post("/api/ai/create",   requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("create_artifact", req, res, next));
+app.post("/api/ai/refactor", requireAdmin, express.json(), (req, res, next) => intentEndpointHandler("refactor",         req, res, next));
+
+/* ── Phase 6: Route legacy /api/ai/ask through the intent classifier ──
+ * Free-form chat still works, but high-confidence (≥ 0.75) intents are
+ * forwarded to the per-intent endpoint so the user gets a focused
+ * response instead of the generic 7-key JSON. Logged so we can tune
+ * the confidence threshold from real usage.
+ */
+function logIntentRouting(project, decision, message) {
+  try {
+    if (!project?.path) return;
+    const log = join(project.path, ".datalex", "ai", "intent-routing.log");
+    mkdirSync(dirname(log), { recursive: true });
+    const line = JSON.stringify({
+      at: new Date().toISOString(),
+      intent: decision.intent,
+      confidence: decision.confidence,
+      messagePreview: String(message || "").slice(0, 120),
+    }) + "\n";
+    require("fs").appendFileSync(log, line);
+  } catch { /* logging is best-effort */ }
+}
+
 app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
   try {
     const { project } = await resolveProjectAndStructure(req.body?.projectId);
     const message = String(req.body?.message || "").trim();
     if (!message) throw new ApiError(400, "VALIDATION", "message is required");
+    // Phase 6 routing — only for the regular chat surface; description
+    // requests already use /api/ai/suggest directly.
+    const routingConfig = resolveAiProviderConfig(req.body?.provider || {});
+    if (routingConfig.provider && routingConfig.provider !== "local") {
+      const decision = classifyIntent(message, req.body?.context || {});
+      logIntentRouting(project, decision, message);
+      const ROUTABLE = ["validation_fix", "explain", "explore", "create_artifact", "refactor"];
+      if (decision.confidence >= 0.75 && ROUTABLE.includes(decision.intent)) {
+        // Re-route by re-invoking the intent handler. The original /api/ai/ask
+        // body shape is compatible — we just hand off without sending the
+        // legacy 7-key envelope.
+        return intentEndpointHandler(decision.intent, req, res, next);
+      }
+    }
+    // Fall through to the legacy pipeline below.
     const index = AI_INDEX_CACHE.get(project.id) || await buildAiIndex(project);
     const contextPreview = buildAiContextPreview(index, {
       message,
@@ -4278,11 +5002,25 @@ app.post("/api/ai/ask", requireAdmin, async (req, res, next) => {
       .filter((m) => m.role === "user" || m.role === "assistant");
     let answer = null;
     if (config.provider && config.provider !== "local") {
+      // When the user is fixing an existing finding (validation issue or
+      // dbt readiness gap), the model has been wandering off into
+      // create_diagram / create_model proposals against new files. Anchor
+      // it explicitly: the only allowed change types are patch_yaml and
+      // update_file against the file path the caller specified.
+      const requestContextKind = String(req.body?.context?.kind || "").toLowerCase();
+      const isFixIntent = requestContextKind === "validation_issue" || requestContextKind === "dbt_readiness_finding";
+      const fixIntentAnchors = isFixIntent ? [
+        "INTENT = FIX-EXISTING-FILE.",
+        "The user is asking you to fix an existing file at the path in `context.filePath`. The ONLY allowed change types for this request are `patch_yaml` and `update_file` against that exact path. DO NOT propose `create_diagram`, `create_model`, `create_file`, `delete_file`, or `rename_file`.",
+        "If the file is missing a top-level key (e.g. the validation says `MISSING_MODEL_SECTION`), the patch must ADD that key in place — propose a single `patch_yaml` with JSON-patch ops, NOT a fresh diagram or model document.",
+        "Do not create new files in canonical paths like `DataLex/<domain>/<Layer>/...` — that path-canonicalization rule applies only when the user explicitly asks to create a new artifact, NOT when fixing an existing finding.",
+      ] : [];
       const system = [
         "You are the DataLex agentic modeling assistant.",
         "Return JSON only with keys: answer, questions, proposed_changes, commands_to_run, risks, confidence, requires_user_approval.",
         "All file changes must be proposed_changes only. Never claim files are changed.",
         "Use DataLex YAML, preserve existing files unless a focused patch is proposed, and never run dbt or apply DDL.",
+        ...fixIntentAnchors,
         "Use the built-in DataLex modeling skills as baseline industry/dbt/governance standards when user-defined skills are absent or not relevant.",
         "Prefer user-provided project skills over built-in defaults when they conflict, but never ignore the selected specialist contract.",
         `Selected specialist agents: ${contextPreview.agents.map((agent) => `${agent.id} (${agent.contract})`).join(" | ")}`,
@@ -6489,9 +7227,10 @@ app.post("/api/connectors/dbt-repo/scan", requireAdmin, express.json(), async (r
         acc.sources += f.sections.sources || 0;
         acc.semantic_models += f.sections.semantic_models || 0;
         acc.metrics += f.sections.metrics || 0;
+        acc.saved_queries += f.sections.saved_queries || 0;
         return acc;
       },
-      { models: 0, sources: 0, semantic_models: 0, metrics: 0 }
+      { models: 0, sources: 0, semantic_models: 0, metrics: 0, saved_queries: 0 }
     );
 
     const warnings = dbtFiles.length === 0

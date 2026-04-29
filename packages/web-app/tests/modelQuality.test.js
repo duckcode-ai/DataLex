@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runGate, runModelChecks } from "../src/modelQuality.js";
+import { classifyYamlText, YAML_DOCUMENT_KINDS } from "../src/lib/yamlDocumentKind.js";
 
 const BASE_HEADER = `model:
   name: analytics_model
@@ -209,4 +210,27 @@ relationships:
   assert.ok(codes.includes("CONCEPTUAL_MISSING_GLOSSARY_LINK"));
   assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_FROM"), false);
   assert.equal(errorCodes.includes("INVALID_RELATIONSHIP_TO"), false);
+});
+
+test("runModelChecks treats dbt semantic YAML without version as dbt semantic", () => {
+  const yamlText = `semantic_models:
+  - name: orders
+    model: ref('fct_orders')
+    entities:
+      - name: order_id
+        type: primary
+metrics:
+  - name: order_total
+    type: simple
+    type_params:
+      measure: order_total
+`;
+
+  assert.equal(classifyYamlText(yamlText), YAML_DOCUMENT_KINDS.DBT_SEMANTIC);
+  const check = runModelChecks(yamlText);
+  const errorCodes = check.errors.map((item) => item.code);
+  assert.equal(check.hasErrors, false);
+  assert.equal(errorCodes.includes("INVALID_METRIC_ENTITY"), false);
+  assert.equal(errorCodes.includes("INVALID_METRIC_EXPRESSION"), false);
+  assert.ok(check.warnings.some((item) => item.code === "DBT_SCHEMA_DETECTED"));
 });

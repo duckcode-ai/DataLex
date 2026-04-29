@@ -34,7 +34,8 @@ import {
 } from "../components/dialogs/ProjectModals";
 import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
 import AiProposalPreview from "../components/ai/AiProposalPreview";
-import { proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle } from "../components/ai/aiProposalYaml";
+import { isPatchYamlProposal, proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle, proposalPatchOps } from "../components/ai/aiProposalYaml";
+import { computeValidationStatus } from "../lib/validationStatus";
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
@@ -43,9 +44,12 @@ const DiffPanel           = React.lazy(() => import("../components/panels/DiffPa
 const HistoryPanel        = React.lazy(() => import("../components/panels/HistoryPanel"));
 const DictionaryPanel     = React.lazy(() => import("../components/panels/DictionaryPanel"));
 // P1.B — read-only panels for non-model dbt resources surfaced from the active YAML.
+// Still routed in BottomPanelContent for direct access (URL / palette), but
+// the bottom-tab strip funnels everything through the consolidated DbtPanel.
 const SnapshotsPanel      = React.lazy(() => import("../components/panels/SnapshotsPanel"));
 const ExposuresPanel      = React.lazy(() => import("../components/panels/ExposuresPanel"));
 const UnitTestsPanel      = React.lazy(() => import("../components/panels/UnitTestsPanel"));
+const DbtPanel            = React.lazy(() => import("../components/panels/DbtPanel"));
 // P0.3 — custom policy pack editor for <project>/.datalex/policies/.
 const PolicyPacksPanel    = React.lazy(() => import("../components/panels/PolicyPacksPanel"));
 const SelectionSummaryPanel = React.lazy(() => import("../components/panels/SelectionSummaryPanel"));
@@ -155,39 +159,49 @@ const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
 const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 520;
 
+/* Bottom-drawer tab order.
+   - Validation comes first so "what's broken / missing" is the default answer.
+   - Diff is second for the change-review path.
+   - Build (was "Studio") is the create/edit surface — forms + buttons that
+     mutate the active YAML for the active layer. Renamed because "Studio"
+     told users nothing about what it actually does.
+   - Policy Packs (and History on layers that support it) sit on the right.
+
+   We deliberately do NOT include a "dbt" bottom tab here. Earlier we shipped
+   one, but the same data is rendered richer (and scrollable) in the top-row
+   Docs view, which is the canonical "what's in this file" surface. The bottom
+   panel is for interactive / layer-specific tools — read-only resource lists
+   live one row up.
+
+   `description` is shown as a tooltip when the user hovers the tab so each
+   tab self-documents without anyone having to ask "what is this for?". */
 const LOGICAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Blueprint",     icon: Wand2 },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
-  { id: "diff",          label: "Diff",          icon: GitCompare },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dimensional nudges, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit logical entities, relationships, and keys for the active layer." },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const PHYSICAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "dbt",           label: "dbt YAML",      icon: Braces },
-  { id: "sql",           label: "SQL Preview",   icon: FileCode2 },
-  { id: "constraints",   label: "Constraints",   icon: Database },
-  { id: "snapshots",     label: "Snapshots",     icon: Camera },
-  { id: "exposures",     label: "Exposures",     icon: Eye },
-  { id: "unit_tests",    label: "Unit Tests",    icon: FlaskConical },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield },
-  { id: "diff",          label: "Diff",          icon: GitCompare },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dbt readiness review, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit physical entities, relationships, and dbt model targets for the active diagram." },
+  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
 ];
 
 const CONCEPTUAL_BOTTOM_TABS = [
-  { id: "modeler",       label: "Studio",        icon: Wand2 },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
-  { id: "relationships", label: "Relationships", icon: GitBranch },
-  { id: "validation",    label: "Validation",    icon: ShieldCheck },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
+  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create concepts, business relationships, and capture domain definitions." },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
+  { id: "relationships", label: "Relationships", icon: GitBranch,   description: "Cross-entity relationships, role names, cardinality, and identifying status." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const VIEWER_BOTTOM_TABS = [
-  { id: "properties",    label: "Properties",    icon: Columns3 },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen },
-  { id: "history",       label: "History",       icon: Clock },
+  { id: "properties",    label: "Properties",    icon: Columns3,    description: "Properties of the selected entity, column, or relationship." },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const LazyFallback = (
@@ -252,6 +266,94 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
   );
 }
 
+function explanationFieldText(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function AiProposalExplanation({ proposal }) {
+  if (!proposal) return null;
+  const reviewSummary = explanationFieldText(proposal.review_summary);
+  const rationale = explanationFieldText(proposal.rationale);
+  const patchExplanation = explanationFieldText(proposal.explanation);
+  const validationImpact = explanationFieldText(proposal.validation_impact);
+  const sourceContext = Array.isArray(proposal.source_context)
+    ? proposal.source_context.filter(Boolean)
+    : (proposal.source_context ? [proposal.source_context] : []);
+  const questions = Array.isArray(proposal.questions) ? proposal.questions.filter(Boolean) : [];
+  const hasAnything = reviewSummary || rationale || patchExplanation || validationImpact || sourceContext.length > 0 || questions.length > 0;
+  if (!hasAnything) return null;
+  return (
+    <details className="ai-plan-explanation" open>
+      <summary>
+        <strong>Why this change</strong>
+        {reviewSummary && <span className="ai-plan-explanation-summary">{reviewSummary}</span>}
+      </summary>
+      <div className="ai-plan-explanation-body">
+        {rationale && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Rationale</span>
+            <p>{rationale}</p>
+          </section>
+        )}
+        {patchExplanation && patchExplanation !== rationale && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Explanation</span>
+            <p>{patchExplanation}</p>
+          </section>
+        )}
+        {validationImpact && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Validation impact</span>
+            <p>{validationImpact}</p>
+          </section>
+        )}
+        {questions.length > 0 && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">AI needs your input</span>
+            <ul>
+              {questions.map((question, index) => (
+                <li key={`q-${index}`}>{question}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {sourceContext.length > 0 && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Source context</span>
+            <div className="ai-plan-explanation-chips">
+              {sourceContext.map((source, index) => (
+                <code key={`src-${index}`} className="ai-plan-explanation-chip">{String(source)}</code>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
+/* Persisted split between the diagram preview (left) and YAML editor
+   (right) in the AI review modal. Keep it generous on first open so the
+   diagram has room to breathe; let the user drag once and it sticks. */
+const AI_PLAN_SPLIT_KEY = "datalex.aiPlanSplit";
+const AI_PLAN_SPLIT_DEFAULT = 0.55;
+const AI_PLAN_SPLIT_MIN = 0.25;
+const AI_PLAN_SPLIT_MAX = 0.85;
+
+function readPersistedSplit() {
+  try {
+    const raw = window.localStorage?.getItem(AI_PLAN_SPLIT_KEY);
+    if (!raw) return AI_PLAN_SPLIT_DEFAULT;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed)) return AI_PLAN_SPLIT_DEFAULT;
+    return Math.max(AI_PLAN_SPLIT_MIN, Math.min(AI_PLAN_SPLIT_MAX, parsed));
+  } catch {
+    return AI_PLAN_SPLIT_DEFAULT;
+  }
+}
+
 function AiPlanReviewEditor({ document, onClose }) {
   const content = String(document?.content || "");
   const proposals = Array.isArray(document?.proposals) ? document.proposals : [];
@@ -260,6 +362,9 @@ function AiPlanReviewEditor({ document, onClose }) {
   const [validation, setValidation] = React.useState(null);
   const [error, setError] = React.useState("");
   const [busy, setBusy] = React.useState("");
+  const [splitFraction, setSplitFraction] = React.useState(readPersistedSplit);
+  const workspaceRef = React.useRef(null);
+  const dragStateRef = React.useRef({ dragging: false, rafId: 0, pendingFraction: splitFraction });
   React.useEffect(() => {
     setActiveIndex(0);
     setDrafts(proposals.map((proposal) => proposal.editor_yaml || proposalEditableYaml(proposal)));
@@ -300,13 +405,65 @@ function AiPlanReviewEditor({ document, onClose }) {
     setBusy("apply");
     setError("");
     try {
-      await document.onApply(draftChanges);
+      await document.onApply(activePreviewChange ? [activePreviewChange] : []);
     } catch (err) {
       setError(err?.message || String(err));
       setBusy("");
     }
   };
+  /* Drag the splitter between preview and YAML. We mutate a CSS var on
+     the workspace ref during the drag (rAF-throttled) so React doesn't
+     re-render at 60 fps; on mouseup we commit the final fraction to
+     state + localStorage. */
+  const onSplitterMove = React.useCallback((event) => {
+    const st = dragStateRef.current;
+    if (!st.dragging) return;
+    const node = workspaceRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const raw = (event.clientX - rect.left) / rect.width;
+    const next = Math.max(AI_PLAN_SPLIT_MIN, Math.min(AI_PLAN_SPLIT_MAX, raw));
+    st.pendingFraction = next;
+    if (!st.rafId) {
+      st.rafId = requestAnimationFrame(() => {
+        node.style.setProperty("--ai-plan-split", `${st.pendingFraction}`);
+        st.rafId = 0;
+      });
+    }
+  }, []);
+  const onSplitterEnd = React.useCallback(() => {
+    const st = dragStateRef.current;
+    if (!st.dragging) return;
+    st.dragging = false;
+    if (st.rafId) { cancelAnimationFrame(st.rafId); st.rafId = 0; }
+    document.body.classList.remove("ai-plan-resizing");
+    document.removeEventListener("mousemove", onSplitterMove);
+    document.removeEventListener("mouseup", onSplitterEnd);
+    setSplitFraction(st.pendingFraction);
+    try { window.localStorage?.setItem(AI_PLAN_SPLIT_KEY, String(st.pendingFraction)); } catch { /* ignore */ }
+  }, [onSplitterMove]);
+  const onSplitterStart = React.useCallback((event) => {
+    event.preventDefault();
+    const st = dragStateRef.current;
+    st.dragging = true;
+    st.pendingFraction = splitFraction;
+    document.body.classList.add("ai-plan-resizing");
+    document.addEventListener("mousemove", onSplitterMove);
+    document.addEventListener("mouseup", onSplitterEnd);
+  }, [splitFraction, onSplitterMove, onSplitterEnd]);
+  const onSplitterDoubleClick = React.useCallback(() => {
+    setSplitFraction(AI_PLAN_SPLIT_DEFAULT);
+    try { window.localStorage?.setItem(AI_PLAN_SPLIT_KEY, String(AI_PLAN_SPLIT_DEFAULT)); } catch { /* ignore */ }
+    if (workspaceRef.current) {
+      workspaceRef.current.style.setProperty("--ai-plan-split", `${AI_PLAN_SPLIT_DEFAULT}`);
+    }
+  }, []);
+
   if (!document) return null;
+  const activeIsPatch = isPatchYamlProposal(activeProposal);
+  const activePatchOps = proposalPatchOps(activePreviewChange || activeProposal);
+  const workspaceStyle = { "--ai-plan-split": String(splitFraction) };
   return (
     <section className="ai-plan-editor-shell" aria-label="AI review plan">
       <div className="ai-plan-editor-header">
@@ -323,7 +480,7 @@ function AiPlanReviewEditor({ document, onClose }) {
           )}
           {proposals.length > 0 && (
             <button type="button" className="panel-btn primary" onClick={applyDrafts} disabled={busy === "apply" || validation?.valid === false}>
-              {busy === "apply" ? "Applying..." : `Apply ${proposals.length}`}
+              {busy === "apply" ? "Applying..." : "Apply 1"}
             </button>
           )}
           <button type="button" className="panel-btn" onClick={copy}>
@@ -349,15 +506,46 @@ function AiPlanReviewEditor({ document, onClose }) {
             ))}
           </div>
         )}
+        {proposals.length > 0 && <AiProposalExplanation proposal={activeProposal} />}
         {proposals.length > 0 ? (
-          <div className="ai-plan-review-workspace">
-            <div className="ai-plan-preview-grid">
-              {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
+            <div ref={workspaceRef} className="ai-plan-review-workspace" style={workspaceStyle}>
+            {activeIsPatch ? (
+              <div className="ai-plan-preview-grid">
+                <div className="panel-card" style={{ padding: 12, display: "grid", gap: 8 }}>
+                  <strong>YAML Patch</strong>
+                  <span className="muted">{activePreviewChange?.path || activeProposal?.path || "(no path)"}</span>
+                  {(activePreviewChange?.targetPointer || activeProposal?.targetPointer) && (
+                    <span className="muted">Target: {activePreviewChange?.targetPointer || activeProposal?.targetPointer}</span>
+                  )}
+                  {activePatchOps.length > 0 ? activePatchOps.map((op, index) => (
+                    <code key={`${op?.op}-${op?.path}-${index}`} className="ai-md-inline-code">
+                      {op?.op || "op"} {op?.path || "/"}
+                    </code>
+                  )) : (
+                    <span className="muted">Edit the JSON Patch operations in the pane before validating.</span>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="ai-plan-preview-grid">
+                {activePreviewChange && <AiProposalPreview change={activePreviewChange} />}
+              </div>
+            )}
+            <div
+              className="ai-plan-splitter"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize diagram and YAML panes"
+              title="Drag to resize · double-click to reset"
+              onMouseDown={onSplitterStart}
+              onDoubleClick={onSplitterDoubleClick}
+            >
+              <span className="ai-plan-splitter-grip" />
             </div>
             <div className="ai-plan-yaml-pane">
               <div className="ai-plan-yaml-toolbar">
-                <strong>Editable YAML</strong>
-                <span>Modify the proposal, then validate and apply. The preview updates from this YAML.</span>
+                <strong>{activeIsPatch ? "Editable JSON Patch" : "Editable YAML"}</strong>
+                <span>{activeIsPatch ? "Modify the patch operations, then validate and apply the selected change." : "Modify the proposal, then validate and apply. The preview updates from this YAML."}</span>
               </div>
               <textarea
                 className="ai-plan-editor-text"
@@ -414,9 +602,7 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
     case "relationships":
       node = <LayerSupportPanel title="Relationships" eyebrow={schema?.modelKind || "Model"} description="Review relationship meaning, role names, cardinality, optionality, identifying status, and diagram-scoped edges." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
-    case "dbt":
-      node = <LayerSupportPanel title="dbt YAML" eyebrow="Physical" description="Physical diagrams are composed from dbt model/source YAML. Drag dbt YAML files from Explorer into this diagram and model constraints here." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
-      break;
+    case "dbt":           node = <DbtPanel />; break;
     case "sql":
       node = <LayerSupportPanel title="SQL Preview" eyebrow="Physical" description="Generate or export SQL from physical dbt-backed diagrams. Logical diagrams can stage generated dbt SQL/YAML under generated-sql/ and the active domain folder." table={table} rel={rel} relationships={relationships} schema={schema} activeFile={activeFile} isDiagramFile={isDiagramFile} />;
       break;
@@ -1556,14 +1742,31 @@ export default function Shell() {
   }, [isDiagramFile, addToast]);
 
   const isEditable = !!(canEdit && canEdit());
+  const validationStatus = React.useMemo(
+    () => computeValidationStatus(activeFileContent, activeFile),
+    [activeFileContent, activeFile]
+  );
   const activeBottomTabs = React.useMemo(
     () => {
-      if (activeModelKind === "conceptual") return CONCEPTUAL_BOTTOM_TABS;
-      if (activeModelKind === "logical") return LOGICAL_BOTTOM_TABS;
-      if (activeModelKind === "physical") return PHYSICAL_BOTTOM_TABS;
-      return isEditable ? PHYSICAL_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
+      const baseTabs =
+        activeModelKind === "conceptual" ? CONCEPTUAL_BOTTOM_TABS
+        : activeModelKind === "logical" ? LOGICAL_BOTTOM_TABS
+        : activeModelKind === "physical" ? PHYSICAL_BOTTOM_TABS
+        : (isEditable ? PHYSICAL_BOTTOM_TABS : VIEWER_BOTTOM_TABS);
+      if (!validationStatus.status) return baseTabs;
+      return baseTabs.map((tab) => tab.id === "validation"
+        ? {
+            ...tab,
+            status: validationStatus.status,
+            statusTitle: validationStatus.status === "red"
+              ? `${validationStatus.blockers} blocker${validationStatus.blockers === 1 ? "" : "s"}`
+              : validationStatus.status === "yellow"
+                ? `${validationStatus.warnings} warning${validationStatus.warnings === 1 ? "" : "s"}`
+                : "All checks passed",
+          }
+        : tab);
     },
-    [activeModelKind, isEditable]
+    [activeModelKind, isEditable, validationStatus]
   );
 
   React.useEffect(() => {

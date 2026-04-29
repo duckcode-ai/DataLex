@@ -1,4 +1,5 @@
 import yaml from "js-yaml";
+import { classifyYamlDocument, dbtVersionWarning, isDbtYamlDocumentKind, YAML_DOCUMENT_KINDS } from "./lib/yamlDocumentKind.js";
 
 // ── Completeness scoring ───────────────────────────────────────────────────────
 
@@ -522,18 +523,6 @@ function parseYaml(yamlText) {
       parseError: err instanceof Error ? err.message : "Unknown YAML parsing error"
     };
   }
-}
-
-function looksLikeDbtSchemaDocument(model) {
-  if (!isObject(model)) return false;
-  const hasDbtSections =
-    Array.isArray(model.models) ||
-    Array.isArray(model.sources) ||
-    Array.isArray(model.semantic_models) ||
-    Array.isArray(model.metrics);
-  if (!hasDbtSections) return false;
-  const version = String(model.version ?? "").trim();
-  return version === "2" || version === "2.0";
 }
 
 function structuralIssues(model) {
@@ -1660,11 +1649,18 @@ export function runModelChecks(yamlText) {
     };
   }
 
-  if (looksLikeDbtSchemaDocument(parsed.model)) {
+  const yamlDocumentKind = classifyYamlDocument(parsed.model);
+  if (isDbtYamlDocumentKind(yamlDocumentKind)) {
+    const missingVersionWarning = dbtVersionWarning(parsed.model, yamlDocumentKind);
+    const message = yamlDocumentKind === YAML_DOCUMENT_KINDS.DBT_SEMANTIC
+      ? "This file looks like dbt semantic layer YAML. DataLex skips native model validation for dbt semantic models and metrics."
+      : yamlDocumentKind === YAML_DOCUMENT_KINDS.DBT_SAVED_QUERIES
+        ? "This file looks like dbt saved query YAML. DataLex skips native model validation for dbt saved queries."
+        : "This file looks like a dbt schema/properties file (.yml/.yaml). Import it as dbt to generate a DataLex model.";
     const dbtIssue = issue(
       "warn",
       "DBT_SCHEMA_DETECTED",
-      "This file looks like a dbt schema file (.yml/.yaml). Import it as dbt to generate a DataLex model.",
+      missingVersionWarning || message,
       "/"
     );
     return {

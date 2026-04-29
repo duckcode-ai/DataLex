@@ -126,6 +126,21 @@ export function lintDoc(doc, opts = {}) {
       }
     }
   }
+  if (Array.isArray(doc.semantic_models)) {
+    for (const sm of doc.semantic_models) out.push(...lintSemanticModel(sm, { filePath }));
+  }
+  if (Array.isArray(doc.metrics)) {
+    for (const m of doc.metrics) out.push(...lintMetric(m, { filePath }));
+  }
+  if (Array.isArray(doc.saved_queries)) {
+    for (const sq of doc.saved_queries) out.push(...lintSavedQuery(sq, { filePath }));
+  }
+  if (Array.isArray(doc.exposures)) {
+    for (const e of doc.exposures) out.push(...lintExposure(e, { filePath }));
+  }
+  if (Array.isArray(doc.snapshots)) {
+    for (const s of doc.snapshots) out.push(...lintSnapshot(s, { filePath }));
+  }
 
   // DataLex per-file entity shape: `kind: model|source` + top-level columns.
   if (!out.length && (doc.kind === "model" || doc.kind === "source")) {
@@ -136,6 +151,152 @@ export function lintDoc(doc, opts = {}) {
     }
   }
 
+  return out;
+}
+
+/* dbt semantic-layer linters — minimal "metadata complete enough to be
+   trustworthy" rules so an imported dbt repo's semantic / metrics / saved
+   queries / exposure / snapshot files always show something in Validation
+   instead of an empty panel. We don't try to typecheck refs against the
+   dbt graph here — that's the readiness review's job. */
+function lintSemanticModel(sm, opts = {}) {
+  if (!sm || typeof sm !== "object") return [];
+  const filePath = opts.filePath || "";
+  const name = sm.name || "(unnamed semantic model)";
+  const pathBase = filePath ? `${filePath}#${name}` : name;
+  const out = [];
+  if (!hasValue(sm.description)) {
+    out.push({ code: "DBT_SEMANTIC_MODEL_NO_DESCRIPTION", severity: "warn", path: pathBase, message: `Semantic model \`${name}\` has no description.` });
+  }
+  if (!hasValue(sm.model)) {
+    out.push({ code: "DBT_SEMANTIC_MODEL_NO_REF", severity: "error", path: pathBase, message: `Semantic model \`${name}\` is missing the \`model:\` ref to the underlying dbt model.` });
+  }
+  const entities = Array.isArray(sm.entities) ? sm.entities : [];
+  if (entities.length === 0) {
+    out.push({ code: "DBT_SEMANTIC_MODEL_NO_ENTITIES", severity: "warn", path: pathBase, message: `Semantic model \`${name}\` declares no entities — metrics built on it cannot resolve joins.` });
+  } else if (!entities.some((e) => String(e?.type || "").toLowerCase() === "primary")) {
+    out.push({ code: "DBT_SEMANTIC_MODEL_NO_PRIMARY_ENTITY", severity: "warn", path: pathBase, message: `Semantic model \`${name}\` has no \`type: primary\` entity. The semantic layer needs one to anchor joins.` });
+  }
+  for (const e of entities) {
+    if (!hasValue(e?.name)) out.push({ code: "DBT_SEMANTIC_ENTITY_NO_NAME", severity: "error", path: pathBase, message: `Semantic model \`${name}\` has an entity without a \`name\`.` });
+    if (!hasValue(e?.type)) out.push({ code: "DBT_SEMANTIC_ENTITY_NO_TYPE", severity: "warn", path: `${pathBase}.${e?.name || "(unnamed)"}`, message: `Entity \`${e?.name || "(unnamed)"}\` has no \`type\` (primary | foreign | natural).` });
+  }
+  for (const m of (Array.isArray(sm.measures) ? sm.measures : [])) {
+    const mName = m?.name || "(unnamed measure)";
+    if (!hasValue(m?.agg)) {
+      out.push({ code: "DBT_SEMANTIC_MEASURE_NO_AGG", severity: "warn", path: `${pathBase}.${mName}`, field: mName, message: `Measure \`${mName}\` has no \`agg\` (sum | average | count | …).` });
+    }
+    if (!hasValue(m?.expr) && !hasValue(m?.column)) {
+      out.push({ code: "DBT_SEMANTIC_MEASURE_NO_EXPR", severity: "warn", path: `${pathBase}.${mName}`, field: mName, message: `Measure \`${mName}\` has no \`expr\` or \`column\`.` });
+    }
+  }
+  for (const d of (Array.isArray(sm.dimensions) ? sm.dimensions : [])) {
+    const dName = d?.name || "(unnamed dimension)";
+    if (!hasValue(d?.type)) {
+      out.push({ code: "DBT_SEMANTIC_DIMENSION_NO_TYPE", severity: "warn", path: `${pathBase}.${dName}`, field: dName, message: `Dimension \`${dName}\` has no \`type\` (categorical | time).` });
+    }
+    if (String(d?.type || "").toLowerCase() === "time" && !hasValue(d?.type_params?.time_granularity)) {
+      out.push({ code: "DBT_SEMANTIC_TIME_DIMENSION_NO_GRANULARITY", severity: "warn", path: `${pathBase}.${dName}`, field: dName, message: `Time dimension \`${dName}\` should declare a \`type_params.time_granularity\`.` });
+    }
+  }
+  return out;
+}
+
+function lintMetric(metric, opts = {}) {
+  if (!metric || typeof metric !== "object") return [];
+  const filePath = opts.filePath || "";
+  const name = metric.name || "(unnamed metric)";
+  const pathBase = filePath ? `${filePath}#${name}` : name;
+  const out = [];
+  if (!hasValue(metric.description)) {
+    out.push({ code: "DBT_METRIC_NO_DESCRIPTION", severity: "warn", path: pathBase, message: `Metric \`${name}\` has no description.` });
+  }
+  if (!hasValue(metric.label)) {
+    out.push({ code: "DBT_METRIC_NO_LABEL", severity: "info", path: pathBase, message: `Metric \`${name}\` has no \`label\` for BI surfaces.` });
+  }
+  const type = String(metric.type || "").toLowerCase();
+  if (!hasValue(type)) {
+    out.push({ code: "DBT_METRIC_NO_TYPE", severity: "error", path: pathBase, message: `Metric \`${name}\` has no \`type\`.` });
+  }
+  const tp = metric.type_params || {};
+  if (type === "simple" && !hasValue(tp.measure)) {
+    out.push({ code: "DBT_METRIC_SIMPLE_NO_MEASURE", severity: "error", path: pathBase, message: `Simple metric \`${name}\` is missing \`type_params.measure\`.` });
+  }
+  if (type === "ratio" && (!hasValue(tp.numerator) || !hasValue(tp.denominator))) {
+    out.push({ code: "DBT_METRIC_RATIO_INCOMPLETE", severity: "error", path: pathBase, message: `Ratio metric \`${name}\` needs both \`numerator\` and \`denominator\`.` });
+  }
+  if (type === "derived" && !hasValue(tp.expr)) {
+    out.push({ code: "DBT_METRIC_DERIVED_NO_EXPR", severity: "error", path: pathBase, message: `Derived metric \`${name}\` is missing \`type_params.expr\`.` });
+  }
+  if (type === "cumulative" && !hasValue(tp.measure)) {
+    out.push({ code: "DBT_METRIC_CUMULATIVE_NO_MEASURE", severity: "error", path: pathBase, message: `Cumulative metric \`${name}\` is missing \`type_params.measure\`.` });
+  }
+  return out;
+}
+
+function lintSavedQuery(sq, opts = {}) {
+  if (!sq || typeof sq !== "object") return [];
+  const filePath = opts.filePath || "";
+  const name = sq.name || "(unnamed saved query)";
+  const pathBase = filePath ? `${filePath}#${name}` : name;
+  const out = [];
+  if (!hasValue(sq.description)) {
+    out.push({ code: "DBT_SAVED_QUERY_NO_DESCRIPTION", severity: "warn", path: pathBase, message: `Saved query \`${name}\` has no description.` });
+  }
+  const params = sq.query_params || {};
+  if (!Array.isArray(params.metrics) || params.metrics.length === 0) {
+    out.push({ code: "DBT_SAVED_QUERY_NO_METRICS", severity: "error", path: pathBase, message: `Saved query \`${name}\` lists no \`query_params.metrics\`.` });
+  }
+  if (!Array.isArray(params.group_by) || params.group_by.length === 0) {
+    out.push({ code: "DBT_SAVED_QUERY_NO_GROUP_BY", severity: "info", path: pathBase, message: `Saved query \`${name}\` declares no \`query_params.group_by\` — usually only correct for a single-row aggregate.` });
+  }
+  return out;
+}
+
+function lintExposure(exposure, opts = {}) {
+  if (!exposure || typeof exposure !== "object") return [];
+  const filePath = opts.filePath || "";
+  const name = exposure.name || "(unnamed exposure)";
+  const pathBase = filePath ? `${filePath}#${name}` : name;
+  const out = [];
+  if (!hasValue(exposure.description)) {
+    out.push({ code: "DBT_EXPOSURE_NO_DESCRIPTION", severity: "warn", path: pathBase, message: `Exposure \`${name}\` has no description.` });
+  }
+  if (!hasValue(exposure.type)) {
+    out.push({ code: "DBT_EXPOSURE_NO_TYPE", severity: "warn", path: pathBase, message: `Exposure \`${name}\` is missing \`type\` (dashboard | analysis | ml | application | notebook).` });
+  }
+  if (!hasValue(exposure.owner?.name) && !hasValue(exposure.owner?.email)) {
+    out.push({ code: "DBT_EXPOSURE_NO_OWNER", severity: "warn", path: pathBase, message: `Exposure \`${name}\` has no \`owner.name\` or \`owner.email\`.` });
+  }
+  if (!Array.isArray(exposure.depends_on) || exposure.depends_on.length === 0) {
+    out.push({ code: "DBT_EXPOSURE_NO_DEPENDENCIES", severity: "info", path: pathBase, message: `Exposure \`${name}\` declares no \`depends_on\` — its lineage will be invisible to dbt docs.` });
+  }
+  return out;
+}
+
+function lintSnapshot(snapshot, opts = {}) {
+  if (!snapshot || typeof snapshot !== "object") return [];
+  const filePath = opts.filePath || "";
+  const name = snapshot.name || "(unnamed snapshot)";
+  const pathBase = filePath ? `${filePath}#${name}` : name;
+  const out = [];
+  if (!hasValue(snapshot.description)) {
+    out.push({ code: "DBT_SNAPSHOT_NO_DESCRIPTION", severity: "warn", path: pathBase, message: `Snapshot \`${name}\` has no description.` });
+  }
+  const cfg = snapshot.config || {};
+  const strategy = String(cfg.strategy || "").toLowerCase();
+  if (!hasValue(strategy)) {
+    out.push({ code: "DBT_SNAPSHOT_NO_STRATEGY", severity: "error", path: pathBase, message: `Snapshot \`${name}\` is missing \`config.strategy\` (timestamp | check).` });
+  }
+  if (!hasValue(cfg.unique_key)) {
+    out.push({ code: "DBT_SNAPSHOT_NO_UNIQUE_KEY", severity: "error", path: pathBase, message: `Snapshot \`${name}\` is missing \`config.unique_key\`.` });
+  }
+  if (strategy === "timestamp" && !hasValue(cfg.updated_at)) {
+    out.push({ code: "DBT_SNAPSHOT_TIMESTAMP_NO_UPDATED_AT", severity: "error", path: pathBase, message: `Timestamp-strategy snapshot \`${name}\` needs \`config.updated_at\`.` });
+  }
+  if (strategy === "check" && !Array.isArray(cfg.check_cols) && cfg.check_cols !== "all") {
+    out.push({ code: "DBT_SNAPSHOT_CHECK_NO_COLS", severity: "error", path: pathBase, message: `Check-strategy snapshot \`${name}\` needs \`config.check_cols\` (list of columns or "all").` });
+  }
   return out;
 }
 

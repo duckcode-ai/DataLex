@@ -466,6 +466,27 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .bottom-drawer-tab.active svg { color: var(--accent); }
 .bottom-drawer-tab svg { width: 12px; height: 12px; flex-shrink: 0; }
 .bottom-drawer-tab-label { font-weight: inherit; }
+.bottom-drawer-tab-status {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  margin-left: -2px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 0%, transparent);
+}
+.bottom-drawer-tab-status.status-red {
+  background: var(--status-danger, #ef4444);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-danger, #ef4444) 24%, transparent);
+}
+.bottom-drawer-tab-status.status-yellow {
+  background: var(--status-warning, #f59e0b);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-warning, #f59e0b) 24%, transparent);
+}
+.bottom-drawer-tab-status.status-green {
+  background: var(--status-success, #22c55e);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--status-success, #22c55e) 24%, transparent);
+}
 
 /* ── Right-aligned action cluster (min / max / close) ──────────────── */
 .bottom-drawer-actions {
@@ -2169,6 +2190,55 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   gap: 5px;
   flex: 0 0 auto;
 }
+.ai-proposal-preview-canvas-wrap {
+  position: relative;
+}
+.ai-proposal-preview-toolbar {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: color-mix(in srgb, var(--bg-1) 86%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(6px);
+  z-index: 4;
+}
+.ai-proposal-preview-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  width: 22px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.ai-proposal-preview-toolbar button:hover:not(:disabled) {
+  background: var(--bg-2);
+  color: var(--text-primary);
+  border-color: var(--border-default);
+}
+.ai-proposal-preview-toolbar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.ai-proposal-preview-zoom-readout {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+  padding: 0 4px;
+  min-width: 34px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
 .ai-proposal-preview-canvas {
   min-height: 360px;
   overflow: auto;
@@ -2184,6 +2254,27 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   min-width: 100%;
   width: 100%;
   height: 440px;
+}
+.ai-proposal-preview.fullscreen {
+  position: fixed;
+  inset: 24px;
+  z-index: 9000;
+  margin: 0;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  max-height: calc(100vh - 48px);
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.45);
+}
+.ai-proposal-preview.fullscreen .ai-proposal-preview-canvas-wrap {
+  min-height: 0;
+}
+.ai-proposal-preview.fullscreen .ai-proposal-preview-canvas {
+  height: 100%;
+  min-height: 0;
+}
+.ai-proposal-preview.fullscreen .ai-proposal-preview-canvas svg {
+  height: auto;
+  min-height: 100%;
 }
 .ai-proposal-preview.compact .ai-proposal-preview-canvas {
   min-height: 430px;
@@ -2592,14 +2683,22 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   gap: 7px;
   flex-shrink: 0;
 }
+/* Body is now scrollable as a whole — the user complained that with the
+   explanation panel open they couldn't see the bottom of the workspace.
+   Tabs + explanation + workspace + validation all flow naturally; if
+   total content exceeds the modal, the body itself scrolls. The
+   workspace keeps a min-height so it never gets crushed flat. */
 .ai-plan-editor-body {
   min-width: 0;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 0;
-  overflow: hidden;
+  overflow: auto;
 }
+.ai-plan-editor-body > .ai-plan-explanation { margin: 10px 16px 0; flex-shrink: 0; }
+.ai-plan-editor-body > .ai-plan-proposal-tabs { flex-shrink: 0; }
+.ai-plan-editor-body > .ai-plan-validation { flex-shrink: 0; }
 .ai-plan-proposal-tabs {
   display: flex;
   align-items: center;
@@ -2629,12 +2728,112 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   color: var(--text-primary);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--status-success, #22c55e) 20%, transparent);
 }
+.ai-plan-explanation {
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.ai-plan-explanation > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  list-style: none;
+  user-select: none;
+  background: color-mix(in srgb, var(--accent, #3b82f6) 8%, var(--bg-1));
+  border-bottom: 1px solid transparent;
+  transition: background 120ms;
+}
+.ai-plan-explanation > summary::-webkit-details-marker { display: none; }
+.ai-plan-explanation > summary::before {
+  content: "▸";
+  font-size: 10px;
+  color: var(--text-tertiary);
+  transition: transform 140ms;
+}
+.ai-plan-explanation[open] > summary::before { transform: rotate(90deg); }
+.ai-plan-explanation[open] > summary { border-bottom-color: var(--border-default); }
+.ai-plan-explanation > summary:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 14%, var(--bg-1));
+}
+.ai-plan-explanation > summary > strong {
+  color: var(--text-primary);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+.ai-plan-explanation-summary {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ai-plan-explanation-body {
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+.ai-plan-explanation-body section {
+  display: grid;
+  gap: 4px;
+}
+.ai-plan-explanation-eyebrow {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.ai-plan-explanation-body p {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+.ai-plan-explanation-body ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.ai-plan-explanation-body ul li {
+  margin: 2px 0;
+}
+.ai-plan-explanation-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ai-plan-explanation-chip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+/* Workspace is a 3-column grid: preview · splitter · YAML.
+   --ai-plan-split (0..1) drives how much horizontal space goes to the
+   preview side; the YAML side gets the remainder. The splitter is a
+   thin draggable strip in between. min-height keeps both panes usable
+   even when the modal body is scrolling its outer overflow. */
 .ai-plan-review-workspace {
   min-width: 0;
-  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(520px, 1.08fr) minmax(420px, 0.92fr);
-  overflow: hidden;
+  /* 14px column for the splitter — wider than the visible bar so the
+     hit target is easy to grab. The visible 4px bar is painted by the
+     splitter's ::before, centered in the column. */
+  grid-template-columns: calc(var(--ai-plan-split, 0.55) * 100%) 14px minmax(0, 1fr);
+  flex: 1 0 auto;
+  min-height: 540px;
 }
 .ai-plan-preview-grid {
   min-width: 0;
@@ -2644,9 +2843,56 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
   padding: 16px;
-  border-right: 1px solid var(--border-default);
   background: var(--bg-1);
 }
+.ai-plan-splitter {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 5;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.ai-plan-splitter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 5px;
+  right: 5px;
+  border-radius: 2px;
+  background: var(--border-default);
+  transition: background 120ms, left 120ms, right 120ms;
+  pointer-events: none;
+}
+.ai-plan-splitter:hover::before,
+body.ai-plan-resizing .ai-plan-splitter::before {
+  background: var(--accent, #3b82f6);
+  left: 4px;
+  right: 4px;
+}
+.ai-plan-splitter-grip {
+  display: block;
+  width: 2px;
+  height: 36px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--text-tertiary) 70%, transparent);
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
+}
+.ai-plan-splitter:hover .ai-plan-splitter-grip,
+body.ai-plan-resizing .ai-plan-splitter-grip {
+  background: rgba(255, 255, 255, 0.92);
+}
+body.ai-plan-resizing { cursor: col-resize; user-select: none; }
+body.ai-plan-resizing * { cursor: col-resize !important; }
+body.ai-plan-resizing .ai-plan-editor-body { overflow: hidden; }
 .ai-plan-preview-grid .ai-proposal-preview {
   margin: 0;
 }
@@ -2722,11 +2968,18 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
   }
   .ai-plan-review-workspace {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(360px, auto) 6px minmax(280px, auto);
   }
   .ai-plan-preview-grid {
     border-right: 0;
     border-bottom: 1px solid var(--border-default);
   }
+  .ai-plan-splitter {
+    cursor: row-resize;
+    height: 6px;
+  }
+  body.ai-plan-resizing { cursor: row-resize; }
+  body.ai-plan-resizing * { cursor: row-resize !important; }
   .ai-chat-card {
     border-right: 0;
     border-bottom: 1px solid var(--border-default);

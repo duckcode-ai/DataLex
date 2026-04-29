@@ -193,15 +193,40 @@ export async function appendAiChatMessages(project, chatId, messages = []) {
   return chat;
 }
 
-export async function listAiMemories(project) {
+/**
+ * Read the per-project memory store with a one-time selective migration
+ * to drop entries auto-extracted by the old over-eager regex (see
+ * `pruneAutoExtractedMemoryRules` below). Subsequent reads are no-ops
+ * because the matched entries are already gone.
+ *
+ * Both `listAiMemories` and `upsertAiMemories` go through this helper so
+ * the cleanup happens on first load regardless of which path the
+ * api-server hits first.
+ */
+async function loadMemoryStoreMigrated(project) {
   const store = await readJson(project, MEMORY_FILE, { version: 1, memories: [] });
+  const list = Array.isArray(store.memories) ? store.memories : [];
+  const { memories: cleaned, droppedCount } = pruneAutoExtractedMemoryRules(list);
+  if (droppedCount > 0) {
+    store.memories = cleaned;
+    await writeJson(project, MEMORY_FILE, store);
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[memory] migrated ${droppedCount} auto-extracted entries from polluted store`);
+    } catch { /* logger not available */ }
+  }
+  return store;
+}
+
+export async function listAiMemories(project) {
+  const store = await loadMemoryStoreMigrated(project);
   return (Array.isArray(store.memories) ? store.memories : [])
     .filter((memory) => !memory.supersededBy)
     .sort((a, b) => String(b.updatedAt || b.createdAt || "").localeCompare(String(a.updatedAt || a.createdAt || "")));
 }
 
 export async function upsertAiMemories(project, memories = []) {
-  const store = await readJson(project, MEMORY_FILE, { version: 1, memories: [] });
+  const store = await loadMemoryStoreMigrated(project);
   store.version = 1;
   store.memories = Array.isArray(store.memories) ? store.memories : [];
   const existing = new Map(store.memories.filter((m) => !m.supersededBy).map((m) => [normalizeText(m.content).toLowerCase(), m]));
@@ -230,7 +255,7 @@ export async function upsertAiMemories(project, memories = []) {
 }
 
 export async function deleteAiMemory(project, memoryId) {
-  const store = await readJson(project, MEMORY_FILE, { version: 1, memories: [] });
+  const store = await loadMemoryStoreMigrated(project);
   const before = Array.isArray(store.memories) ? store.memories.length : 0;
   store.memories = (Array.isArray(store.memories) ? store.memories : []).filter((memory) => memory.id !== memoryId);
   if (store.memories.length !== before) {
@@ -240,27 +265,100 @@ export async function deleteAiMemory(project, memoryId) {
   return false;
 }
 
+/**
+ * Extract user-stated *rules* from a chat message and persist them as
+ * modeling memory.
+ *
+ * The previous heuristic was wildly over-eager — any line containing
+ * "dbt", "model", or "test" was tagged as a `dbt_implementation_rule`.
+ * That meant ordinary one-shot prompts ("suggest a description for the
+ * dbt model …") landed in `<project>/.datalex/agent/memory.json`,
+ * polluted future agent runs, and surfaced back to the user as
+ * "Remembered modeling preferences."
+ *
+ * Tightened contract: a memory is extracted ONLY when the line is in
+ * imperative mood AND looks like a structural rule. We require:
+ *   1. The line starts with an imperative trigger
+ *      (always / never / prefer / avoid / do not / don't / use only / use this /
+ *       rule: / standard: / convention:).
+ *   2. The line is short enough to be a rule, not a paragraph (≤ 240 chars).
+ *
+ * Anything else — questions, requests, descriptions of intent — is
+ * deliberately ignored. False negatives are vastly preferable to false
+ * positives here: a missed memory is recoverable; a poisoned memory
+ * needs a manual cleanup.
+ */
+// Split into two alternations because `\b` only marks a word↔non-word
+// boundary — after a literal `:` followed by space, there's no boundary,
+// so the colon-prefix patterns need a separate match without `\b`.
+const MEMORY_IMPERATIVE_RX = /^(always|never|prefer|avoid|do not|don't|use only|use this)\b|^(rule|standard|convention)\s*:/;
+
 export function extractModelingMemories(message) {
   const text = String(message || "");
   const candidates = [];
   const lines = text.split(/\r?\n|[.;]\s+/).map(normalizeText).filter(Boolean);
   for (const line of lines) {
+    if (line.length > 240) continue;
     const lower = line.toLowerCase();
-    if (/^(always|never|prefer|use|do not|don't|avoid)\b/.test(lower)) {
-      candidates.push({ category: "user_preference", content: line });
-    } else if (/\b(naming|name|suffix|prefix|convention)\b/.test(lower)) {
+    if (!MEMORY_IMPERATIVE_RX.test(lower)) continue;
+
+    // Within the imperative subset, classify the rule into a category so
+    // downstream consumers (chat UI, system-prompt rendering) can group.
+    // Order matters: dbt-implementation hints (test / contract / schema)
+    // beat naming hints (column / convention) when both are present —
+    // "every PK column needs a unique + not_null test" is a test-coverage
+    // rule, not a naming rule.
+    if (/\b(dbt|schema\.yml|test|contract|source|exposure|metric)\b/.test(lower)) {
+      candidates.push({ category: "dbt_implementation_rule", content: line });
+    } else if (/\b(domain|subject area|bounded context)\b/.test(lower)) {
+      candidates.push({ category: "domain_decision", content: line });
+    } else if (/\b(naming|name|names?|suffix(?:es)?|prefix(?:es)?|case|column|snake|camel|pascal|kebab)\b/.test(lower)) {
+      // "convention" is intentionally NOT here — it's used as a generic
+      // sentence prefix ("Convention: customer domain owns …") far more
+      // often than as an actual naming hint, and the prefix doesn't
+      // imply the rule's category.
       candidates.push({ category: "naming_rule", content: line });
     } else if (/\b(glossary|term|definition|dictionary)\b/.test(lower)) {
       candidates.push({ category: "glossary_convention", content: line });
-    } else if (/\b(dbt|schema.yml|test|contract|source|exposure|metric)\b/.test(lower)) {
-      candidates.push({ category: "dbt_implementation_rule", content: line });
-    } else if (/\b(standard|naming convention|business rule|modeling rule|dbt rule)\b/.test(lower)) {
-      candidates.push({ category: "business_standard", content: line });
-    } else if (/\b(domain|subject area|bounded context)\b/.test(lower) && /\b(means|should|must|is)\b/.test(lower)) {
-      candidates.push({ category: "domain_decision", content: line });
+    } else {
+      candidates.push({ category: "user_preference", content: line });
     }
   }
   return candidates.slice(0, 8);
+}
+
+/**
+ * One-time selective migration for memory stores polluted by the old
+ * over-eager extractor. Drops only entries whose `content` matches the
+ * known polluted-prompt patterns from the original "Suggest with AI"
+ * button (which sent its own prompt template through `/api/ai/ask` and
+ * got every prompt persisted as a rule).
+ *
+ * Idempotent — second run is a no-op because the matched entries are
+ * already gone. Returns the cleaned memory list and the count dropped
+ * so callers can log it.
+ */
+const POLLUTED_MEMORY_PATTERNS = [
+  /^For the dbt \+ DataLex model at /i,
+  /Reply with ONLY/i,
+  /suggest a 1-2 sentence/i,
+  /^For the entity .+ in `/i,
+  /^For the field .+ on entity /i,
+];
+
+export function pruneAutoExtractedMemoryRules(memories) {
+  if (!Array.isArray(memories)) return { memories: [], droppedCount: 0 };
+  const kept = [];
+  let dropped = 0;
+  for (const m of memories) {
+    const content = String(m?.content || "");
+    if (POLLUTED_MEMORY_PATTERNS.some((rx) => rx.test(content))) {
+      dropped += 1;
+      continue;
+    }
+    kept.push(m);
+  }
+  return { memories: kept, droppedCount: dropped };
 }
 
 export function renderMemoryContext(memories = []) {
