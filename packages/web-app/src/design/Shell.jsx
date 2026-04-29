@@ -35,6 +35,7 @@ import {
 import KeyboardShortcutsPanel from "../components/panels/KeyboardShortcutsPanel";
 import AiProposalPreview from "../components/ai/AiProposalPreview";
 import { isPatchYamlProposal, proposalChangeFromYaml, proposalEditableYaml, proposalEditorTitle, proposalPatchOps } from "../components/ai/aiProposalYaml";
+import { computeValidationStatus } from "../lib/validationStatus";
 
 // Heavy panels / dialogs are split into separate chunks — they only load when
 // the user actually opens them, which keeps the initial JS bundle small.
@@ -1653,14 +1654,31 @@ export default function Shell() {
   }, [isDiagramFile, addToast]);
 
   const isEditable = !!(canEdit && canEdit());
+  const validationStatus = React.useMemo(
+    () => computeValidationStatus(activeFileContent, activeFile),
+    [activeFileContent, activeFile]
+  );
   const activeBottomTabs = React.useMemo(
     () => {
-      if (activeModelKind === "conceptual") return CONCEPTUAL_BOTTOM_TABS;
-      if (activeModelKind === "logical") return LOGICAL_BOTTOM_TABS;
-      if (activeModelKind === "physical") return PHYSICAL_BOTTOM_TABS;
-      return isEditable ? PHYSICAL_BOTTOM_TABS : VIEWER_BOTTOM_TABS;
+      const baseTabs =
+        activeModelKind === "conceptual" ? CONCEPTUAL_BOTTOM_TABS
+        : activeModelKind === "logical" ? LOGICAL_BOTTOM_TABS
+        : activeModelKind === "physical" ? PHYSICAL_BOTTOM_TABS
+        : (isEditable ? PHYSICAL_BOTTOM_TABS : VIEWER_BOTTOM_TABS);
+      if (!validationStatus.status) return baseTabs;
+      return baseTabs.map((tab) => tab.id === "validation"
+        ? {
+            ...tab,
+            status: validationStatus.status,
+            statusTitle: validationStatus.status === "red"
+              ? `${validationStatus.blockers} blocker${validationStatus.blockers === 1 ? "" : "s"}`
+              : validationStatus.status === "yellow"
+                ? `${validationStatus.warnings} warning${validationStatus.warnings === 1 ? "" : "s"}`
+                : "All checks passed",
+          }
+        : tab);
     },
-    [activeModelKind, isEditable]
+    [activeModelKind, isEditable, validationStatus]
   );
 
   React.useEffect(() => {
