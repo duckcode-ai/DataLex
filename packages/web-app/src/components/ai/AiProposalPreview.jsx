@@ -1,5 +1,6 @@
 import React from "react";
 import yaml from "js-yaml";
+import { ZoomIn, ZoomOut, Maximize2, Minimize2, RotateCcw } from "lucide-react";
 
 function cleanName(value, fallback = "Item") {
   const text = String(value || "").trim();
@@ -118,8 +119,27 @@ function relationshipSentence(relationship) {
   return `${base} Cardinality: ${cardinalityLabel(relationship.cardinality)}.`;
 }
 
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.5;
+const ZOOM_STEP = 0.2;
+
+function clampZoom(value) {
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(value * 100) / 100));
+}
+
 export default function AiProposalPreview({ change, compact = false }) {
   const preview = buildAiProposalPreviewData(change);
+  const [zoom, setZoom] = React.useState(1);
+  const [fullscreen, setFullscreen] = React.useState(false);
+  React.useEffect(() => {
+    if (!fullscreen) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") setFullscreen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen]);
   if (!preview) return null;
   const nodeWidth = compact ? 190 : 220;
   const nodeHeight = compact ? 86 : 104;
@@ -136,8 +156,12 @@ export default function AiProposalPreview({ change, compact = false }) {
   const width = Math.max(compact ? 820 : 980, ...nodes.map((node) => node.x + nodeWidth + 72));
   const height = Math.max(compact ? 430 : 520, ...nodes.map((node) => node.y + nodeHeight + 70));
 
+  const zoomIn = () => setZoom((z) => clampZoom(z + ZOOM_STEP));
+  const zoomOut = () => setZoom((z) => clampZoom(z - ZOOM_STEP));
+  const zoomReset = () => setZoom(1);
+
   return (
-    <div className={`ai-proposal-preview ${compact ? "compact" : "expanded"}`}>
+    <div className={`ai-proposal-preview ${compact ? "compact" : "expanded"} ${fullscreen ? "fullscreen" : ""}`}>
       <div className="ai-proposal-preview-head">
         <div>
           <strong>{preview.title}</strong>
@@ -150,8 +174,46 @@ export default function AiProposalPreview({ change, compact = false }) {
           <span className="status-pill tone-accent">{preview.relationships.length} relation{preview.relationships.length === 1 ? "" : "s"}</span>
         </div>
       </div>
-      <div className="ai-proposal-preview-canvas">
-        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Preview of ${preview.title}`}>
+      <div className="ai-proposal-preview-canvas-wrap">
+        <div className="ai-proposal-preview-toolbar" role="toolbar" aria-label="Diagram zoom and view controls">
+          <button type="button" onClick={zoomOut} disabled={zoom <= ZOOM_MIN} title="Zoom out" aria-label="Zoom out">
+            <ZoomOut size={13} />
+          </button>
+          <span className="ai-proposal-preview-zoom-readout" title="Current zoom level">{Math.round(zoom * 100)}%</span>
+          <button type="button" onClick={zoomIn} disabled={zoom >= ZOOM_MAX} title="Zoom in" aria-label="Zoom in">
+            <ZoomIn size={13} />
+          </button>
+          <button type="button" onClick={zoomReset} disabled={zoom === 1} title="Reset zoom to 100%" aria-label="Reset zoom">
+            <RotateCcw size={13} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setFullscreen((value) => !value)}
+            title={fullscreen ? "Exit fullscreen (Esc)" : "Maximize diagram"}
+            aria-label={fullscreen ? "Exit fullscreen" : "Maximize diagram"}
+          >
+            {fullscreen ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+          </button>
+        </div>
+        <div className="ai-proposal-preview-canvas">
+        <div
+          className="ai-proposal-preview-canvas-inner"
+          style={zoom === 1 ? undefined : {
+            width: `${width * zoom}px`,
+            height: `${height * zoom}px`,
+          }}
+        >
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          role="img"
+          aria-label={`Preview of ${preview.title}`}
+          style={zoom === 1 ? undefined : {
+            width: `${width}px`,
+            height: `${height}px`,
+            transform: `scale(${zoom})`,
+            transformOrigin: "top left",
+          }}
+        >
           <defs>
             <marker id="ai-preview-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M 0 0 L 10 5 L 0 10 z" />
@@ -186,6 +248,8 @@ export default function AiProposalPreview({ change, compact = false }) {
             </g>
           ))}
         </svg>
+        </div>
+      </div>
       </div>
       {preview.relationships.length > 0 ? (
         <div className="ai-proposal-preview-meaning">

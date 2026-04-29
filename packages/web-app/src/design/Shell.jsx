@@ -259,6 +259,74 @@ function LayerSupportPanel({ title, eyebrow, description, table, rel, relationsh
   );
 }
 
+function explanationFieldText(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value.trim();
+  try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+}
+
+function AiProposalExplanation({ proposal }) {
+  if (!proposal) return null;
+  const reviewSummary = explanationFieldText(proposal.review_summary);
+  const rationale = explanationFieldText(proposal.rationale);
+  const patchExplanation = explanationFieldText(proposal.explanation);
+  const validationImpact = explanationFieldText(proposal.validation_impact);
+  const sourceContext = Array.isArray(proposal.source_context)
+    ? proposal.source_context.filter(Boolean)
+    : (proposal.source_context ? [proposal.source_context] : []);
+  const questions = Array.isArray(proposal.questions) ? proposal.questions.filter(Boolean) : [];
+  const hasAnything = reviewSummary || rationale || patchExplanation || validationImpact || sourceContext.length > 0 || questions.length > 0;
+  if (!hasAnything) return null;
+  return (
+    <details className="ai-plan-explanation" open>
+      <summary>
+        <strong>Why this change</strong>
+        {reviewSummary && <span className="ai-plan-explanation-summary">{reviewSummary}</span>}
+      </summary>
+      <div className="ai-plan-explanation-body">
+        {rationale && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Rationale</span>
+            <p>{rationale}</p>
+          </section>
+        )}
+        {patchExplanation && patchExplanation !== rationale && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Explanation</span>
+            <p>{patchExplanation}</p>
+          </section>
+        )}
+        {validationImpact && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Validation impact</span>
+            <p>{validationImpact}</p>
+          </section>
+        )}
+        {questions.length > 0 && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">AI needs your input</span>
+            <ul>
+              {questions.map((question, index) => (
+                <li key={`q-${index}`}>{question}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {sourceContext.length > 0 && (
+          <section>
+            <span className="ai-plan-explanation-eyebrow">Source context</span>
+            <div className="ai-plan-explanation-chips">
+              {sourceContext.map((source, index) => (
+                <code key={`src-${index}`} className="ai-plan-explanation-chip">{String(source)}</code>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </details>
+  );
+}
+
 function AiPlanReviewEditor({ document, onClose }) {
   const content = String(document?.content || "");
   const proposals = Array.isArray(document?.proposals) ? document.proposals : [];
@@ -358,6 +426,7 @@ function AiPlanReviewEditor({ document, onClose }) {
             ))}
           </div>
         )}
+        {proposals.length > 0 && <AiProposalExplanation proposal={activeProposal} />}
         {proposals.length > 0 ? (
             <div className="ai-plan-review-workspace">
             {activeIsPatch ? (
