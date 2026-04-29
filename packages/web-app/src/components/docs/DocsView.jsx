@@ -647,6 +647,219 @@ function DbtShapeSections({
   );
 }
 
+/* ConceptualNarrative — renders a `kind: diagram` / conceptual model as
+ * a readable docs page rather than a fields table. Three blocks:
+ *
+ *   - Domain table-of-contents : counts of concepts per domain so a PM
+ *     can scan the file at a glance.
+ *   - Business flow            : numbered list of relationship sentences
+ *     ("Customer **places** Order.", "Order **generates** Revenue.")
+ *     using the verb populated by Phase 1C's conceptualizer.
+ *   - Per-concept paragraphs   : title + definition (editable) + meta
+ *     pills (owner, domain, terms, tags, visibility).
+ *
+ * Read-only-ish: definitions are inline-editable via EditableDescription,
+ * but nothing else mutates here — the Build tab is the authoring surface.
+ */
+function endpointEntity(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value.split(".")[0];
+  return String(value.entity || value.dataset || value.name || "");
+}
+
+function humanizeVerb(verb) {
+  return String(verb || "").replace(/_/g, " ").trim();
+}
+
+function ConceptualNarrative({
+  entities,
+  relationships,
+  onEntityDescription,
+  aiEnabled,
+  aiDisabledHint,
+  busyKey,
+  askAi,
+}) {
+  // Group concepts by domain for the TOC.
+  const byDomain = new Map();
+  for (const e of entities) {
+    const d = String(e?.domain || e?.subject_area || "Uncategorized").trim() || "Uncategorized";
+    const list = byDomain.get(d) || [];
+    list.push(e);
+    byDomain.set(d, list);
+  }
+  const domainEntries = Array.from(byDomain.entries()).sort(([a], [b]) => a.localeCompare(b));
+
+  return (
+    <>
+      {domainEntries.length > 1 && (
+        <section style={{ marginBottom: 24 }}>
+          <h2 className="dlx-docs-eyebrow" style={{ marginBottom: 10 }}>Domains in this model</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+            {domainEntries.map(([d, list]) => (
+              <a
+                key={d}
+                href={`#domain-${d.replace(/\s+/g, "_")}`}
+                style={{
+                  display: "block",
+                  padding: "10px 12px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-1)",
+                  color: "var(--text-primary)",
+                  textDecoration: "none",
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  transition: "border-color 0.15s",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{d}</div>
+                <div style={{ marginTop: 3, fontSize: 11, color: "var(--text-tertiary)" }}>
+                  {list.length} concept{list.length === 1 ? "" : "s"}
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {relationships.length > 0 && (
+        <section className="dlx-docs-card" style={{ borderColor: "color-mix(in srgb, var(--accent, #3b82f6) 35%, var(--border-default))" }}>
+          <p className="dlx-docs-eyebrow">Business flow</p>
+          <ol style={{ margin: 0, paddingLeft: 22, fontSize: 14, lineHeight: 1.7, color: "var(--text-primary)" }}>
+            {relationships.map((r, idx) => {
+              const fromName = endpointEntity(r?.from);
+              const toName = endpointEntity(r?.to);
+              const verb = humanizeVerb(r?.verb) || "is associated with";
+              if (!fromName || !toName) return null;
+              return (
+                <li key={(r?.name || idx) + ""} style={{ marginBottom: 4 }}>
+                  <strong>{fromName}</strong>{" "}
+                  <em style={{ color: "var(--accent, #3b82f6)", fontStyle: "normal", fontWeight: 600 }}>{verb}</em>{" "}
+                  <strong>{toName}</strong>.
+                  {r?.description && (
+                    <span style={{ color: "var(--text-tertiary)", fontWeight: 500 }}> — {r.description}</span>
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </section>
+      )}
+
+      {domainEntries.map(([d, list]) => (
+        <section key={d} id={`domain-${d.replace(/\s+/g, "_")}`} style={{ marginBottom: 22 }}>
+          <h2 style={{
+            fontSize: 16,
+            fontWeight: 700,
+            margin: "8px 0 12px",
+            color: "var(--text-primary)",
+            borderBottom: "1px solid var(--border-default)",
+            paddingBottom: 6,
+          }}>
+            {d} · <span style={{ fontSize: 12, color: "var(--text-tertiary)", fontWeight: 500 }}>{list.length} concept{list.length === 1 ? "" : "s"}</span>
+          </h2>
+          {list.map((ent) => {
+            const entName = String(ent?.name || ent?.entity || "");
+            if (!entName) return null;
+            const tags = Array.isArray(ent?.tags) ? ent.tags : [];
+            const terms = Array.isArray(ent?.terms) ? ent.terms : [];
+            const visibility = String(ent?.visibility || "shared").toLowerCase();
+            return (
+              <article
+                key={entName}
+                id={`concept-${entName}`}
+                className="dlx-docs-card"
+                style={{ marginBottom: 14 }}
+              >
+                <header className="dlx-docs-card-header">
+                  <h3 style={{ margin: 0, fontSize: 17, fontWeight: 700, letterSpacing: "-0.005em" }}>{entName}</h3>
+                  <span className="dlx-docs-pill" style={{ background: "rgba(59,130,246,0.10)", borderColor: "rgba(59,130,246,0.30)", color: "var(--text-primary)" }}>
+                    {ent?.type || "concept"}
+                  </span>
+                  {ent?.owner && (
+                    <span className="dlx-docs-pill"><strong style={{ opacity: 0.6 }}>owner</strong> <code>{ent.owner}</code></span>
+                  )}
+                  {visibility !== "shared" && (
+                    <span className="dlx-docs-pill" style={{ background: visibility === "internal" ? "rgba(245,158,11,0.12)" : "rgba(34,197,94,0.12)", borderColor: visibility === "internal" ? "rgba(245,158,11,0.4)" : "rgba(34,197,94,0.4)" }}>
+                      {visibility}
+                    </span>
+                  )}
+                </header>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10, marginTop: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: 14, lineHeight: 1.65 }}>
+                    <EditableDescription
+                      value={ent?.description || ""}
+                      placeholder={`Describe what ${entName} means in your business.`}
+                      onSave={onEntityDescription(entName)}
+                      ariaLabel={`${entName} definition`}
+                    />
+                  </div>
+                  {askAi && (
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0, marginTop: 4 }}>
+                      <AiActionButtons
+                        aiEnabled={aiEnabled}
+                        aiDisabledHint={aiDisabledHint}
+                        hasDescription={Boolean(ent?.description)}
+                        busyKey={busyKey}
+                        baseKey={`entity:${entName}`}
+                        size="md"
+                        onAsk={(mode) => askAi("entity", entName, mode)}
+                      />
+                    </div>
+                  )}
+                </div>
+                {(terms.length > 0 || tags.length > 0) && (
+                  <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {terms.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4 }}>
+                          Glossary
+                        </span>
+                        {terms.map((t, i) => (
+                          <code
+                            key={i}
+                            style={{
+                              fontSize: 11, padding: "1px 7px", borderRadius: 999,
+                              background: "rgba(168,85,247,0.14)", border: "1px solid rgba(168,85,247,0.35)",
+                              color: "var(--text-primary)", fontFamily: "var(--font-mono, inherit)",
+                            }}
+                          >
+                            {t}
+                          </code>
+                        ))}
+                      </div>
+                    )}
+                    {tags.length > 0 && (
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--text-tertiary)", marginRight: 4 }}>
+                          Tags
+                        </span>
+                        {tags.map((t, i) => (
+                          <code
+                            key={i}
+                            style={{
+                              fontSize: 11, padding: "1px 7px", borderRadius: 999,
+                              background: "rgba(34,197,94,0.12)", border: "1px solid rgba(34,197,94,0.35)",
+                              color: "var(--text-primary)", fontFamily: "var(--font-mono, inherit)",
+                            }}
+                          >
+                            {t}
+                          </code>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </section>
+      ))}
+    </>
+  );
+}
+
 export default function DocsView() {
   const activeFile = useWorkspaceStore((s) => s.activeFile);
   const activeFileContent = useWorkspaceStore((s) => s.activeFileContent);
@@ -798,6 +1011,19 @@ export default function DocsView() {
   const owners = Array.isArray(meta.owners) ? meta.owners : [];
   const entities = Array.isArray(doc.entities) ? doc.entities : [];
   const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
+
+  /* Conceptual-layer detection. When the active file is a conceptual
+     diagram or model the per-entity field-tables are noise (concepts
+     usually have no fields). Phase 2b's narrative renderer takes over
+     instead — concept paragraphs grouped by domain, plus a "Business
+     flow" section with verb-driven relationship sentences. The
+     existing physical / logical / dbt renderers stay unchanged. */
+  const isConceptual = (
+    String(layer || "").toLowerCase() === "conceptual" ||
+    String(doc.kind || "").toLowerCase() === "conceptual" ||
+    String(meta.kind || "").toLowerCase() === "conceptual" ||
+    entities.some((e) => String(e?.type || "").toLowerCase() === "concept")
+  );
 
   // dbt-shape sections (rendered below the DataLex entities block).
   const dbtSemanticModels = Array.isArray(doc.semantic_models) ? doc.semantic_models : [];
@@ -1049,7 +1275,8 @@ export default function DocsView() {
           )}
         </section>
 
-        {/* Mermaid ERD */}
+        {/* Mermaid ERD — useful for both narrative (conceptual) and
+            tabular (logical/physical) renderers. */}
         {entities.length > 0 && (
           <section style={{ marginBottom: 24 }}>
             <h2 style={{ fontSize: 13, fontWeight: 700, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-tertiary)" }}>
@@ -1059,8 +1286,26 @@ export default function DocsView() {
           </section>
         )}
 
-        {/* Per-entity sections */}
-        {entities.map((ent, idx) => {
+        {/* Phase 2b — narrative renderer for conceptual files. The
+            existing field-table layout below renders only when the file
+            is NOT conceptual; concepts usually have no fields, so the
+            narrative + business-flow surface fits the use case better. */}
+        {isConceptual && entities.length > 0 && (
+          <ConceptualNarrative
+            entities={entities}
+            relationships={relationships}
+            onEntityDescription={handleEntityDescription}
+            aiEnabled={aiEnabled}
+            aiDisabledHint={aiDisabledHint}
+            busyKey={aiBusyKey}
+            askAi={askAiToSuggest}
+          />
+        )}
+
+        {/* Per-entity sections (tabular field renderer) — physical /
+            logical / dbt only. Conceptual files use ConceptualNarrative
+            above instead. */}
+        {!isConceptual && entities.map((ent, idx) => {
           if (!ent || typeof ent !== "object") return null;
           const entName = String(ent.name || `Entity ${idx + 1}`);
           const fields = Array.isArray(ent.fields) ? ent.fields : [];
@@ -1192,8 +1437,10 @@ export default function DocsView() {
           />
         )}
 
-        {/* Relationships table (read-only for now) */}
-        {relationships.length > 0 && (
+        {/* Relationships table (read-only for now). Conceptual files
+            already get a narrative "Business flow" inside
+            ConceptualNarrative — don't duplicate the data here. */}
+        {!isConceptual && relationships.length > 0 && (
           <section style={{ marginBottom: 12 }}>
             <h2 style={{ fontSize: 13, fontWeight: 700, margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-tertiary)" }}>
               Relationships
