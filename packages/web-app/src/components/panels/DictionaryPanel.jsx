@@ -70,9 +70,16 @@ function EntityCard({ entity, classifications, indexes, relationships, isExpande
   const tags = entity.tags || [];
   const entityIndexes = indexes.filter((idx) => idx.entity === entity.name);
   const entityRels = relationships.filter((r) => {
-    const from = (r.from || "").split(".")[0];
-    const to = (r.to || "").split(".")[0];
-    return from === entity.name || to === entity.name;
+    // r.from / r.to can be either "Entity.field" strings (logical /
+    // physical layers) OR { entity, field } objects (conceptual layer).
+    // Without this guard the panel crashes on conceptual files with a
+    // "(r.from || '').split is not a function" TypeError.
+    const endpointEntity = (value) => {
+      if (!value) return "";
+      if (typeof value === "string") return value.split(".")[0];
+      return String(value.entity || value.dataset || value.name || "");
+    };
+    return endpointEntity(r.from) === entity.name || endpointEntity(r.to) === entity.name;
   });
 
   return (

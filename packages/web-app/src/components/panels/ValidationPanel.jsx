@@ -991,16 +991,16 @@ export default function ValidationPanel() {
         title="dbt Readiness"
         count={readinessFindings.length}
         icon={<Gauge size={11} />}
-        description="Repo-level dbt/DataLex review for metadata, tests, governance, import health, and enterprise modeling readiness."
+        description="The same CI gate the GitHub Action enforces — metadata, tests, governance, import health, enterprise modeling readiness. Click Rerun (or the 'Run CI readiness gate' button in Docs) to refresh the score."
         action={
           <button
             type="button"
             className="panel-btn"
             onClick={handleRerunReadiness}
             disabled={dbtReadinessLoading}
-            title="Rerun readiness review for the active file"
+            title="Re-runs the dbt readiness gate for the active file. Same gate as 'Run CI readiness gate' in the Docs view, but scoped to this file."
           >
-            <Wand2 size={11} /> {dbtReadinessLoading ? "Reviewing..." : "Rerun"}
+            <Wand2 size={11} /> {dbtReadinessLoading ? "Reviewing..." : "Rerun gate"}
           </button>
         }
       >
