@@ -7,6 +7,46 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-04-30
+
+Minor release — picks up the roadmap after the v1.7.x polish pass.
+**Phase 3 — Capability Map view**: a new top-tab that renders the
+active YAML doc's entities as a 2-level boxes-in-boxes hierarchy
+(Domain → Subject area → Concept), replacing the LeanIX /
+Avolution use case for a YAML-first crowd.
+
+### Added
+
+- **`Capabilities` top-tab** (peer of Diagram / Docs / Table /
+  Views / Enums) registered in `VALID_SHELL_VIEW_MODES` and the
+  `VIEW_MODES` strip in `Chrome.jsx`.
+- **`design/views/CapabilityMap.jsx`** — new view (270 LOC). Top
+  of page shows totals (N domains · N subject areas · N concepts).
+  Real-time search filters concepts by name, owner, tag, subject
+  area, or domain. Concept chips are clickable: click drills into
+  Diagram view-mode with that concept selected and the Build panel
+  opened so the user lands on the Phase 1A inline-editable Selected
+  Concept block.
+- **Visibility tinting** on concept chips: `internal` → orange-ish
+  background, `public` → green tint, `shared` → default. PII
+  concepts visually stand out from the public hierarchy.
+- **`design/views/capabilityHierarchy.js`** — pure builder function
+  extracted so it's testable without React. Domain falls through:
+  `entity.domain → doc.domain → doc.model.domain → "Uncategorized"`.
+- **8 unit tests** at `tests/capabilityHierarchy.test.js` covering
+  the domain fallback, subject-area fallback, malformed-entry
+  resilience, and alphabetical sort. Web-app suite: 115 → 123 pass.
+
+### Out of scope (deferred)
+
+- RACI matrix view (different mental model — process not
+  capability; scoped for a later phase).
+- Capability authoring (edit-in-place from the map). v1 is
+  read-only; the Build panel remains the canonical authoring
+  surface.
+
+PR: [#99](https://github.com/duckcode-ai/DataLex/pull/99).
+
 ## [1.7.3] - 2026-04-30
 
 Patch release. The AI fix-agent now actually has rule-by-rule recipes
