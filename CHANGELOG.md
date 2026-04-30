@@ -7,6 +7,41 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-04-30
+
+Patch release — Roadmap Phase 4a: EventStorming sticky-note shapes.
+
+### Added
+
+- **Five new entity types** registered in `ALLOWED_ENTITY_TYPES`,
+  vocabulary borrowed verbatim from the Brandolini canon: `event`,
+  `command`, `actor`, `policy`, `aggregate`. `INVALID_ENTITY_TYPE`
+  no longer fires for these.
+- **Canonical EventStorming palette** in
+  `EntityNode.jsx → TYPE_COLORS`:
+    event     → orange     (past tense — "Order Placed")
+    command   → blue       (imperative — "Place Order")
+    actor     → yellow     (person, role, external system)
+    policy    → pink       (reactive rule that may issue commands)
+    aggregate → pale-yellow (consistency boundary holding state)
+- **Build panel** type picker on the conceptual layer now lists the
+  EventStorming family alongside `concept`, with one-line
+  descriptions in the dropdown. Logical and physical layers stay
+  focused on data shape.
+- **2 new tests** in `modelQuality.test.js` — positive (accepts new
+  types) and negative (still rejects unknown types so a missed
+  registration would be caught).
+
+### Out of scope (Phase 4b — separate PR)
+
+- Swim-lane layout (`flow_mode: true` on diagrams).
+- Numbered narrative for flow files in DocsView.
+- AI conceptualizer extension to propose event/command/actor types
+  from staging-layer behavior (needs deeper read than current
+  FK-walk supports).
+
+PR: [#100](https://github.com/duckcode-ai/DataLex/pull/100).
+
 ## [1.8.0] - 2026-04-30
 
 Minor release — picks up the roadmap after the v1.7.x polish pass.
