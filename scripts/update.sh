@@ -15,8 +15,10 @@
 set -euo pipefail
 
 REPO_URL="https://github.com/duckcode-ai/DataLex.git"
-SUBDIR="packages/cli"
-PIP_FROM_MAIN="git+${REPO_URL}#subdirectory=${SUBDIR}"
+# Top-level pyproject.toml is what defines `datalex-cli`; there is no
+# `packages/cli/pyproject.toml`. So `pip install git+REPO_URL` (no
+# `#subdirectory`) is what we want.
+PIP_FROM_MAIN="git+${REPO_URL}"
 
 force_source=0
 for arg in "$@"; do
