@@ -1,0 +1,100 @@
+{
+  "project": "midsize_shop",
+  "dialect": "duckdb",
+  "models": [
+    {
+      "name": "dim_customers",
+      "description": "Customer dimension, one row per customer.",
+      "schema": "marts",
+      "materialization": "table",
+      "tags": ["mart"],
+      "meta": {},
+      "columns": [
+        {
+          "name": "customer_id",
+          "type": "integer",
+          "description": "Primary key for the customer.",
+          "constraints": ["not_null", "unique"]
+        },
+        {
+          "name": "customer_email",
+          "type": "varchar",
+          "description": "Primary email used for receipts.",
+          "constraints": ["not_null"]
+        }
+      ],
+      "refs": []
+    },
+    {
+      "name": "fct_orders",
+      "description": "Order fact table, one row per completed order.",
+      "schema": "marts",
+      "materialization": "table",
+      "tags": ["mart"],
+      "meta": {},
+      "columns": [
+        {
+          "name": "order_id",
+          "type": "integer",
+          "description": "Primary key for the order.",
+          "constraints": ["not_null", "unique"]
+        },
+        {
+          "name": "customer_id",
+          "type": "integer",
+          "description": "Foreign key to the customer who placed the order.",
+          "constraints": ["not_null"]
+        },
+        {
+          "name": "ordered_at",
+          "type": "timestamp",
+          "description": "UTC timestamp the order was placed.",
+          "constraints": ["not_null"]
+        },
+        {
+          "name": "order_total",
+          "type": "decimal(12,2)",
+          "description": "Order total in USD, inclusive of tax and discounts.",
+          "constraints": []
+        }
+      ],
+      "refs": ["dim_customers"]
+    },
+    {
+      "name": "order_items",
+      "description": "Line items, one row per item per order.",
+      "schema": "marts",
+      "materialization": "table",
+      "tags": ["mart"],
+      "meta": {},
+      "columns": [
+        {
+          "name": "order_item_id",
+          "type": "integer",
+          "description": "Primary key for the order line item.",
+          "constraints": ["not_null", "unique"]
+        },
+        {
+          "name": "order_id",
+          "type": "integer",
+          "description": "Foreign key to the parent order.",
+          "constraints": ["not_null"]
+        },
+        {
+          "name": "product_id",
+          "type": "integer",
+          "description": "Foreign key to the product.",
+          "constraints": ["not_null"]
+        },
+        {
+          "name": "quantity",
+          "type": "integer",
+          "description": "Number of units ordered.",
+          "constraints": ["not_null"]
+        }
+      ],
+      "refs": ["fct_orders"]
+    }
+  ],
+  "sources": []
+}

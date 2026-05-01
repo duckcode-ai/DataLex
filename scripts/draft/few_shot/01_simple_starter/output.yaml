@@ -1,0 +1,35 @@
+```yaml
+model:
+  name: commerce
+  version: 1.0.0
+  domain: commerce
+  owners:
+    - data@example.com
+  state: draft
+
+entities:
+  - name: Customer
+    type: table
+    description: Customer dimension table, one row per customer.
+    tags: [GOLD, MART, PII]
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Primary key for the customer.
+      - name: customer_name
+        type: string
+        description: Customer display name.
+      - name: customer_email
+        type: string
+        nullable: false
+        description: Primary email used for receipts and login.
+      - name: first_ordered_at
+        type: timestamp
+        description: Timestamp of the customer's first order.
+
+governance:
+  classification:
+    Customer.customer_email: PII
+```

@@ -1,0 +1,42 @@
+{
+  "project": "tiny_shop",
+  "dialect": "duckdb",
+  "models": [
+    {
+      "name": "dim_customers",
+      "description": "Customer dimension table, one row per customer.",
+      "schema": "marts",
+      "materialization": "table",
+      "tags": ["mart"],
+      "meta": {},
+      "columns": [
+        {
+          "name": "customer_id",
+          "type": "integer",
+          "description": "Primary key for the customer.",
+          "constraints": ["not_null", "unique"]
+        },
+        {
+          "name": "customer_name",
+          "type": "varchar",
+          "description": "Customer display name.",
+          "constraints": []
+        },
+        {
+          "name": "customer_email",
+          "type": "varchar",
+          "description": "Primary email used for receipts and login.",
+          "constraints": ["not_null"]
+        },
+        {
+          "name": "first_ordered_at",
+          "type": "timestamp",
+          "description": "Timestamp of the customer's first order.",
+          "constraints": []
+        }
+      ],
+      "refs": []
+    }
+  ],
+  "sources": []
+}

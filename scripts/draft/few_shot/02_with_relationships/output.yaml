@@ -1,0 +1,90 @@
+```yaml
+model:
+  name: commerce
+  version: 1.0.0
+  domain: commerce
+  owners:
+    - data@example.com
+  state: draft
+
+entities:
+  - name: Customer
+    type: table
+    description: Customer dimension, one row per customer.
+    tags: [GOLD, MART, PII]
+    fields:
+      - name: customer_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Primary key for the customer.
+      - name: customer_email
+        type: string
+        nullable: false
+        description: Primary email used for receipts.
+
+  - name: Order
+    type: table
+    description: Order fact table, one row per completed order.
+    tags: [GOLD, MART]
+    fields:
+      - name: order_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Primary key for the order.
+      - name: customer_id
+        type: integer
+        nullable: false
+        description: Foreign key to the customer who placed the order.
+      - name: ordered_at
+        type: timestamp
+        nullable: false
+        description: UTC timestamp the order was placed.
+      - name: order_total
+        type: decimal(12,2)
+        description: Order total in USD, inclusive of tax and discounts.
+
+  - name: OrderItem
+    type: table
+    description: Line items, one row per item per order.
+    tags: [GOLD, MART]
+    fields:
+      - name: order_item_id
+        type: integer
+        primary_key: true
+        nullable: false
+        description: Primary key for the order line item.
+      - name: order_id
+        type: integer
+        nullable: false
+        description: Foreign key to the parent order.
+      - name: product_id
+        type: integer
+        nullable: false
+        description: Foreign key to the product.
+      - name: quantity
+        type: integer
+        nullable: false
+        description: Number of units ordered.
+
+relationships:
+  - name: customer_orders
+    from: Customer.customer_id
+    to: Order.customer_id
+    cardinality: one_to_many
+  - name: order_items
+    from: Order.order_id
+    to: OrderItem.order_id
+    cardinality: one_to_many
+
+governance:
+  classification:
+    Customer.customer_email: PII
+
+rules:
+  - name: order_total_non_negative
+    target: Order.order_total
+    expression: "value >= 0"
+    severity: error
+```
