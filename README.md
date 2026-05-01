@@ -71,7 +71,7 @@ In the UI, use `/workspace` as the dbt repository path. Full Docker
 notes (env vars, troubleshooting) live in
 [Install → Docker Fallback](#docker-fallback-optional).
 
-### When the app opens — the Onboarding Journey (1.4.1)
+### When the app opens — the Onboarding Journey
 
 A **480px right-rail panel** slides in on first launch and walks you
 through six concrete actions. Each step has a primary button that opens
@@ -89,6 +89,20 @@ Progress is saved — close the panel anytime and resume where you left off.
 
 Replay anytime via **Settings → Replay onboarding**. The deeper 13-step
 spotlight tour is still there under **Settings → Deep feature tour**.
+
+### What's new in 1.8
+
+Three release threads landed across `1.8.0` → `1.8.2`. Each is on by
+default; no config flags or migrations needed.
+
+| Phase | Feature | Where to find it |
+|---|---|---|
+| 3 (1.8.0) | **Capability Map** top-tab — boxes-in-boxes hierarchy of `Domain → Subject area → Concept` for the active model | `Capabilities` tab in the workspace, peer of Diagram / Docs / Table |
+| 4a (1.8.1) | **EventStorming entity types** — five new types (`event`, `command`, `actor`, `policy`, `aggregate`) with the canonical Brandolini sticky-note palette on the canvas | Build panel type picker on conceptual diagrams |
+| 4b (1.8.2) | **EventStorming flow narrative** in DocsView — numbered story grouped Actors → Commands → Aggregates → Events → Policies, sticky-note swatches matching the canvas | DocsView, between the ER diagram and per-entity tables (auto-hides for plain ER models) |
+| 5a (1.8.2) | **Markdown export** from DocsView — portable `.md` with mermaid blocks embedded; renders inline on GitHub, GitLab, Confluence-with-mermaid, Notion, and inside any LLM context window | `Export Markdown` button next to `Export OSI` in DocsView's header |
+
+Walked through end-to-end in the [jaffle-shop tutorial](https://github.com/duckcode-ai/jaffle-shop-DataLex). Full release notes in [CHANGELOG.md](CHANGELOG.md).
 
 **Point it at your dbt repo:**
 
