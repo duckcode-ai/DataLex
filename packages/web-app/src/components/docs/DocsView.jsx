@@ -39,6 +39,7 @@ import {
 import EditableDescription from "./EditableDescription";
 import MermaidERD from "./MermaidERD";
 import { buildEventStormingFlow } from "../../design/views/eventStormingFlow";
+import { buildDocsMarkdown } from "../../design/views/docsToMarkdown";
 
 /* EventStorming sticky-note palette for the docs narrative. The canvas
  * (EntityNode.jsx, Phase 4a) renders the same five types in the same
@@ -1164,6 +1165,35 @@ export default function DocsView() {
     writeIfChanged(patchField(activeFileContent || "", entityName, fieldName, { description: text }));
   };
 
+  /* Phase 5a — Markdown export. Generates a portable .md from the
+     parsed doc and triggers a browser download. Filename is derived
+     from the active file's basename so re-exports overwrite predictably
+     instead of piling up "model (1).md", "model (2).md" in Downloads. */
+  const handleExportMarkdown = () => {
+    try {
+      const md = buildDocsMarkdown(doc);
+      const rawName = String(activeFile?.path || activeFile?.fullPath || activeFile?.name || meta?.name || "model");
+      const base = rawName.split("/").pop().replace(/\.(ya?ml|json)$/i, "");
+      const safe = base.replace(/[^A-Za-z0-9._-]+/g, "_") || "model";
+      const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${safe}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Revoke after a tick so Safari has a chance to follow the link.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      // Best-effort — surfacing the error inline would crowd the
+      // header. The console message is enough; a malformed YAML buffer
+      // is the only realistic failure path and the editor already
+      // surfaces those.
+      console.error("Markdown export failed:", err);
+    }
+  };
+
   const renderEntityReadiness = (entityName) => {
     if (!fileReview || !Array.isArray(fileReview.findings)) return null;
     // The readiness review's `findings` are file-scoped; filter by entity if present.
@@ -1320,6 +1350,34 @@ export default function DocsView() {
               >
                 <Download size={12} /> Export OSI
               </a>
+              {/* Phase 5a — Markdown export. Renders the same content
+                  the docs page shows (header, ERD, EventStorming flow,
+                  per-entity tables) as a portable .md. Mermaid blocks
+                  travel inside the markdown, so the diagram still
+                  renders on GitHub, GitLab, Confluence-with-mermaid,
+                  Notion, and any LLM context window. */}
+              <button
+                type="button"
+                onClick={handleExportMarkdown}
+                disabled={!entities.length && !meta?.description}
+                title="Download this docs page as a portable Markdown file. Works in GitHub, Confluence, Notion, and LLM context windows."
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "7px 13px",
+                  borderRadius: 8,
+                  border: "1px solid var(--border-default)",
+                  background: "var(--bg-2)",
+                  color: "var(--text-secondary)",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: (entities.length || meta?.description) ? "pointer" : "not-allowed",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Download size={12} /> Export Markdown
+              </button>
             </div>
           </div>
           {/* Meta pills row */}
