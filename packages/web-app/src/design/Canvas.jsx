@@ -23,8 +23,9 @@ const DEFAULT_WORLD_HEIGHT = 1600;
 const WORLD_PADDING = 180;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.25;
-const CONCEPT_CARD_WIDTH = 220;
-const CONCEPT_CARD_HEIGHT = 128;
+const CONCEPT_CARD_WIDTH = 300;
+const CONCEPT_CARD_MAX_WIDTH = 380;
+const CONCEPT_CARD_HEIGHT = 136;
 
 function isConceptTable(table, modelKind = "") {
   return String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual"
@@ -34,7 +35,7 @@ function isConceptTable(table, modelKind = "") {
 function conceptualCardWidth(table) {
   const storedWidth = Number(table?.width);
   if (!Number.isFinite(storedWidth)) return CONCEPT_CARD_WIDTH;
-  return Math.min(Math.max(storedWidth, 190), CONCEPT_CARD_WIDTH);
+  return Math.min(Math.max(storedWidth, 240), CONCEPT_CARD_MAX_WIDTH);
 }
 
 function estimateTableBounds(table, modelKind = "") {
@@ -725,6 +726,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [isPanning, setIsPanning] = React.useState(false);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
+  const activeFileKey = activeFile?.fullPath || activeFile?.path || activeFile?.name || "";
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
   const logicalMode = String(modelKind || "").toLowerCase() === "logical";
   const physicalMode = String(modelKind || "").toLowerCase() === "physical";
@@ -924,6 +926,22 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       syncViewport();
     });
   }, [onFit, syncViewport, tables.length, world]);
+
+  const fitRef = React.useRef(handleFit);
+  React.useEffect(() => {
+    fitRef.current = handleFit;
+  }, [handleFit]);
+  const autoFitKeyRef = React.useRef("");
+  React.useEffect(() => {
+    if (!activeFileKey || !tables.length) return;
+    const nextKey = `${activeFileKey}:${tables.length}`;
+    if (autoFitKeyRef.current === nextKey) return;
+    autoFitKeyRef.current = nextKey;
+    const timer = window.setTimeout(() => {
+      fitRef.current?.();
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [activeFileKey, tables.length]);
 
   const handleAutoLayoutClick = React.useCallback(async () => {
     if (!onAutoLayout) return;

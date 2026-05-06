@@ -781,6 +781,7 @@ export default function Shell() {
   const setGraph = useDiagramStore((s) => s.setGraph);
   const selectDiagramEntity = useDiagramStore((s) => s.selectEntity);
   const clearDiagramSelection = useDiagramStore((s) => s.clearSelection);
+  const setActiveSchemaFilter = useDiagramStore((s) => s.setActiveSchemaFilter);
 
   /* ── Keyboard shortcuts (match legacy App.jsx behavior) ────────── */
   const [showShortcuts, setShowShortcuts] = useState(false);
@@ -1113,15 +1114,45 @@ export default function Shell() {
     } catch (_e) { return {}; }
   }, [layoutKey]);
 
+  const normalizeCanvasPositions = React.useCallback((items) => {
+    if (!Array.isArray(items) || items.length === 0) return [];
+    const xs = items.map((table) => Number(table?.x)).filter(Number.isFinite);
+    const ys = items.map((table) => Number(table?.y)).filter(Number.isFinite);
+    if (xs.length === 0 || ys.length === 0) return items;
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const padX = 120;
+    const padY = 120;
+    const dx = minX < padX ? padX - minX : 0;
+    const dy = minY < padY ? padY - minY : 0;
+    if (!dx && !dy) return items;
+    return items.map((table) => ({
+      ...table,
+      x: Math.round((Number(table?.x) || 0) + dx),
+      y: Math.round((Number(table?.y) || 0) + dy),
+    }));
+  }, []);
+
   /* ── Tables state (local copy so drag-move works + layout merge) ─ */
   const [tables, setTables] = React.useState(() => {
     const stored = layoutKey ? loadStoredLayout() : {};
-    return schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+    const merged = schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+    return Object.keys(stored).length > 0 ? merged : normalizeCanvasPositions(merged);
   });
   React.useEffect(() => {
     const stored = loadStoredLayout();
-    setTables(schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t)));
-  }, [schema, loadStoredLayout]);
+    const merged = schema.tables.map((t) => (stored[t.id] ? { ...t, ...stored[t.id] } : t));
+    setTables(Object.keys(stored).length > 0 ? merged : normalizeCanvasPositions(merged));
+  }, [schema, loadStoredLayout, normalizeCanvasPositions]);
+
+  const tablesRef = React.useRef(tables);
+  React.useEffect(() => {
+    tablesRef.current = tables;
+  }, [tables]);
+
+  React.useEffect(() => {
+    setActiveSchemaFilter(null);
+  }, [activeFile?.fullPath, setActiveSchemaFilter]);
 
   // Debounced write of positions back to localStorage whenever tables move.
   const saveLayoutTimer = React.useRef(null);
@@ -1560,7 +1591,7 @@ export default function Shell() {
    * synchronously on drag end; the mutate helper is ~microseconds on
    * jaffle-scale YAML. */
   const handleTableMoveEnd = React.useCallback((tableId) => {
-    const t = tables.find((x) => x.id === tableId);
+    const t = tablesRef.current.find((x) => x.id === tableId);
     if (!t) return;
     const s = useWorkspaceStore.getState();
     if (!s.activeFileContent) return;
@@ -1581,7 +1612,7 @@ export default function Shell() {
     if (next && next !== s.activeFileContent) {
       s.updateContent(next);
     }
-  }, [tables]);
+  }, []);
 
   const handleStartLeftResize = React.useCallback((event) => {
     event.preventDefault();
