@@ -22,8 +22,11 @@ export default function SubjectAreaGroup({ id, data }) {
         type="button"
         onClick={handleToggle}
         onDoubleClick={handleToggle}
-        className="absolute top-2 left-3 flex items-center gap-1.5 px-2 py-1 rounded-md hover:ring-1 hover:ring-border-primary transition"
-        style={{ backgroundColor: color.bg || "rgba(100,116,139,0.08)" }}
+        className="absolute -top-1 left-4 flex items-center gap-1.5 rounded-full border px-2.5 py-1 shadow-sm transition hover:ring-1 hover:ring-border-primary"
+        style={{
+          backgroundColor: "var(--bg-2, #fff)",
+          borderColor: color.border || "rgba(100,116,139,0.2)",
+        }}
         title={collapsed ? "Expand subject area" : "Collapse subject area"}
       >
         {collapsed ? (
