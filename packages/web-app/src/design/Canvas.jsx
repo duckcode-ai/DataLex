@@ -902,7 +902,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
   // view. The legacy canvas used to only scroll to the top-left; now it
   // computes a real zoom-to-fit and centers the model in the viewport.
-  const handleFit = React.useCallback(() => {
+  const handleFit = React.useCallback((options = {}) => {
+    const { behavior = "smooth" } = options;
     if (onFit) { onFit(); return; }
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -922,7 +923,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     window.requestAnimationFrame(() => {
       const left = Math.max(0, (world.minX - padding) * fitZoom - Math.max(0, viewport.clientWidth - rawWidth * fitZoom) / 2);
       const top = Math.max(0, (world.minY - padding) * fitZoom - Math.max(0, viewport.clientHeight - rawHeight * fitZoom) / 2);
-      viewport.scrollTo({ left, top, behavior: "smooth" });
+      viewport.scrollTo({ left, top, behavior });
       syncViewport();
     });
   }, [onFit, syncViewport, tables.length, world]);
@@ -934,14 +935,37 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const autoFitKeyRef = React.useRef("");
   React.useEffect(() => {
     if (!activeFileKey || !tables.length) return;
-    const nextKey = `${activeFileKey}:${tables.length}`;
+    const nextKey = [
+      activeFileKey,
+      modelKind,
+      tables.length,
+      relationships.length,
+      Math.round(world.minX),
+      Math.round(world.minY),
+      Math.round(world.maxX),
+      Math.round(world.maxY),
+    ].join(":");
     if (autoFitKeyRef.current === nextKey) return;
     autoFitKeyRef.current = nextKey;
-    const timer = window.setTimeout(() => {
-      fitRef.current?.();
-    }, 80);
-    return () => window.clearTimeout(timer);
-  }, [activeFileKey, tables.length]);
+    let cancelled = false;
+    const runFit = () => {
+      if (cancelled) return;
+      fitRef.current?.({ behavior: "auto" });
+    };
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(runFit);
+    });
+    const timers = [
+      window.setTimeout(runFit, 100),
+      window.setTimeout(runFit, 300),
+      window.setTimeout(runFit, 700),
+    ];
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [activeFileKey, modelKind, relationships.length, tables.length, world]);
 
   const handleAutoLayoutClick = React.useCallback(async () => {
     if (!onAutoLayout) return;
