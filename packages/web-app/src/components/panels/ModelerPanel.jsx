@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug, X as XIcon, Eye, EyeOff, BookOpen } from "lucide-react";
+import { Boxes, ArrowRightLeft, Shapes, Layers3, Wand2, Plus, Info, KeyRound, Database, Braces, FileCode2, Plug, X as XIcon, Eye, EyeOff, BookOpen, ShieldCheck, ClipboardCheck, GitPullRequest, CheckCircle2, AlertTriangle } from "lucide-react";
 import yaml from "js-yaml";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import useDiagramStore from "../../stores/diagramStore";
@@ -79,6 +79,134 @@ const VISIBILITY_OPTIONS = [
   { value: "shared",   label: "Shared",   hint: "Visible across teams. Included in OSI export by default." },
   { value: "public",   label: "Public",   hint: "Anyone in the org. Always included in OSI export." },
 ];
+
+function slugify(value, fallback = "artifact") {
+  return String(value || fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    || fallback;
+}
+
+function titleFromContractPath(path = "") {
+  const file = String(path || "").split("/").pop() || "contract";
+  return file
+    .replace(/\.contract\.ya?ml$/i, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+
+function isContractPath(file = {}) {
+  const path = String(file.path || file.fullPath || file.name || "");
+  return /\.contract\.ya?ml$/i.test(path) || /\/contracts?\//i.test(path);
+}
+
+function readinessTone(summary) {
+  if (!summary) return { tone: "neutral", label: "Not run", color: "var(--text-tertiary)" };
+  if (Number(summary.red || 0) > 0 || Number(summary.errors || 0) > 0) return { tone: "error", label: "Blockers", color: "#ef4444" };
+  if (Number(summary.yellow || 0) > 0 || Number(summary.warnings || 0) > 0) return { tone: "warning", label: "Warnings", color: "#f59e0b" };
+  return { tone: "success", label: "Ready", color: "#10b981" };
+}
+
+function StandardsGateSummary({ review, loading, onRun, onOpenValidation }) {
+  const summary = review?.summary || null;
+  const tone = readinessTone(summary);
+  const score = Number.isFinite(Number(summary?.score)) ? Number(summary.score) : null;
+  const blockerCount = Number(summary?.errors || 0) + Number(summary?.red || 0);
+  const warningCount = Number(summary?.warnings || 0) + Number(summary?.yellow || 0);
+
+  return (
+    <PanelSection title="Standards Gate" icon={<ShieldCheck size={11} />}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 0.9fr) minmax(0, 1.4fr) auto", gap: 10, alignItems: "stretch" }}>
+        <div style={{ border: `1px solid ${tone.color}`, borderRadius: 10, padding: 10, background: "var(--bg-1)", display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: tone.color }}>
+            {tone.tone === "success" ? <CheckCircle2 size={13} /> : tone.tone === "error" ? <AlertTriangle size={13} /> : <ClipboardCheck size={13} />}
+            {tone.label}
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 800, lineHeight: 1, color: "var(--text-primary)" }}>
+            {score == null ? "--" : `${score}%`}
+          </div>
+          <div style={{ fontSize: 10.5, color: "var(--text-tertiary)" }}>
+            {summary ? `${summary.total_files || review?.files?.length || 0} files reviewed` : "Run once after import"}
+          </div>
+        </div>
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 10, background: "var(--bg-1)", display: "grid", gap: 6 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>What to fix before DQL certification</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            <span className="panel-chip" style={{ borderColor: blockerCount ? "#ef4444" : "var(--border-default)", color: blockerCount ? "#ef4444" : "var(--text-secondary)" }}>{blockerCount} blockers</span>
+            <span className="panel-chip" style={{ borderColor: warningCount ? "#f59e0b" : "var(--border-default)", color: warningCount ? "#f59e0b" : "var(--text-secondary)" }}>{warningCount} warnings</span>
+            <span className="panel-chip">{Number(summary?.findings || 0)} findings</span>
+          </div>
+          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>
+            Enforce owners, descriptions, data types, tests, contracts, and lineage before this model becomes a certified analytics source.
+          </div>
+        </div>
+        <div style={{ display: "grid", gap: 6, alignContent: "center" }}>
+          <button type="button" className="panel-btn primary" onClick={onOpenValidation}>
+            <ClipboardCheck size={11} /> Review
+          </button>
+          <button type="button" className="panel-btn" onClick={onRun} disabled={loading}>
+            <Wand2 size={11} /> {loading ? "Running..." : "Run gate"}
+          </button>
+        </div>
+      </div>
+    </PanelSection>
+  );
+}
+
+function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract }) {
+  const selectedSlug = slugify(selectedEntity?.name || "");
+  const matching = selectedSlug
+    ? contracts.filter((contract) => slugify(contract.name).includes(selectedSlug) || slugify(contract.path).includes(selectedSlug))
+    : [];
+  return (
+    <PanelSection
+      title="Contracts"
+      icon={<ShieldCheck size={11} />}
+      action={
+        <button type="button" className="panel-btn primary" disabled={!canEdit || !selectedEntity} onClick={onCreateContract}>
+          <Plus size={11} /> Create from selected
+        </button>
+      }
+    >
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 0.9fr)", gap: 10 }}>
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 10, background: "var(--bg-1)", display: "grid", gap: 7 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+            <GitPullRequest size={13} style={{ color: "var(--accent)" }} />
+            <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
+              Contract is the rule DQL must satisfy
+            </div>
+          </div>
+          <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>
+            A certified block must bind to one contract, query an accepted source, pass validation, and carry lineage. Conceptual modeling creates the meaning; the contract turns it into an enforceable rule.
+          </div>
+          {selectedEntity && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <span className="panel-chip">Selected: {selectedEntity.logical_name || selectedEntity.name}</span>
+              <span className="panel-chip">{matching.length ? `${matching.length} matching contract${matching.length === 1 ? "" : "s"}` : "No matching contract yet"}</span>
+            </div>
+          )}
+        </div>
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 10, background: "var(--bg-1)", minHeight: 96 }}>
+          {contracts.length ? (
+            <div style={{ display: "grid", gap: 6, maxHeight: 160, overflow: "auto" }}>
+              {contracts.slice(0, 8).map((contract) => (
+                <div key={contract.path} style={{ display: "grid", gap: 2, borderBottom: "1px solid var(--border-subtle)", paddingBottom: 6 }}>
+                  <div style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-primary)" }}>{contract.name}</div>
+                  <code style={{ fontSize: 10, color: "var(--text-tertiary)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{contract.path}</code>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <PanelEmpty icon={ShieldCheck} title="No contracts yet" description="Select a business concept, then create the first DataLex contract." />
+          )}
+        </div>
+      </div>
+    </PanelSection>
+  );
+}
 
 /* InlineField — click-to-edit single-line text input for a Build-panel
    property card. Mirrors EditableDescription's commit-on-blur /
@@ -421,7 +549,16 @@ function PropertyCard({ label, hint, fullWidth = false, children }) {
 }
 
 export default function ModelerPanel() {
-  const { activeFile, activeFileContent, updateContent, createNewFile, projectFiles } = useWorkspaceStore();
+  const {
+    activeFile,
+    activeFileContent,
+    updateContent,
+    createNewFile,
+    projectFiles,
+    dbtReadinessReview,
+    dbtReadinessLoading,
+    runDbtReadinessReview,
+  } = useWorkspaceStore();
   const {
     model,
     selectedEntity,
@@ -442,6 +579,19 @@ export default function ModelerPanel() {
   const entities = Array.isArray(model?.entities) ? model.entities : [];
   const subjectAreas = Array.isArray(model?.subject_areas) ? model.subject_areas : [];
   const entityOptions = useMemo(() => allowedTypes(activeLayer), [activeLayer]);
+  const contracts = useMemo(() => (
+    (projectFiles || [])
+      .filter(isContractPath)
+      .map((file) => {
+        const path = String(file.path || file.fullPath || file.name || "");
+        return {
+          name: titleFromContractPath(path),
+          path,
+          fullPath: file.fullPath || path,
+        };
+      })
+      .sort((a, b) => a.path.localeCompare(b.path))
+  ), [projectFiles]);
 
   const [entityType, setEntityType] = useState(defaultEntityType(modelingViewMode, modelKind));
   const [entityName, setEntityName] = useState("");
@@ -508,6 +658,63 @@ export default function ModelerPanel() {
   const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeFile?.name || activeFile?.path || "");
   const hasWorkspaceFiles = (projectFiles || []).length > 0;
 
+  const openValidationGate = () => {
+    setBottomPanelTab("validation");
+  };
+
+  const handleRunStandardsGate = async () => {
+    try {
+      await runDbtReadinessReview?.({ scope: "all" });
+      setBottomPanelTab("validation");
+      addToast?.({ type: "success", message: "Standards gate refreshed." });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Could not run standards gate." });
+    }
+  };
+
+  const handleCreateContractFromConcept = async () => {
+    if (!selectedEntity) {
+      addToast?.({ type: "error", message: "Select a concept before creating a contract." });
+      return;
+    }
+    const contractDomain = slugify(selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core");
+    const contractId = slugify(selectedEntity.name || selectedEntity.logical_name || "contract");
+    const contractDoc = {
+      kind: "datalex_contract",
+      id: contractId,
+      domain: selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core",
+      owner: selectedEntity.owner || "",
+      business_definition: selectedEntity.description || `Define the governed business meaning for ${selectedEntity.logical_name || selectedEntity.name}.`,
+      grain: "",
+      accepted_sources: [],
+      metrics: [],
+      dimensions: Array.isArray(selectedEntity.terms) ? selectedEntity.terms : [],
+      required_tests: ["not_null"],
+      certification_policy: {
+        required_approvals: 1,
+        reviewers: selectedEntity.owner ? [selectedEntity.owner] : [],
+        allow_self_approval: false,
+      },
+      lineage: {
+        conceptual_entity: selectedEntity.name,
+        logical_entities: [],
+        physical_models: [],
+      },
+      status: "draft",
+    };
+    const path = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+    if (contracts.some((contract) => contract.path === path || contract.fullPath === path)) {
+      addToast?.({ type: "info", message: "A contract for this concept already exists." });
+      return;
+    }
+    try {
+      await createNewFile(path, yaml.dump(contractDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
+      addToast?.({ type: "success", message: `Created contract ${contractId}. Fill accepted sources before DQL certification.` });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Could not create contract." });
+    }
+  };
+
   /* handleCreateEntity used to live below all the layer-specific
      returns; moved up here so the conceptual quick-add form (which
      calls it from its onSubmit) doesn't hit the temporal dead zone. */
@@ -572,12 +779,19 @@ export default function ModelerPanel() {
         title="Business Model"
         subtitle={`${entities.length} ${entities.length === 1 ? "concept" : "concepts"} · ${relationshipCount} relationships`}
       >
+        <StandardsGateSummary
+          review={dbtReadinessReview}
+          loading={dbtReadinessLoading}
+          onRun={handleRunStandardsGate}
+          onOpenValidation={openValidationGate}
+        />
+
         <PanelSection title="Process" icon={<Layers3 size={11} />}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
             {[
               ["1", "Define", "Capture business concepts, owners, domains, and definitions."],
-              ["2", "Relate", "Connect concepts with business verbs and cardinality."],
-              ["3", "Promote", "Use the logical layer for attributes, keys, and type intent."],
+              ["2", "Contract", "Create a DataLex contract that states grain, accepted sources, metrics, and review policy."],
+              ["3", "Certify", "DQL blocks must bind to this contract before Apps can publish trusted metrics."],
             ].map(([n, title, text]) => (
               <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>
@@ -589,6 +803,13 @@ export default function ModelerPanel() {
             ))}
           </div>
         </PanelSection>
+
+        <ContractLibrary
+          contracts={contracts}
+          selectedEntity={selectedEntity}
+          canEdit={canEdit}
+          onCreateContract={handleCreateContractFromConcept}
+        />
 
         <PanelSection title="Actions" icon={<Plus size={11} />}>
           <div style={{ display: "grid", gap: 10 }}>

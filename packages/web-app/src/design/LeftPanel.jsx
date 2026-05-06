@@ -411,8 +411,20 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   );
   const readinessByPath = React.useMemo(() => {
     const by = {};
+    const add = (key, file) => {
+      const normalized = String(key || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
+      if (!normalized || by[normalized]) return;
+      by[normalized] = file;
+    };
     for (const file of dbtReadinessReview?.files || []) {
-      if (file?.path) by[file.path] = file;
+      if (!file?.path) continue;
+      add(file.path, file);
+      add(file.fullPath, file);
+      add(file.name, file);
+      const parts = String(file.path || "").replace(/\\/g, "/").split("/");
+      for (let i = 1; i < parts.length; i += 1) {
+        add(parts.slice(i).join("/"), file);
+      }
     }
     return by;
   }, [dbtReadinessReview]);
