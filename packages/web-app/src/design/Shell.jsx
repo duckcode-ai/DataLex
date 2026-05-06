@@ -936,6 +936,24 @@ export default function Shell() {
     const n = activeFile?.name || "";
     return /\.diagram\.ya?ml$/i.test(n);
   }, [activeFile]);
+  const shouldOpenDiagramSurface = React.useMemo(() => {
+    const name = String(activeFile?.name || "");
+    const path = String(activeFile?.path || activeFile?.fullPath || name).toLowerCase();
+    if (!/\.ya?ml$/i.test(name)) return false;
+    return (
+      /\.diagram\.ya?ml$/i.test(name) ||
+      /\.model\.ya?ml$/i.test(name) ||
+      /\/(conceptual|logical|physical)\//i.test(path) ||
+      /^models\//i.test(path) ||
+      /\/models\//i.test(path)
+    );
+  }, [activeFile]);
+
+  React.useEffect(() => {
+    if (shouldOpenDiagramSurface && shellViewMode !== "diagram") {
+      setShellViewMode("diagram");
+    }
+  }, [shouldOpenDiagramSurface, shellViewMode, setShellViewMode]);
 
   /* Merge `fileContentCache` contents into the projectFiles list so both
      the diagram adapter and semantic-model type resolver can inspect

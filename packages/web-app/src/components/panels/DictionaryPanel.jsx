@@ -81,6 +81,13 @@ function EntityCard({ entity, classifications, indexes, relationships, isExpande
     };
     return endpointEntity(r.from) === entity.name || endpointEntity(r.to) === entity.name;
   });
+  const endpointLabel = (value) => {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    const endpointEntityName = value.entity || value.dataset || value.name || "";
+    const endpointFieldName = value.field || value.col || value.column || "";
+    return [endpointEntityName, endpointFieldName].filter(Boolean).join(".");
+  };
 
   return (
     <PanelCard tone={tone} dense>
@@ -211,9 +218,9 @@ function EntityCard({ entity, classifications, indexes, relationships, isExpande
                   fontSize: 10.5, color: "var(--text-secondary)", padding: "2px 0",
                 }}>
                   <span style={{ fontWeight: 600, color: "var(--text-primary)" }}>{rel.name}</span>
-                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{rel.from}</code>
+                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{endpointLabel(rel.from)}</code>
                   <span style={{ color: "var(--text-tertiary)" }}>→</span>
-                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{rel.to}</code>
+                  <code style={{ fontFamily: "var(--font-mono, inherit)", color: "var(--cat-users)" }}>{endpointLabel(rel.to)}</code>
                   <span style={{ fontSize: 10, color: "var(--text-tertiary)" }}>({(rel.cardinality || "").replace(/_/g, ":")})</span>
                 </div>
               ))}
