@@ -193,7 +193,7 @@ const PHYSICAL_BOTTOM_TABS = [
 
 const CONCEPTUAL_BOTTOM_TABS = [
   { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
-  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create concepts, business relationships, and capture domain definitions." },
+  { id: "modeler",       label: "Contracts",     icon: Wand2,       description: "Create concepts, business relationships, DataLex contracts, and certification rules." },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
   { id: "relationships", label: "Relationships", icon: GitBranch,   description: "Cross-entity relationships, role names, cardinality, and identifying status." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
@@ -901,11 +901,6 @@ export default function Shell() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [showShortcuts, cycleTheme, cycleProject, toggleBottomPanel, setCommandPaletteOpen, addToast]);
-
-  /* ── Auto-switch bottom tab when entity selected ───────────────── */
-  useEffect(() => {
-    if (selectedEntityId) setBottomPanelTab("properties");
-  }, [selectedEntityId, setBottomPanelTab]);
 
   /* ── Current git branch (displayed on project tabs bar) ───────── */
   const [branch, setBranch] = useState("main");

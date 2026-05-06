@@ -132,6 +132,10 @@ export default function BottomDrawer({ tabs, children }) {
                 data-tour={`panel-tab-${id}`}
                 className={`bottom-drawer-tab ${bottomPanelTab === id ? "active" : ""}`}
                 onClick={() => setBottomPanelTab(id)}
+                onMouseUp={(event) => {
+                  event.preventDefault();
+                  setBottomPanelTab(id);
+                }}
                 title={tooltip}
               >
                 {Icon && <Icon size={12} />}

@@ -786,6 +786,13 @@ export default function ModelerPanel() {
           onOpenValidation={openValidationGate}
         />
 
+        <ContractLibrary
+          contracts={contracts}
+          selectedEntity={selectedEntity}
+          canEdit={canEdit}
+          onCreateContract={handleCreateContractFromConcept}
+        />
+
         <PanelSection title="Process" icon={<Layers3 size={11} />}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
             {[
@@ -803,13 +810,6 @@ export default function ModelerPanel() {
             ))}
           </div>
         </PanelSection>
-
-        <ContractLibrary
-          contracts={contracts}
-          selectedEntity={selectedEntity}
-          canEdit={canEdit}
-          onCreateContract={handleCreateContractFromConcept}
-        />
 
         <PanelSection title="Actions" icon={<Plus size={11} />}>
           <div style={{ display: "grid", gap: 10 }}>

@@ -991,6 +991,11 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setRightPanelTab("DETAILS");
   }, [setRightPanelOpen, setRightPanelTab]);
 
+  const openConceptContracts = React.useCallback(() => {
+    setBottomPanelOpen(true);
+    setBottomPanelTab("modeler");
+  }, [setBottomPanelOpen, setBottomPanelTab]);
+
   const openRelationshipDialog = React.useCallback(() => {
     const orderedTables = Array.isArray(tables) ? tables : [];
     const first = selectedTable || orderedTables[0] || null;
@@ -1082,6 +1087,17 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 disabled={!selectedTable}
               >
                 <I.Edit />Edit Details
+              </button>
+              <button
+                className="canvas-btn"
+                onClick={openConceptContracts}
+                onMouseUp={(event) => {
+                  event.preventDefault();
+                  openConceptContracts();
+                }}
+                title="Open DataLex contracts, standards gate, and certification rules for this business model"
+              >
+                <I.Check />Contracts
               </button>
             </>
           )}

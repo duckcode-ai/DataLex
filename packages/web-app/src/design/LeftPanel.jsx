@@ -1153,21 +1153,15 @@ function TreeRender({
         const isActive = activeFullPath && fullPath === activeFullPath;
         const meta = artifactMeta(n.path, n.name, "file");
         const readiness = readinessByPath[n.path] || readinessByPath[fullPath];
+        const openThisFile = () => {
+          if (onOpenFile && fd) onOpenFile(fd);
+        };
         return (
           <div
             key={`l:${n.path}`}
             className={`tree-item tree-artifact tree-artifact-${meta.tone} ${isActive ? "active" : ""}`}
             onClick={() => {
-              const dragState = dragStateRef?.current;
-              if (
-                dragState &&
-                dragState.path === n.path &&
-                Date.now() - dragState.at < 500
-              ) {
-                dragState.path = "";
-                return;
-              }
-              if (onOpenFile && fd) onOpenFile(fd);
+              openThisFile();
             }}
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, "file", n.path) : undefined}
             draggable={!!onDropOnFolder}
@@ -1204,7 +1198,38 @@ function TreeRender({
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
           >
             <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+            <button
+              type="button"
+              className="tree-file-open"
+              draggable={false}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openThisFile();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openThisFile();
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                cursor: "pointer",
+                border: 0,
+                padding: 0,
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                textAlign: "left",
+              }}
+            >
+              {n.name}
+            </button>
             <ReadinessBadge review={readiness} />
             {onMoveItem && (
               <button
