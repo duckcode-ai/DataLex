@@ -103,6 +103,176 @@ function isContractPath(file = {}) {
   return /\.contract\.ya?ml$/i.test(path) || /\/contracts?\//i.test(path);
 }
 
+function filePathOf(file = {}) {
+  return String(file.path || file.fullPath || file.name || "").replace(/\\/g, "/");
+}
+
+function compactJson(value, fallback = {}) {
+  try {
+    return JSON.stringify(value ?? fallback, null, 2);
+  } catch (_err) {
+    return JSON.stringify(fallback, null, 2);
+  }
+}
+
+function uniqueList(items = [], limit = 12) {
+  const seen = new Set();
+  const out = [];
+  for (const item of items || []) {
+    const text = String(item || "").trim();
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+function tokenSetForContract(entity = {}, domain = "") {
+  return uniqueList([
+    domain,
+    entity.name,
+    entity.logical_name,
+    entity.domain,
+    entity.subject_area,
+    ...(Array.isArray(entity.tags) ? entity.tags : []),
+    ...(Array.isArray(entity.terms) ? entity.terms : []),
+  ].flatMap((item) => String(item || "").toLowerCase().split(/[^a-z0-9]+/)), 16)
+    .filter((token) => token.length >= 3);
+}
+
+function inferContractCandidateSources(projectFiles = [], selectedEntity = {}, domain = "") {
+  const tokens = tokenSetForContract(selectedEntity, domain);
+  return (projectFiles || [])
+    .map((file) => {
+      const path = filePathOf(file);
+      const lower = path.toLowerCase();
+      if (!/\.(ya?ml|sql|json)$/i.test(lower)) return null;
+      const basename = lower.split("/").pop() || lower;
+      let score = 0;
+      for (const token of tokens) {
+        if (lower.includes(token)) score += basename.includes(token) ? 3 : 1;
+      }
+      if (/\b(fct|fact|dim|dimension|mart|metric|semantic|schema|source)[_-]/i.test(basename)) score += 2;
+      if (/^(models|marts|semantic|sources|dbt|DataLex\/generated|generated-sql)\//i.test(path)) score += 2;
+      if (isContractPath(file)) score -= 3;
+      return score > 0 ? { path, score } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+    .slice(0, 12)
+    .map((item) => item.path);
+}
+
+function relationshipSummaryForEntity(relationships = [], entityName = "") {
+  const selected = String(entityName || "");
+  return (relationships || [])
+    .filter((rel) => {
+      const from = String(rel?.from || rel?.source || rel?.source_entity || "");
+      const to = String(rel?.to || rel?.target || rel?.target_entity || "");
+      return !selected || from === selected || to === selected;
+    })
+    .slice(0, 10)
+    .map((rel) => ({
+      name: rel?.name || rel?.relationship || "",
+      from: rel?.from || rel?.source || rel?.source_entity || "",
+      to: rel?.to || rel?.target || rel?.target_entity || "",
+      type: rel?.type || rel?.cardinality || rel?.relationship_type || "",
+      description: rel?.description || rel?.label || "",
+    }));
+}
+
+function buildDomainContractPrompt({ selectedEntity, model, entities, relationships, contracts, projectFiles }) {
+  const domain = selectedEntity?.domain || selectedEntity?.subject_area || model?.domain || model?.model?.domain || "core";
+  const contractDomain = slugify(domain);
+  const contractId = slugify(selectedEntity?.name || selectedEntity?.logical_name || "contract");
+  const candidateSources = inferContractCandidateSources(projectFiles, selectedEntity, domain);
+  const peerConcepts = (entities || [])
+    .filter((entity) => entity?.name && entity.name !== selectedEntity?.name)
+    .slice(0, 12)
+    .map((entity) => ({
+      name: entity.name,
+      domain: entity.domain || entity.subject_area || "",
+      description: entity.description || "",
+      terms: Array.isArray(entity.terms) ? entity.terms : [],
+    }));
+  const selectedRelationships = relationshipSummaryForEntity(relationships, selectedEntity?.name);
+  const existingContractPaths = uniqueList((contracts || []).map((contract) => contract.path), 16);
+  const targetPath = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+
+  return [
+    `You are a specialized DataLex contract designer for the ${domain} domain.`,
+    "Draft a domain-specific DataLex contract for the selected business concept. Do not write a generic contract definition.",
+    "",
+    "Selected concept:",
+    compactJson({
+      name: selectedEntity?.name || "",
+      logical_name: selectedEntity?.logical_name || "",
+      type: selectedEntity?.type || selectedEntity?.kind || "concept",
+      domain,
+      owner: selectedEntity?.owner || "",
+      subject_area: selectedEntity?.subject_area || "",
+      description: selectedEntity?.description || "",
+      terms: Array.isArray(selectedEntity?.terms) ? selectedEntity.terms : [],
+      tags: Array.isArray(selectedEntity?.tags) ? selectedEntity.tags : [],
+    }),
+    "",
+    "Related concepts and relationships:",
+    compactJson({ peer_concepts: peerConcepts, relationships: selectedRelationships }),
+    "",
+    "Candidate dbt / semantic / source files to consider for accepted_sources. Use only plausible sources; mark assumptions when uncertain:",
+    candidateSources.length ? candidateSources.map((path) => `- ${path}`).join("\n") : "- No candidate source files were inferred from the workspace.",
+    "",
+    "Existing contracts to avoid duplicating:",
+    existingContractPaths.length ? existingContractPaths.map((path) => `- ${path}`).join("\n") : "- None found.",
+    "",
+    "Required output:",
+    `- Return one proposed_changes item with type "create_file" and path "${targetPath}".`,
+    "- The file content must be YAML with this shape:",
+    [
+      "kind: datalex_contract",
+      `id: ${contractId}`,
+      `domain: ${domain}`,
+      "owner: <domain steward or selected concept owner>",
+      "business_definition: <specific business meaning and decision support value>",
+      "grain: <business grain for certified analytics>",
+      "accepted_sources:",
+      "  - name: <dbt/source/semantic object>",
+      "    type: dbt_model|source|semantic_metric|warehouse_table",
+      "    confidence: high|medium|low",
+      "    rationale: <why this source is acceptable>",
+      "metrics:",
+      "  - name: <domain metric>",
+      "    definition: <specific formula/business rule>",
+      "    allowed_aggregations: [sum, avg, count]",
+      "dimensions:",
+      "  - name: <business dimension>",
+      "    definition: <how users slice this concept>",
+      "required_tests:",
+      "  - not_null",
+      "  - accepted_values",
+      "certification_policy:",
+      "  required_approvals: 1",
+      "  reviewers: []",
+      "  allow_self_approval: false",
+      "lineage:",
+      `  conceptual_entity: ${selectedEntity?.name || contractId}`,
+      "  logical_entities: []",
+      "  physical_models: []",
+      "status: draft",
+      "assumptions: []",
+      "open_questions: []",
+    ].join("\n"),
+    "",
+    "Quality bar:",
+    "- Explain the business value this contract enables for analysts and executives in this domain.",
+    "- Prefer a narrow, enforceable grain over a broad catch-all contract.",
+    "- Do not invent exact warehouse tables when candidate sources are weak; put them in open_questions or accepted_sources with low confidence.",
+    "- Include certification blockers as open_questions when owner, grain, accepted source, metric definition, or tests are missing.",
+    "- Keep it reviewable: one contract file, no unrelated model changes.",
+  ].join("\n");
+}
+
 function readinessTone(summary) {
   if (!summary) return { tone: "neutral", label: "Not run", color: "var(--text-tertiary)" };
   if (Number(summary.red || 0) > 0 || Number(summary.errors || 0) > 0) return { tone: "error", label: "Blockers", color: "#ef4444" };
@@ -156,7 +326,7 @@ function StandardsGateSummary({ review, loading, onRun, onOpenValidation }) {
   );
 }
 
-function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract }) {
+function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract, onDraftContractWithAi }) {
   const selectedSlug = slugify(selectedEntity?.name || "");
   const matching = selectedSlug
     ? contracts.filter((contract) => slugify(contract.name).includes(selectedSlug) || slugify(contract.path).includes(selectedSlug))
@@ -166,9 +336,14 @@ function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract 
       title="Contracts"
       icon={<ShieldCheck size={11} />}
       action={
-        <button type="button" className="panel-btn primary" disabled={!canEdit || !selectedEntity} onClick={onCreateContract}>
-          <Plus size={11} /> Create from selected
-        </button>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <button type="button" className="panel-btn primary" disabled={!canEdit || !selectedEntity} onClick={onDraftContractWithAi}>
+            <Wand2 size={11} /> AI draft contract
+          </button>
+          <button type="button" className="panel-btn" disabled={!canEdit || !selectedEntity} onClick={onCreateContract}>
+            <Plus size={11} /> Blank
+          </button>
+        </div>
       }
     >
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 0.9fr)", gap: 10 }}>
@@ -181,6 +356,9 @@ function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract 
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>
             A certified block must bind to one contract, query an accepted source, pass validation, and carry lineage. Conceptual modeling creates the meaning; the contract turns it into an enforceable rule.
+          </div>
+          <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--text-tertiary)" }}>
+            AI drafting uses this domain concept, peer concepts, relationships, candidate dbt/semantic files, and existing contracts. It returns draft YAML for human review before DQL certification.
           </div>
           {selectedEntity && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -567,7 +745,7 @@ export default function ModelerPanel() {
     setModelingViewMode,
     requestLayoutRefresh,
   } = useDiagramStore();
-  const { addToast, openModal } = useUiStore();
+  const { addToast, openModal, openAiPanel } = useUiStore();
   const setBottomPanelTab = useUiStore((s) => s.setBottomPanelTab);
   const { canEdit: canEditFn } = useAuthStore();
   const canEdit = canEditFn();
@@ -579,6 +757,7 @@ export default function ModelerPanel() {
   const entities = Array.isArray(model?.entities) ? model.entities : [];
   const subjectAreas = Array.isArray(model?.subject_areas) ? model.subject_areas : [];
   const entityOptions = useMemo(() => allowedTypes(activeLayer), [activeLayer]);
+  const relationships = Array.isArray(model?.relationships) ? model.relationships : [];
   const contracts = useMemo(() => (
     (projectFiles || [])
       .filter(isContractPath)
@@ -715,6 +894,47 @@ export default function ModelerPanel() {
     }
   };
 
+  const handleDraftContractWithAi = () => {
+    if (!selectedEntity) {
+      addToast?.({ type: "error", message: "Select a concept before asking AI to draft a contract." });
+      return;
+    }
+    const domain = selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core";
+    const contractDomain = slugify(domain);
+    const contractId = slugify(selectedEntity.name || selectedEntity.logical_name || "contract");
+    const targetPath = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+    if (contracts.some((contract) => contract.path === targetPath || contract.fullPath === targetPath)) {
+      addToast?.({ type: "info", message: "A contract for this concept already exists. Ask AI to improve the existing contract instead." });
+      return;
+    }
+    const candidateSources = inferContractCandidateSources(projectFiles, selectedEntity, domain);
+    openAiPanel?.({
+      source: "contracts",
+      targetName: selectedEntity.logical_name || selectedEntity.name || contractId,
+      initialMessage: buildDomainContractPrompt({
+        selectedEntity,
+        model,
+        entities,
+        relationships,
+        contracts,
+        projectFiles,
+      }),
+      autoSubmit: true,
+      context: {
+        kind: "datalex_contract_draft",
+        intent: "domain_contract_design",
+        filePath: targetPath,
+        domain,
+        entityName: selectedEntity.name || selectedEntity.logical_name || "",
+        selectedEntity,
+        candidateSources,
+        existingContracts: contracts.map((contract) => contract.path).slice(0, 20),
+        requiredShape: "datalex_contract",
+      },
+    });
+    addToast?.({ type: "info", message: "AI is drafting a domain-specific DataLex contract for review." });
+  };
+
   /* handleCreateEntity used to live below all the layer-specific
      returns; moved up here so the conceptual quick-add form (which
      calls it from its onSubmit) doesn't hit the temporal dead zone. */
@@ -791,6 +1011,7 @@ export default function ModelerPanel() {
           selectedEntity={selectedEntity}
           canEdit={canEdit}
           onCreateContract={handleCreateContractFromConcept}
+          onDraftContractWithAi={handleDraftContractWithAi}
         />
 
         <PanelSection title="Process" icon={<Layers3 size={11} />}>

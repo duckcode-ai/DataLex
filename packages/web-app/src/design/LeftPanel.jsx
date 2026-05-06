@@ -174,6 +174,17 @@ const SKILL_TEMPLATES = [
     body: "- Preserve existing dbt YAML, descriptions, tests, tags, meta, and contracts.\n- Prefer focused YAML patches over full-file rewrites.\n- Infer datatypes from existing YAML, SQL, catalog metadata, or clear naming conventions.\n- Do not run dbt or apply DDL.",
   },
   {
+    id: "contract",
+    name: "domain-contract-designer",
+    title: "Contracts",
+    description: "Domain-specific DataLex contracts for DQL certification, accepted sources, metrics, grain, and review policy.",
+    useWhen: "DataLex contract\ncertified block\naccepted source\nmetric grain\nDQL certification\nbusiness definition",
+    tags: "contract,certification,domain,metrics,lineage",
+    layers: "conceptual,logical,physical",
+    agentModes: "contract_designer\ngovernance_reviewer\nyaml_patch_engineer",
+    body: "- Start from the selected business concept and domain vocabulary; do not write generic contract boilerplate.\n- Define the business decision value, grain, accepted sources, metrics, dimensions, required tests, owner, and certification policy.\n- Use dbt, semantic, lineage, glossary, and peer concept context to recommend accepted_sources with confidence and rationale.\n- If source, grain, owner, or metric logic is uncertain, keep the contract in draft and add open_questions instead of inventing facts.\n- A DQL block should only certify when it binds to this contract, queries accepted sources, passes validation, and has lineage.",
+  },
+  {
     id: "governance",
     name: "governance-and-validation",
     title: "Governance",
