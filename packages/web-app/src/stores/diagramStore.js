@@ -44,7 +44,7 @@ const useDiagramStore = create((set, get) => ({
     tagFilter: "all",
     layoutMode: "elk",
     layoutDensity: "normal",
-    groupBySubjectArea: true,
+    groupBySubjectArea: false,
   },
 
   // --- Actions ---

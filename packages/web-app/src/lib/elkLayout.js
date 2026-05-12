@@ -166,9 +166,9 @@ function buildSubjectAreaGroupNodes(nodes, options = {}) {
     isLargeGraph: nodes.length > LARGE_GRAPH_THRESHOLD,
     fieldView: parsed.fieldView || "all",
   });
-  const paddingX = 24;
-  const paddingY = 20;
-  const titleHeight = 30;
+  const paddingX = 44;
+  const paddingY = 34;
+  const titleHeight = 38;
 
   return Array.from(groups.entries())
     .sort((a, b) => b[1].length - a[1].length)
@@ -198,10 +198,10 @@ function buildSubjectAreaGroupNodes(nodes, options = {}) {
         style: {
           width: Math.max(220, maxX - minX + paddingX * 2),
           height: Math.max(120, maxY - minY + paddingY * 2 + titleHeight),
-          background: color.bg,
+          background: "transparent",
           border: `1px dashed ${color.border}`,
-          borderRadius: "18px",
-          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.45)",
+          borderRadius: "20px",
+          boxShadow: "none",
           pointerEvents: "none",
         },
         draggable: false,

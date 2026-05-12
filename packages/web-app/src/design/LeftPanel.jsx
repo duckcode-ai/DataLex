@@ -174,6 +174,17 @@ const SKILL_TEMPLATES = [
     body: "- Preserve existing dbt YAML, descriptions, tests, tags, meta, and contracts.\n- Prefer focused YAML patches over full-file rewrites.\n- Infer datatypes from existing YAML, SQL, catalog metadata, or clear naming conventions.\n- Do not run dbt or apply DDL.",
   },
   {
+    id: "contract",
+    name: "domain-contract-designer",
+    title: "Contracts",
+    description: "Domain-specific DataLex contracts for DQL certification, accepted sources, metrics, grain, and review policy.",
+    useWhen: "DataLex contract\ncertified block\naccepted source\nmetric grain\nDQL certification\nbusiness definition",
+    tags: "contract,certification,domain,metrics,lineage",
+    layers: "conceptual,logical,physical",
+    agentModes: "contract_designer\ngovernance_reviewer\nyaml_patch_engineer",
+    body: "- Start from the selected business concept and domain vocabulary; do not write generic contract boilerplate.\n- Define the business decision value, grain, accepted sources, metrics, dimensions, required tests, owner, and certification policy.\n- Use dbt, semantic, lineage, glossary, and peer concept context to recommend accepted_sources with confidence and rationale.\n- If source, grain, owner, or metric logic is uncertain, keep the contract in draft and add open_questions instead of inventing facts.\n- A DQL block should only certify when it binds to this contract, queries accepted sources, passes validation, and has lineage.",
+  },
+  {
     id: "governance",
     name: "governance-and-validation",
     title: "Governance",
@@ -411,8 +422,20 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   );
   const readinessByPath = React.useMemo(() => {
     const by = {};
+    const add = (key, file) => {
+      const normalized = String(key || "").replace(/\\/g, "/").replace(/^[/\\]+/, "");
+      if (!normalized || by[normalized]) return;
+      by[normalized] = file;
+    };
     for (const file of dbtReadinessReview?.files || []) {
-      if (file?.path) by[file.path] = file;
+      if (!file?.path) continue;
+      add(file.path, file);
+      add(file.fullPath, file);
+      add(file.name, file);
+      const parts = String(file.path || "").replace(/\\/g, "/").split("/");
+      for (let i = 1; i < parts.length; i += 1) {
+        add(parts.slice(i).join("/"), file);
+      }
     }
     return by;
   }, [dbtReadinessReview]);
@@ -1141,21 +1164,15 @@ function TreeRender({
         const isActive = activeFullPath && fullPath === activeFullPath;
         const meta = artifactMeta(n.path, n.name, "file");
         const readiness = readinessByPath[n.path] || readinessByPath[fullPath];
+        const openThisFile = () => {
+          if (onOpenFile && fd) onOpenFile(fd);
+        };
         return (
           <div
             key={`l:${n.path}`}
             className={`tree-item tree-artifact tree-artifact-${meta.tone} ${isActive ? "active" : ""}`}
             onClick={() => {
-              const dragState = dragStateRef?.current;
-              if (
-                dragState &&
-                dragState.path === n.path &&
-                Date.now() - dragState.at < 500
-              ) {
-                dragState.path = "";
-                return;
-              }
-              if (onOpenFile && fd) onOpenFile(fd);
+              openThisFile();
             }}
             onContextMenu={onContextMenu ? (e) => onContextMenu(e, "file", n.path) : undefined}
             draggable={!!onDropOnFolder}
@@ -1192,7 +1209,38 @@ function TreeRender({
             style={{ paddingLeft: indent + 10, cursor: onDropOnFolder ? "grab" : undefined }}
           >
             <span className="tree-artifact-icon"><ArtifactIcon I={I} meta={meta} /></span>
-            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{n.name}</span>
+            <button
+              type="button"
+              className="tree-file-open"
+              draggable={false}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseUp={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openThisFile();
+              }}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                openThisFile();
+              }}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                cursor: "pointer",
+                border: 0,
+                padding: 0,
+                background: "transparent",
+                color: "inherit",
+                font: "inherit",
+                textAlign: "left",
+              }}
+            >
+              {n.name}
+            </button>
             <ReadinessBadge review={readiness} />
             {onMoveItem && (
               <button

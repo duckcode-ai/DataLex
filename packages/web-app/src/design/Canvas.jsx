@@ -23,8 +23,9 @@ const DEFAULT_WORLD_HEIGHT = 1600;
 const WORLD_PADDING = 180;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2.25;
-const CONCEPT_CARD_WIDTH = 220;
-const CONCEPT_CARD_HEIGHT = 128;
+const CONCEPT_CARD_WIDTH = 300;
+const CONCEPT_CARD_MAX_WIDTH = 380;
+const CONCEPT_CARD_HEIGHT = 136;
 
 function isConceptTable(table, modelKind = "") {
   return String(modelKind || table?.modelKind || "").toLowerCase() === "conceptual"
@@ -34,7 +35,7 @@ function isConceptTable(table, modelKind = "") {
 function conceptualCardWidth(table) {
   const storedWidth = Number(table?.width);
   if (!Number.isFinite(storedWidth)) return CONCEPT_CARD_WIDTH;
-  return Math.min(Math.max(storedWidth, 190), CONCEPT_CARD_WIDTH);
+  return Math.min(Math.max(storedWidth, 240), CONCEPT_CARD_MAX_WIDTH);
 }
 
 function estimateTableBounds(table, modelKind = "") {
@@ -725,6 +726,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const [isPanning, setIsPanning] = React.useState(false);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
+  const activeFileKey = activeFile?.fullPath || activeFile?.path || activeFile?.name || "";
   const conceptualMode = String(modelKind || "").toLowerCase() === "conceptual";
   const logicalMode = String(modelKind || "").toLowerCase() === "logical";
   const physicalMode = String(modelKind || "").toLowerCase() === "physical";
@@ -900,7 +902,8 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   // Fit: scroll the .canvas viewport so the bounding box of all tables is in
   // view. The legacy canvas used to only scroll to the top-left; now it
   // computes a real zoom-to-fit and centers the model in the viewport.
-  const handleFit = React.useCallback(() => {
+  const handleFit = React.useCallback((options = {}) => {
+    const { behavior = "smooth" } = options;
     if (onFit) { onFit(); return; }
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -920,10 +923,49 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     window.requestAnimationFrame(() => {
       const left = Math.max(0, (world.minX - padding) * fitZoom - Math.max(0, viewport.clientWidth - rawWidth * fitZoom) / 2);
       const top = Math.max(0, (world.minY - padding) * fitZoom - Math.max(0, viewport.clientHeight - rawHeight * fitZoom) / 2);
-      viewport.scrollTo({ left, top, behavior: "smooth" });
+      viewport.scrollTo({ left, top, behavior });
       syncViewport();
     });
   }, [onFit, syncViewport, tables.length, world]);
+
+  const fitRef = React.useRef(handleFit);
+  React.useEffect(() => {
+    fitRef.current = handleFit;
+  }, [handleFit]);
+  const autoFitKeyRef = React.useRef("");
+  React.useEffect(() => {
+    if (!activeFileKey || !tables.length) return;
+    const nextKey = [
+      activeFileKey,
+      modelKind,
+      tables.length,
+      relationships.length,
+      Math.round(world.minX),
+      Math.round(world.minY),
+      Math.round(world.maxX),
+      Math.round(world.maxY),
+    ].join(":");
+    if (autoFitKeyRef.current === nextKey) return;
+    autoFitKeyRef.current = nextKey;
+    let cancelled = false;
+    const runFit = () => {
+      if (cancelled) return;
+      fitRef.current?.({ behavior: "auto" });
+    };
+    const raf = window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(runFit);
+    });
+    const timers = [
+      window.setTimeout(runFit, 100),
+      window.setTimeout(runFit, 300),
+      window.setTimeout(runFit, 700),
+    ];
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(raf);
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [activeFileKey, modelKind, relationships.length, tables.length, world]);
 
   const handleAutoLayoutClick = React.useCallback(async () => {
     if (!onAutoLayout) return;
@@ -972,6 +1014,11 @@ export default function Canvas({ tables, setTables, relationships, areas, select
     setRightPanelOpen(true);
     setRightPanelTab("DETAILS");
   }, [setRightPanelOpen, setRightPanelTab]);
+
+  const openConceptContracts = React.useCallback(() => {
+    setBottomPanelOpen(true);
+    setBottomPanelTab("modeler");
+  }, [setBottomPanelOpen, setBottomPanelTab]);
 
   const openRelationshipDialog = React.useCallback(() => {
     const orderedTables = Array.isArray(tables) ? tables : [];
@@ -1064,6 +1111,17 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 disabled={!selectedTable}
               >
                 <I.Edit />Edit Details
+              </button>
+              <button
+                className="canvas-btn"
+                onClick={openConceptContracts}
+                onMouseUp={(event) => {
+                  event.preventDefault();
+                  openConceptContracts();
+                }}
+                title="Open DataLex contracts, standards gate, and certification rules for this business model"
+              >
+                <I.Check />Contracts
               </button>
             </>
           )}
