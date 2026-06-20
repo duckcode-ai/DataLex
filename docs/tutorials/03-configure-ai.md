@@ -15,6 +15,8 @@ You should see provider cards for:
 
 The page also shows what dbt evidence DataLex can analyze.
 
+![AI Setup with OpenAI, Claude, and Ollama provider cards](../assets/tutorials/ai-setup-paper.png)
+
 ## OpenAI
 
 ```bash

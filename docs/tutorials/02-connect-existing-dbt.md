@@ -25,7 +25,8 @@ Or open DataLex first and use **Connect** to choose the local folder.
 
 ## Confirm detection
 
-The Connect screen should show whether DataLex found:
+After the repo is connected, the workflow screens should show whether DataLex
+found:
 
 - `dbt_project.yml`
 - `target/manifest.json`
@@ -36,6 +37,8 @@ The Connect screen should show whether DataLex found:
 - existing dbt contracts
 - owners, descriptions, tests, and tags
 - existing `DataLex/` artifacts
+
+![Connected dbt evidence in the DataLex paper theme](../assets/tutorials/connect-dbt-evidence-paper.png)
 
 ## If the manifest is missing
 

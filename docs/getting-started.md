@@ -12,6 +12,9 @@ proposes business domains, contracts, diagrams, glossary terms, and metric
 contracts. You review and certify the result before DataLex writes trusted
 artifacts.
 
+Tutorial screenshots use the light **Paper** theme so the workflow is easier to
+read in docs.
+
 ## 1. Install
 
 ```bash
@@ -57,6 +60,8 @@ context is weaker. Run this in your dbt repo when possible:
 dbt parse
 ```
 
+![Connected dbt project evidence in DataLex](assets/tutorials/connect-dbt-evidence-paper.png)
+
 ## 3. Configure AI
 
 Open **AI Setup**.
@@ -93,6 +98,8 @@ Settings are stored locally under:
 
 Secrets are never written under versioned `DataLex/`.
 
+![AI provider setup in DataLex](assets/tutorials/ai-setup-paper.png)
+
 ## 4. Scan readiness
 
 Open **Readiness**.
@@ -116,9 +123,11 @@ Use it to see:
 Models without clear domain evidence stay under **Unassigned / Needs AI domain
 proposal** until AI proposes a real business domain.
 
+![Domain readiness summary in DataLex](assets/tutorials/readiness-paper.png)
+
 ## 5. Generate a focused pack
 
-Open **Generate**.
+Open **Domains** or **Proposals**.
 
 Choose a small scope:
 
@@ -140,9 +149,11 @@ Pick a proposal type:
 
 DataLex generates draft proposals with evidence, not certified artifacts.
 
+![Focused domain generation in DataLex](assets/tutorials/domains-generate-paper.png)
+
 ## 6. Review and certify
 
-Open **Review**.
+Open **Proposals**.
 
 Each proposal card should show:
 
@@ -161,6 +172,8 @@ Each proposal card should show:
 You can approve, edit, ask AI to fix, split, reject, or certify. Only
 certified contracts and metric contracts enter the published manifest.
 
+![Reviewable proposal card with evidence and file changes](assets/tutorials/proposal-review-paper.png)
+
 ## 7. Publish
 
 Open **Publish** and build the manifest, or run:
@@ -171,6 +184,8 @@ datalex datalex manifest build DataLex --out DataLex/datalex-manifest.json
 
 The manifest includes certified DataLex contracts and metric contracts. Rejected
 proposals are excluded.
+
+![Publish readiness and manifest build result](assets/tutorials/publish-paper.png)
 
 DQL readiness is hidden by default in OSS. It appears only when your
 `datalex.yaml` explicitly enables DQL:

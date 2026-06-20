@@ -3,6 +3,8 @@
 These tutorials are intentionally short and sequential. They match the current
 DataLex OSS workflow and avoid the older file-first modeling path.
 
+Screenshots use DataLex's light **Paper** theme.
+
 1. [Install and run DataLex](01-install-and-run.md)
 2. [Connect an existing dbt repo](02-connect-existing-dbt.md)
 3. [Configure AI with OpenAI, Claude, or Ollama](03-configure-ai.md)

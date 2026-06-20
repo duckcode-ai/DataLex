@@ -15,6 +15,8 @@ The screen shows:
 - warnings
 - optional integration status
 
+![Publish view showing DataLex manifest readiness](../assets/tutorials/publish-paper.png)
+
 ## Build from the CLI
 
 From your dbt repo root:

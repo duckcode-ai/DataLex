@@ -100,6 +100,8 @@ Connect dbt repo -> AI Setup -> Readiness -> Generate -> Review -> Contracts -> 
 Generation requires a tested AI provider. Readiness works without AI, but
 DataLex will not create fake domains or placeholder contracts.
 
+![DataLex enterprise readiness in the paper theme](https://raw.githubusercontent.com/duckcode-ai/DataLex/main/docs/assets/tutorials/readiness-paper.png)
+
 ## AI setup
 
 DataLex uses your dbt evidence to generate proposals:
