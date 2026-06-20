@@ -92,6 +92,10 @@ entities:
 
 **At MCP serve time** the DQL MCP refuses to serve any certified block whose `datalex_contract` reference doesn't resolve — so AI agents (Cursor, Claude Code, Copilot, your internal copilot) only ever get certified, traceable answers.
 
+For the developer-facing explanation of what these contracts mean, where they
+come from, and why they should gate certification instead of draft exploration,
+see [Contracts for DQL blocks](contracts-for-dql-blocks.md).
+
 ---
 
 ## End-to-end tutorial (5 minutes)

@@ -84,6 +84,7 @@ nav:
   - Concepts:
       - Architecture: architecture.md
       - Layered model (conceptual / logical / physical): datalex-layout.md
+      - Contracts for DQL blocks: contracts-for-dql-blocks.md
       - Data mesh interfaces: mesh-interfaces.md
       - AI-agentic modeling: ai-agentic-modeling.md
   - Tutorials:

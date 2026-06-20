@@ -85,6 +85,7 @@ Ollama fallback. Pin a specific provider explicitly with the flag.
 3. **[Walk through Jaffle Shop](tutorials/jaffle-shop-walkthrough.md)** — full dbt + DuckDB + DataLex example.
 4. **[Layered modeling](datalex-layout.md)** — when to use conceptual vs. logical vs. physical.
 5. **[The DataLex + DQL stack](datalex-and-dql.md)** — how the two languages combine for certified AI analytics.
+6. **[Contracts for DQL blocks](contracts-for-dql-blocks.md)** - what a contract means for a DQL block, where it comes from, and how it supports fast draft work plus trusted publish gates.
 
 ---
 
