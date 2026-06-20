@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://duckcode.dev/schemas/datalex/proposal.schema.json",
+  "title": "DataLex AI proposal",
+  "type": "object",
+  "required": ["kind", "name", "proposal_type", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": { "const": "proposal" },
+    "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "proposal_type": {
+      "type": "string",
+      "enum": ["domain", "conceptual_model", "logical_entity", "relationship", "dbt_contract", "datalex_contract", "metric_contract", "dql_block", "documentation", "glossary"]
+    },
+    "status": { "type": "string", "enum": ["draft", "reviewed", "certified", "rejected"] },
+    "domain": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "target": { "type": "string" },
+    "summary": { "type": "string" },
+    "proposed_change": { "type": "object", "additionalProperties": true },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "source_models": { "type": "array", "items": { "type": "string" } },
+        "columns": { "type": "array", "items": { "type": "string" } },
+        "tests": { "type": "array", "items": { "type": "string" } },
+        "semantic_metrics": { "type": "array", "items": { "type": "string" } },
+        "inferred_grain": { "type": "string" },
+        "assumptions": { "type": "array", "items": { "type": "string" } },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+        "open_questions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "created_by": { "type": "string" },
+    "created_at": { "type": "string" },
+    "meta": { "type": "object", "additionalProperties": true }
+  }
+}

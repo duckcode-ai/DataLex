@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT / "packages" / "core_engine" / "src"))
 
 from datalex_core.datalex import load_project
 from datalex_core.datalex.diff import diff_entities
+from datalex_core.datalex.manifest import build_manifest, manifest_summary
 from datalex_core.datalex.migrate_layout import migrate_project
 from datalex_core.datalex.types import parse_type
 
@@ -122,6 +123,49 @@ class ProjectLoaderTests(unittest.TestCase):
             self.assertIn("customer_places_order", project.relationships)
             self.assertIn("email", project.data_types)
             self.assertIn("customer_metrics", project.semantic_models)
+
+    def test_loads_contracts_and_manifest_exports_only_certified(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "datalex.yaml", "kind: project\nname: t\nversion: '1'\n")
+            _write(
+                root / "models" / "dbt" / "fct_orders.yaml",
+                "kind: model\nname: fct_orders\ndomain: commerce\n"
+                "columns:\n"
+                "  - name: order_id\n    type: bigint\n    constraints: [{type: primary_key}]\n",
+            )
+            _write(
+                root / "contracts" / "orders.contract.yaml",
+                "kind: contract\nname: monthly_orders\ndomain: commerce\nentity: Order\n"
+                "version: 1\nstatus: certified\nowner: data@example.com\n"
+                "source: {kind: dbt_model, ref: model.acme.fct_orders}\n"
+                "signature:\n  outputs:\n    - {name: order_count, type: integer}\n",
+            )
+            _write(
+                root / "contracts" / "draft.contract.yaml",
+                "kind: contract\nname: draft_metric\ndomain: commerce\nentity: Order\n"
+                "version: 1\nstatus: draft\n",
+            )
+            _write(
+                root / ".datalex" / "proposals" / "orders.yaml",
+                "kind: proposal\nname: orders_contract\nproposal_type: dbt_contract\nstatus: draft\n"
+                "target: fct_orders\n",
+            )
+
+            project = load_project(root, strict=True)
+            self.assertEqual(2, len(project.contracts))
+            self.assertEqual(1, len(project.proposals))
+
+            manifest = build_manifest(project)
+            summary = manifest_summary(manifest)
+            self.assertEqual(1, summary["contracts"])
+            commerce = next(d for d in manifest["domains"] if d["name"] == "commerce")
+            contracts = [
+                c
+                for entity in commerce["entities"]
+                for c in entity.get("contracts", [])
+            ]
+            self.assertEqual(["commerce.Order.monthly_orders"], [c["id"] for c in contracts])
 
     def test_relationship_validation_is_layer_aware(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -440,12 +440,22 @@ def _build_model_doc(
     config = node.get("config") or {}
     if config.get("materialized") and "materialization" not in doc:
         doc["materialization"] = config["materialized"]
+    if isinstance(config.get("contract"), dict) and "contract" not in doc:
+        doc["contract"] = dict(config["contract"])
     if node.get("database"):
         doc["database"] = node["database"]
     if node.get("schema"):
         doc["schema"] = node["schema"]
     if node.get("description") and "description" not in doc:
         doc["description"] = node["description"]
+    if node.get("tags") and "tags" not in doc:
+        doc["tags"] = [_safe_tag(t) for t in (node.get("tags") or []) if _safe_tag(t)]
+    owner = _owner_from_node(node)
+    if owner and "owner" not in doc:
+        doc["owner"] = owner
+    domain = _domain_from_node(node)
+    if domain and "domain" not in doc:
+        doc["domain"] = domain
 
     # depends_on — from manifest; represent both refs and sources
     depends: List[Dict[str, Any]] = []
@@ -767,6 +777,38 @@ def _safe_name(name: str) -> str:
     if not re.match(r"^[a-z]", s):
         s = "n_" + s
     return s
+
+
+def _safe_tag(name: Any) -> str:
+    if not name:
+        return ""
+    s = str(name).strip().lower()
+    s = re.sub(r"[^a-z0-9-]", "-", s)
+    s = s.strip("-")
+    if not s:
+        return ""
+    if not re.match(r"^[a-z]", s):
+        s = "tag-" + s
+    return s
+
+
+def _owner_from_node(node: Dict[str, Any]) -> str:
+    cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+    cfg_meta = cfg.get("meta") if isinstance(cfg.get("meta"), dict) else {}
+    meta = node.get("meta") if isinstance(node.get("meta"), dict) else {}
+    raw = node.get("owner") or meta.get("owner") or cfg_meta.get("owner")
+    if isinstance(raw, dict):
+        return str(raw.get("email") or raw.get("name") or "").strip()
+    return str(raw or "").strip()
+
+
+def _domain_from_node(node: Dict[str, Any]) -> str:
+    cfg = node.get("config") if isinstance(node.get("config"), dict) else {}
+    cfg_meta = cfg.get("meta") if isinstance(cfg.get("meta"), dict) else {}
+    meta = node.get("meta") if isinstance(node.get("meta"), dict) else {}
+    raw = node.get("domain") or meta.get("domain") or meta.get("subject_area") or cfg_meta.get("domain") or node.get("group")
+    value = _safe_name(str(raw or ""))
+    return "" if value == "unnamed" else value
 
 
 # ------------------------ generic-test extraction ------------------------

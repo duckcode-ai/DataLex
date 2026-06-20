@@ -90,6 +90,15 @@ function slugify(value, fallback = "artifact") {
     || fallback;
 }
 
+function pascalize(value, fallback = "Entity") {
+  const parts = String(value || fallback)
+    .trim()
+    .split(/[^a-zA-Z0-9]+/)
+    .filter(Boolean);
+  const out = parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("");
+  return out || fallback;
+}
+
 function titleFromContractPath(path = "") {
   const file = String(path || "").split("/").pop() || "contract";
   return file
@@ -186,6 +195,7 @@ function buildDomainContractPrompt({ selectedEntity, model, entities, relationsh
   const domain = selectedEntity?.domain || selectedEntity?.subject_area || model?.domain || model?.model?.domain || "core";
   const contractDomain = slugify(domain);
   const contractId = slugify(selectedEntity?.name || selectedEntity?.logical_name || "contract");
+  const contractEntity = pascalize(selectedEntity?.logical_name || selectedEntity?.name || "Entity");
   const candidateSources = inferContractCandidateSources(projectFiles, selectedEntity, domain);
   const peerConcepts = (entities || [])
     .filter((entity) => entity?.name && entity.name !== selectedEntity?.name)
@@ -220,7 +230,7 @@ function buildDomainContractPrompt({ selectedEntity, model, entities, relationsh
     "Related concepts and relationships:",
     compactJson({ peer_concepts: peerConcepts, relationships: selectedRelationships }),
     "",
-    "Candidate dbt / semantic / source files to consider for accepted_sources. Use only plausible sources; mark assumptions when uncertain:",
+    "Candidate dbt / semantic / source files to consider for source and evidence. Use only plausible sources; mark assumptions when uncertain:",
     candidateSources.length ? candidateSources.map((path) => `- ${path}`).join("\n") : "- No candidate source files were inferred from the workspace.",
     "",
     "Existing contracts to avoid duplicating:",
@@ -230,44 +240,53 @@ function buildDomainContractPrompt({ selectedEntity, model, entities, relationsh
     `- Return one proposed_changes item with type "create_file" and path "${targetPath}".`,
     "- The file content must be YAML with this shape:",
     [
-      "kind: datalex_contract",
-      `id: ${contractId}`,
-      `domain: ${domain}`,
+      "kind: contract",
+      `id: ${contractDomain}.${contractEntity}.${contractId}`,
+      `name: ${contractId}`,
+      `domain: ${contractDomain}`,
+      `entity: ${contractEntity}`,
+      "version: 1",
+      "status: draft",
       "owner: <domain steward or selected concept owner>",
       "business_definition: <specific business meaning and decision support value>",
       "grain: <business grain for certified analytics>",
-      "accepted_sources:",
-      "  - name: <dbt/source/semantic object>",
-      "    type: dbt_model|source|semantic_metric|warehouse_table",
-      "    confidence: high|medium|low",
-      "    rationale: <why this source is acceptable>",
+      "source:",
+      "  kind: dbt_model",
+      "  ref: model.project.model_name",
+      "dbt_contract:",
+      "  model: <dbt model name>",
+      "  enforced: false",
+      "  source_of_truth: true",
       "metrics:",
       "  - name: <domain metric>",
-      "    definition: <specific formula/business rule>",
-      "    allowed_aggregations: [sum, avg, count]",
+      "    formula: <specific formula/business rule>",
+      "    grain: <metric grain>",
+      "    time_dimension: <date or timestamp dimension>",
+      "    dimensions: []",
+      "    status: draft",
       "dimensions:",
-      "  - name: <business dimension>",
-      "    definition: <how users slice this concept>",
+      "  - <business dimension>",
       "required_tests:",
       "  - not_null",
       "  - accepted_values",
-      "certification_policy:",
-      "  required_approvals: 1",
+      "review:",
+      "  cadence: quarterly",
       "  reviewers: []",
-      "  allow_self_approval: false",
-      "lineage:",
-      `  conceptual_entity: ${selectedEntity?.name || contractId}`,
-      "  logical_entities: []",
-      "  physical_models: []",
-      "status: draft",
-      "assumptions: []",
-      "open_questions: []",
+      "evidence:",
+      "  source_models: []",
+      "  columns: []",
+      "  tests: []",
+      "  semantic_metrics: []",
+      "  inferred_grain: ''",
+      "  assumptions: []",
+      "  confidence: 0.0",
+      "  open_questions: []",
     ].join("\n"),
     "",
     "Quality bar:",
     "- Explain the business value this contract enables for analysts and executives in this domain.",
     "- Prefer a narrow, enforceable grain over a broad catch-all contract.",
-    "- Do not invent exact warehouse tables when candidate sources are weak; put them in open_questions or accepted_sources with low confidence.",
+    "- Do not invent exact warehouse tables when candidate sources are weak; put them in evidence.open_questions instead.",
     "- Include certification blockers as open_questions when owner, grain, accepted source, metric definition, or tests are missing.",
     "- Keep it reviewable: one contract file, no unrelated model changes.",
   ].join("\n");
@@ -858,28 +877,43 @@ export default function ModelerPanel() {
     }
     const contractDomain = slugify(selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core");
     const contractId = slugify(selectedEntity.name || selectedEntity.logical_name || "contract");
+    const contractEntity = pascalize(selectedEntity.logical_name || selectedEntity.name || "Entity");
     const contractDoc = {
-      kind: "datalex_contract",
-      id: contractId,
-      domain: selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core",
+      kind: "contract",
+      id: `${contractDomain}.${contractEntity}.${contractId}`,
+      name: contractId,
+      domain: contractDomain,
+      entity: contractEntity,
+      version: 1,
+      status: "draft",
       owner: selectedEntity.owner || "",
       business_definition: selectedEntity.description || `Define the governed business meaning for ${selectedEntity.logical_name || selectedEntity.name}.`,
       grain: "",
-      accepted_sources: [],
+      source: {
+        kind: "dbt_model",
+        ref: "",
+      },
+      dbt_contract: {
+        enforced: false,
+        source_of_truth: true,
+      },
       metrics: [],
       dimensions: Array.isArray(selectedEntity.terms) ? selectedEntity.terms : [],
       required_tests: ["not_null"],
-      certification_policy: {
-        required_approvals: 1,
+      review: {
+        cadence: "quarterly",
         reviewers: selectedEntity.owner ? [selectedEntity.owner] : [],
-        allow_self_approval: false,
       },
-      lineage: {
-        conceptual_entity: selectedEntity.name,
-        logical_entities: [],
-        physical_models: [],
+      evidence: {
+        source_models: [],
+        columns: [],
+        tests: [],
+        semantic_metrics: [],
+        inferred_grain: "",
+        assumptions: [],
+        confidence: 0,
+        open_questions: [],
       },
-      status: "draft",
     };
     const path = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
     if (contracts.some((contract) => contract.path === path || contract.fullPath === path)) {
@@ -929,7 +963,7 @@ export default function ModelerPanel() {
         selectedEntity,
         candidateSources,
         existingContracts: contracts.map((contract) => contract.path).slice(0, 20),
-        requiredShape: "datalex_contract",
+        requiredShape: "contract",
       },
     });
     addToast?.({ type: "info", message: "AI is drafting a domain-specific DataLex contract for review." });

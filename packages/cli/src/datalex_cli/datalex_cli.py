@@ -21,10 +21,12 @@ from pathlib import Path
 from datalex_core.datalex import load_project
 from datalex_core.datalex.diff import diff_entities
 from datalex_core.datalex.errors import DataLexLoadError
+from datalex_core.datalex.manifest import build_manifest, manifest_summary
 from datalex_core.datalex.migrate_layout import migrate_project
 import datalex_core.dialects  # noqa: F401  — side-effect registers built-in dialects
 from datalex_core.dialects.registry import get_dialect, known_dialects
 from datalex_core.dbt import emit_dbt, import_manifest, write_import_result
+from datalex_core.dbt.readiness import assess_manifest
 from datalex_core.dbt.sync import sync_dbt_project, report_to_json
 from datalex_core.mesh import mesh_issues, mesh_report
 from datalex_core.packages import PackageResolveError, load_imports_for, resolve_imports
@@ -139,6 +141,34 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
     )
     info_parser.set_defaults(func=_cmd_info)
 
+    # manifest
+    manifest_parser = dsub.add_parser(
+        "manifest",
+        help="Build public DataLex manifest artifacts for DQL and agents",
+    )
+    manifest_sub = manifest_parser.add_subparsers(dest="manifest_command", required=True)
+    manifest_build = manifest_sub.add_parser(
+        "build",
+        help="Build datalex-manifest.json from certified first-class contracts",
+    )
+    manifest_build.add_argument("root", help="DataLex project root")
+    manifest_build.add_argument(
+        "--out",
+        default="datalex-manifest.json",
+        help="Output JSON path (default: <root>/datalex-manifest.json)",
+    )
+    manifest_build.add_argument(
+        "--datalex-version",
+        default="1.10.0",
+        help="Version string to write into the manifest",
+    )
+    manifest_build.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Emit the manifest to stdout instead of the human summary",
+    )
+    manifest_build.set_defaults(func=_cmd_manifest_build)
+
     # dbt
     dbt_parser = dsub.add_parser("dbt", help="dbt integration (emit / import)")
     dbt_sub = dbt_parser.add_subparsers(dest="dbt_command", required=True)
@@ -178,6 +208,18 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
         help="Existing DataLex project root to merge user-authored fields from",
     )
     dbt_import.set_defaults(func=_cmd_dbt_import)
+
+    dbt_assess = dbt_sub.add_parser(
+        "assess",
+        help="Assess an existing dbt manifest for enterprise contract adoption",
+    )
+    dbt_assess.add_argument("manifest", help="Path to dbt target/manifest.json")
+    dbt_assess.add_argument(
+        "--output-json",
+        action="store_true",
+        help="Emit machine-readable domain inventory",
+    )
+    dbt_assess.set_defaults(func=_cmd_dbt_assess)
 
     dbt_sync = dbt_sub.add_parser(
         "sync",
@@ -493,6 +535,39 @@ def _cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_manifest_build(args: argparse.Namespace) -> int:
+    try:
+        project = load_project(args.root, strict=False)
+    except DataLexLoadError as e:
+        for err in e.errors:
+            print(str(err), file=sys.stderr)
+        return 1
+
+    manifest = build_manifest(project, datalex_version=args.datalex_version)
+    summary = manifest_summary(manifest)
+
+    if args.output_json:
+        print(json.dumps(manifest, indent=2))
+        return 1 if project.errors.has_errors() else 0
+
+    root = Path(args.root).resolve()
+    out = Path(args.out)
+    if not out.is_absolute():
+        out = root / out
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    print(f"Built DataLex manifest: {out}")
+    print(f"  domains:     {summary['domains']}")
+    print(f"  entities:    {summary['entities']}")
+    print(f"  contracts:   {summary['contracts']} certified")
+    if summary["diagnostics"]:
+        print(f"  diagnostics: {summary['diagnostics']}")
+    if project.contracts and summary["contracts"] == 0:
+        print("  note: no certified contracts were exported; draft/review/rejected contracts stay out of DQL.")
+    return 1 if project.errors.has_errors() else 0
+
+
 def _cmd_dbt_emit(args: argparse.Namespace) -> int:
     try:
         project = load_project(args.root, strict=True)
@@ -550,6 +625,46 @@ def _cmd_dbt_import(args: argparse.Namespace) -> int:
         print("\nWarnings:")
         for w in result.warnings:
             print(f"  - {w}")
+    return 0
+
+
+def _cmd_dbt_assess(args: argparse.Namespace) -> int:
+    try:
+        report = assess_manifest(args.manifest)
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"error: cannot assess dbt manifest: {e}", file=sys.stderr)
+        return 1
+
+    if args.output_json:
+        print(json.dumps(report, indent=2))
+        return 0
+
+    totals = report.get("totals", {})
+    print(f"dbt enterprise assessment: {report.get('project', {}).get('name')}")
+    print(f"  models:             {totals.get('models', 0)}")
+    print(f"  contracted models:  {totals.get('contracted_models', 0)}")
+    print(f"  missing contracts:  {totals.get('missing_contracts', 0)}")
+    print(f"  semantic metrics:   {totals.get('semantic_metrics', 0)}")
+    print(f"  semantic models:    {totals.get('semantic_models', 0)}")
+    print(f"  exposures:          {totals.get('exposures', 0)}")
+    print(f"  domains detected:   {totals.get('domains_detected', 0)}")
+    print("\nTop domains:")
+    domains = sorted(
+        report.get("domains", []),
+        key=lambda d: (d.get("missing_contracts", 0), d.get("models", 0)),
+        reverse=True,
+    )
+    for domain in domains[:10]:
+        print(
+            "  - {name}: {models} model(s), {contracted_models} contracted, {missing_contracts} missing".format(
+                **domain
+            )
+        )
+    opps = report.get("contract_opportunities", [])
+    if opps:
+        print("\nAI contract proposal queue:")
+        for item in opps[:10]:
+            print(f"  - {item.get('domain')}.{item.get('model')}: {item.get('reason')}")
     return 0
 
 

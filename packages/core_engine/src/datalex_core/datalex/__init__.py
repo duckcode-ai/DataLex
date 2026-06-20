@@ -14,6 +14,7 @@ Public surface:
 from datalex_core.datalex.errors import DataLexError, SourceLocation
 from datalex_core.datalex.types import LogicalType, parse_type
 from datalex_core.datalex.loader import load_project
+from datalex_core.datalex.manifest import build_manifest, manifest_summary
 from datalex_core.datalex.project import DataLexProject
 
 __all__ = [
@@ -22,5 +23,7 @@ __all__ = [
     "LogicalType",
     "parse_type",
     "load_project",
+    "build_manifest",
+    "manifest_summary",
     "DataLexProject",
 ]

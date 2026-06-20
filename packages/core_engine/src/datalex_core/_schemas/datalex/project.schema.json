@@ -49,8 +49,25 @@
       "type": "string",
       "description": "Glob for kind:semantic_model files, default 'semantic/**/*.yaml'."
     },
+    "contracts": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Glob(s) for first-class kind:contract files. Defaults include contracts/** and DataLex/*/Contracts/**."
+    },
+    "proposals": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
+      "description": "Glob(s) for first-class kind:proposal files. Draft AI outputs stay here until review/certification."
+    },
     "diagrams": {
-      "type": "string",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ],
       "description": "Glob for kind:diagram files. Defaults include domain-first DataLex/*/(conceptual|logical|physical) paths and legacy datalex/diagrams paths."
     },
     "imports": {

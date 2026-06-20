@@ -41,6 +41,8 @@ KINDS = (
     "relationship",
     "data_type",
     "semantic_model",
+    "contract",
+    "proposal",
 )
 
 
@@ -358,6 +360,18 @@ def load_project(
         "relationships": (manifest or {}).get("relationships", "relationships/**/*.yaml"),
         "data_types": (manifest or {}).get("data_types", "data_types/**/*.yaml"),
         "semantic_models": (manifest or {}).get("semantic_models", "semantic/**/*.yaml"),
+        "contracts": (manifest or {}).get("contracts", [
+            "contracts/**/*.yaml",
+            "DataLex/*/Contracts/**/*.yaml",
+            "DataLex/*/contracts/**/*.yaml",
+            "datalex/contracts/**/*.yaml",
+        ]),
+        "proposals": (manifest or {}).get("proposals", [
+            "proposals/**/*.yaml",
+            ".datalex/proposals/**/*.yaml",
+            "DataLex/*/Proposals/**/*.yaml",
+            "DataLex/*/proposals/**/*.yaml",
+        ]),
     }
 
     entities: Dict[str, Dict[str, Any]] = {}
@@ -371,6 +385,8 @@ def load_project(
     relationships: Dict[str, Dict[str, Any]] = {}
     data_types: Dict[str, Dict[str, Any]] = {}
     semantic_models: Dict[str, Dict[str, Any]] = {}
+    contracts: Dict[str, Dict[str, Any]] = {}
+    proposals: Dict[str, Dict[str, Any]] = {}
     file_of: Dict[Tuple[str, str], str] = {}
 
     def _register(doc: Dict[str, Any], path: Path) -> None:
@@ -390,6 +406,8 @@ def load_project(
             "relationship": relationships,
             "data_type": data_types,
             "semantic_model": semantic_models,
+            "contract": contracts,
+            "proposal": proposals,
         }.get(kind)
         if bucket is None:
             return
@@ -432,6 +450,8 @@ def load_project(
         relationships={k: _strip_marks(v) for k, v in relationships.items()},
         data_types={k: _strip_marks(v) for k, v in data_types.items()},
         semantic_models={k: _strip_marks(v) for k, v in semantic_models.items()},
+        contracts={k: _strip_marks(v) for k, v in contracts.items()},
+        proposals={k: _strip_marks(v) for k, v in proposals.items()},
         file_of=file_of,
         errors=bag,
     )

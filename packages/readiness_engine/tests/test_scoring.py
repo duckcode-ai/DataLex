@@ -238,6 +238,51 @@ def test_review_project_summary(tmp_path):
     by = out["byPath"]
     assert "broken.yml" in by
     assert by["broken.yml"]["status"] == "red"
+    assert out["enterprise"]["totals"]["models"] == 1
+    assert out["enterprise"]["totals"]["missing_contracts"] == 1
+    assert out["enterprise"]["totals"]["domains_detected"] >= 1
+
+
+def test_enterprise_inventory_counts_contracts_and_opportunities(tmp_path):
+    _write(
+        tmp_path / "models" / "marts" / "orders.yml",
+        """
+models:
+  - name: fct_orders
+    description: Orders fact.
+    owner: data
+    domain: commerce
+    columns:
+      - name: order_id
+        description: id
+        data_type: number
+        primary_key: true
+        tests: [unique, not_null]
+      - name: customer_id
+        description: customer
+        data_type: number
+  - name: dim_customers
+    description: Customers.
+    owner: data
+    domain: commerce
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: customer_id
+        description: id
+        data_type: number
+        tests: [unique, not_null]
+metrics:
+  - name: order_count
+""",
+    )
+    out = review_project("p1", str(tmp_path))
+    enterprise = out["enterprise"]
+    assert enterprise["totals"]["models"] == 2
+    assert enterprise["totals"]["contracted_models"] == 1
+    assert enterprise["totals"]["missing_contracts"] == 1
+    assert enterprise["totals"]["semantic_metrics"] == 1
+    assert enterprise["contract_opportunities"][0]["model"] == "fct_orders"
 
 
 def test_summary_empty(tmp_path):

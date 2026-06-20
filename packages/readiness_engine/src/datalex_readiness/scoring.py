@@ -844,6 +844,7 @@ def review_project(
     ]
 
     file_reviews = [review_file(f, artifacts) for f in selected]
+    enterprise = build_enterprise_inventory(selected)
     summary = {
         "total_files": len(file_reviews),
         "red": sum(1 for f in file_reviews if f["status"] == "red"),
@@ -868,6 +869,7 @@ def review_project(
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z"),
         "dbtArtifacts": artifacts,
+        "enterprise": enterprise,
         "summary": summary,
         "files": file_reviews,
         "byPath": {
@@ -875,3 +877,160 @@ def review_project(
             for f in file_reviews
         },
     }
+
+
+def build_enterprise_inventory(files: Iterable[Dict[str, Any]]) -> Dict[str, Any]:
+    """Build a low-noise enterprise adoption inventory from reviewed YAML files."""
+    totals = {
+        "models": 0,
+        "contracted_models": 0,
+        "missing_contracts": 0,
+        "semantic_metrics": 0,
+        "semantic_models": 0,
+        "exposures": 0,
+        "domains_detected": 0,
+        "high_value_marts": 0,
+        "missing_owners": 0,
+        "missing_descriptions": 0,
+        "unclear_grain": 0,
+        "relationship_gaps": 0,
+    }
+    domains: Dict[str, Dict[str, Any]] = {}
+    opportunities: List[Dict[str, Any]] = []
+
+    for file_record in files:
+        try:
+            content = Path(file_record.get("fullPath") or file_record.get("path")).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        doc, error = _safe_yaml_load(content)
+        if error or not isinstance(doc, dict):
+            continue
+
+        if isinstance(doc.get("metrics"), list):
+            totals["semantic_metrics"] += len(doc["metrics"])
+            _domain_row(domains, "semantic")["semantic_metrics"] += len(doc["metrics"])
+        if isinstance(doc.get("semantic_models"), list):
+            totals["semantic_models"] += len(doc["semantic_models"])
+            for sm in doc["semantic_models"]:
+                sm_doc = sm if isinstance(sm, dict) else {}
+                _domain_row(domains, _entity_domain(sm_doc, None, doc))["semantic_metrics"] += len(review_array(sm_doc.get("measures")))
+        if isinstance(doc.get("exposures"), list):
+            totals["exposures"] += len(doc["exposures"])
+
+        for item in review_collect_entities(doc):
+            resource_type = item.get("resourceType") or "model"
+            if resource_type != "model":
+                continue
+            entity = item.get("entity") or {}
+            container = item.get("container")
+            if not isinstance(entity, dict):
+                continue
+            totals["models"] += 1
+            name = review_entity_name(entity)
+            domain_name = str(_entity_domain(entity, container, doc) or "core").strip().lower() or "core"
+            row = _domain_row(domains, domain_name)
+            row["models"] += 1
+
+            columns = review_columns(entity)
+            high_value = _PUBLISHABLE_RE.search(name.lower()) or _FACT_RE.search(name.lower()) or "marts/" in str(file_record.get("path") or "")
+            owner_missing = not review_has_value(_entity_owner(entity, container))
+            description_missing = not review_has_value(entity.get("description"))
+            grain = entity.get("grain") or (entity.get("meta") or {}).get("grain") or ((entity.get("config") or {}).get("meta") or {}).get("grain")
+            unclear_grain = bool(_FACT_RE.search(name.lower()) and not review_has_value(grain))
+            rel_gaps = sum(
+                1
+                for c in columns
+                if isinstance(c, dict)
+                and str(c.get("name") or "").endswith("_id")
+                and not review_is_pk(c)
+                and not review_has_relationship_test(c)
+            )
+            contracted = _entity_contract_enforced(entity)
+
+            if contracted:
+                totals["contracted_models"] += 1
+                row["contracted_models"] += 1
+            else:
+                totals["missing_contracts"] += 1
+                row["missing_contracts"] += 1
+            if high_value:
+                totals["high_value_marts"] += 1
+                row["high_value_marts"] += 1
+            if owner_missing:
+                totals["missing_owners"] += 1
+                row["gaps"].append("missing_owner")
+            if description_missing:
+                totals["missing_descriptions"] += 1
+                row["gaps"].append("missing_description")
+            if unclear_grain:
+                totals["unclear_grain"] += 1
+                row["gaps"].append("unclear_grain")
+            if rel_gaps:
+                totals["relationship_gaps"] += rel_gaps
+                row["gaps"].append("relationship_gaps")
+
+            if not contracted and high_value:
+                opportunities.append(
+                    {
+                        "model": name,
+                        "path": file_record.get("path") or "",
+                        "domain": domain_name,
+                        "maturity": "high_value",
+                        "reason": "publishable model without an enforced dbt contract",
+                        "evidence": {
+                            "source_models": [name],
+                            "columns": [str(c.get("name")) for c in columns if isinstance(c, dict) and c.get("name")][:30],
+                            "tests": sorted({review_test_name(t) for c in columns if isinstance(c, dict) for t in review_tests(c) if review_test_name(t)}),
+                            "semantic_metrics": [],
+                            "inferred_grain": str(grain or ""),
+                            "assumptions": [
+                                "dbt remains the source of truth for physical contract enforcement",
+                                "DataLex proposal stays draft until a reviewer certifies it",
+                            ],
+                            "confidence": 0.7,
+                            "open_questions": [
+                                "Who owns this contract?",
+                                "What is the exact row grain and accepted downstream use?",
+                            ],
+                        },
+                    }
+                )
+
+    totals["domains_detected"] = len(domains)
+    domain_rows = []
+    for row in domains.values():
+        row["gaps"] = sorted(set(row["gaps"]))
+        domain_rows.append(row)
+
+    return {
+        "totals": totals,
+        "domains": sorted(domain_rows, key=lambda row: row["name"]),
+        "contract_opportunities": sorted(
+            opportunities,
+            key=lambda row: (row.get("domain") or "", row.get("model") or ""),
+        )[:100],
+    }
+
+
+def _domain_row(domains: Dict[str, Dict[str, Any]], name: str) -> Dict[str, Any]:
+    key = re.sub(r"[^a-z0-9_]+", "_", str(name or "core").strip().lower()).strip("_") or "core"
+    if key not in domains:
+        domains[key] = {
+            "name": key,
+            "models": 0,
+            "contracted_models": 0,
+            "missing_contracts": 0,
+            "semantic_metrics": 0,
+            "exposures": 0,
+            "high_value_marts": 0,
+            "gaps": [],
+        }
+    return domains[key]
+
+
+def _entity_contract_enforced(entity: Dict[str, Any]) -> bool:
+    contract = entity.get("contract") if isinstance(entity.get("contract"), dict) else {}
+    cfg = entity.get("config") if isinstance(entity.get("config"), dict) else {}
+    cfg_contract = cfg.get("contract") if isinstance(cfg.get("contract"), dict) else {}
+    return bool(contract.get("enforced") or cfg_contract.get("enforced"))

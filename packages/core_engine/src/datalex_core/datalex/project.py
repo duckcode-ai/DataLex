@@ -37,6 +37,8 @@ class DataLexProject:
     relationships: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     data_types: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     semantic_models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    contracts: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    proposals: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     file_of: Dict[Tuple[str, str], str] = field(default_factory=dict)
     errors: DataLexErrorBag = field(default_factory=DataLexErrorBag)
     # Phase C: imported packages. Each key is the package's alias; value is a
@@ -96,6 +98,7 @@ class DataLexProject:
         self._check_model_relationships()
         self._check_type_mappings()
         self._check_semantic_model_refs()
+        self._check_contract_refs()
 
     def _expand_snippets(self) -> None:
         """Inline `use: <snippet>` on columns with snippet.apply content.
@@ -263,6 +266,32 @@ class DataLexProject:
                     )
                 )
 
+    def _check_contract_refs(self) -> None:
+        """Warn when a first-class contract is not tied to a known model/entity.
+
+        Contracts can intentionally point at external sources, so missing refs
+        are warnings. They should still be visible before a manifest is built
+        because DQL certification depends on stable ids and source evidence.
+        """
+        entity_names = {ent.get("name") for ent in self.entities.values()}
+        model_names = set(self.models.keys())
+        for contract in self.contracts.values():
+            ref = contract.get("entity") or contract.get("model")
+            source = contract.get("source") if isinstance(contract.get("source"), dict) else {}
+            dbt_contract = contract.get("dbt_contract") if isinstance(contract.get("dbt_contract"), dict) else {}
+            if ref and ref not in entity_names and ref not in model_names:
+                if source.get("ref") or dbt_contract.get("model") or dbt_contract.get("unique_id"):
+                    continue
+                self.errors.add(
+                    DataLexError(
+                        code="CONTRACT_ENTITY_MISSING",
+                        severity="warn",
+                        message=f"Contract '{contract.get('name')}' references missing entity/model '{ref}'",
+                        location=self._loc_for("contract", contract),
+                        suggested_fix="Point entity/model at a loaded DataLex entity or dbt model, or set source.kind: external.",
+                    )
+                )
+
     def _loc_for(self, kind: str, obj: Dict[str, Any]) -> SourceLocation:
         name = obj.get("name", "")
         layer = obj.get("layer", "physical") if kind == "entity" else ""
@@ -286,6 +315,8 @@ class DataLexProject:
             "relationships": self.relationships,
             "data_types": self.data_types,
             "semantic_models": self.semantic_models,
+            "contracts": self.contracts,
+            "proposals": self.proposals,
             "imports": {
                 alias: {
                     "root": str(sub.root),

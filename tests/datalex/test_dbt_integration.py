@@ -124,7 +124,12 @@ class DbtManifestImportTests(unittest.TestCase):
                     "database": "analytics",
                     "schema": "staging",
                     "description": "Staging orders.",
-                    "config": {"materialized": "view"},
+                    "config": {
+                        "materialized": "view",
+                        "contract": {"enforced": True},
+                        "meta": {"owner": "data@example.com", "domain": "commerce"},
+                    },
+                    "tags": ["mart"],
                     "depends_on": {"nodes": ["source.acme.raw.orders"]},
                     "columns": {
                         "order_id": {"name": "order_id", "data_type": "bigint"},
@@ -167,6 +172,10 @@ class DbtManifestImportTests(unittest.TestCase):
                 (Path(tmp) / "proj" / "models" / "dbt" / "stg_orders.yaml").read_text()
             )
             self.assertEqual(mdl_doc["kind"], "model")
+            self.assertEqual(mdl_doc["contract"], {"enforced": True})
+            self.assertEqual(mdl_doc["owner"], "data@example.com")
+            self.assertEqual(mdl_doc["domain"], "commerce")
+            self.assertIn("mart", mdl_doc["tags"])
             self.assertEqual(
                 mdl_doc["meta"]["datalex"]["dbt"]["unique_id"], "model.acme.stg_orders"
             )

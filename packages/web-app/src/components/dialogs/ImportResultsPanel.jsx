@@ -84,6 +84,8 @@ function buildReportText(report, summary) {
 export default function ImportResultsPanel({ report, tree, sourceLabel, readinessReview, readinessReviewError, onClose, onCopyReport }) {
   const summary = React.useMemo(() => summarizeTree(tree), [tree]);
   const readinessSummary = readinessReview?.summary || null;
+  const enterprise = readinessReview?.enterprise || null;
+  const enterpriseTotals = enterprise?.totals || null;
 
   const warningBanner = React.useMemo(() => {
     if (!report) return null;
@@ -189,6 +191,36 @@ export default function ImportResultsPanel({ report, tree, sourceLabel, readines
             {stat("Green", readinessSummary.green ?? 0)}
             {stat("Findings", readinessSummary.findings ?? 0, "warn")}
           </div>
+        </div>
+      )}
+
+      {enterpriseTotals && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 6 }}>
+            Enterprise adoption
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            {stat("Models", enterpriseTotals.models ?? 0)}
+            {stat("dbt contracts", enterpriseTotals.contracted_models ?? 0)}
+            {stat("Need contracts", enterpriseTotals.missing_contracts ?? 0, "warn")}
+            {stat("Metrics", enterpriseTotals.semantic_metrics ?? 0)}
+            {stat("Domains", enterpriseTotals.domains_detected ?? 0)}
+          </div>
+          {(enterprise?.contract_opportunities || []).length > 0 && (
+            <details>
+              <summary style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", cursor: "pointer" }}>
+                AI contract proposal queue ({enterprise.contract_opportunities.length})
+              </summary>
+              <ul style={{ margin: "6px 0 0 0", paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
+                {enterprise.contract_opportunities.slice(0, 8).map((item) => (
+                  <li key={`${item.path || item.domain}-${item.model}`}>
+                    <code style={{ fontSize: 11 }}>{item.domain}.{item.model}</code>
+                    <span style={{ color: "var(--text-tertiary)" }}> — {item.reason}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </div>
       )}
 
