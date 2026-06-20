@@ -48,7 +48,7 @@ function artifactMeta(path, name, kind = "file") {
   const isModelConceptual = /^models\/conceptual(\/|$)/.test(p);
   const isModelLogical = /^models\/logical(\/|$)/.test(p);
   const isModelPhysical = /^models\/physical(\/|$)/.test(p);
-  const isGeneratedDbt = /^generated-sql\//.test(p) || /^datalex\/generated\/dbt(\/|$)/.test(p);
+  const isGeneratedDbt = /^generated-sql\//.test(p) || /^generated\/dbt(\/|$)/.test(p) || /^datalex\/generated\/dbt(\/|$)/.test(p);
   if (kind === "folder") {
     if (isDiagramConceptual) return { tone: "conceptual", label: "conceptual", icon: "diagram" };
     if (isDiagramLogical) return { tone: "logical", label: "logical", icon: "diagram" };
@@ -697,8 +697,8 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
             <button className="icon-btn" title="Filter"><I.Filter /></button>
           </div>
           <div className="tree">
-            {section("TABLES", "Tables", byKind.TABLES, (t) => (
-              <div key={t.id}
+            {section("TABLES", "Tables", byKind.TABLES, (t, index) => (
+              <div key={`${t.id || t.name || "table"}:${index}`}
                    className={`tree-item ${activeTable === t.id ? "active" : ""}`}
                    onClick={() => onSelectTable(t.id)}>
                 <I.Table />
@@ -706,11 +706,11 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                 <span className="badge">{t.columns.length}</span>
               </div>
             ))}
-            {byKind.VIEWS.length > 0 && section("VIEWS", "Views", byKind.VIEWS, (v) => (
-              <div key={v.id} className="tree-item"><I.View /><span>{v.name}</span></div>
+            {byKind.VIEWS.length > 0 && section("VIEWS", "Views", byKind.VIEWS, (v, index) => (
+              <div key={`${v.id || v.name || "view"}:${index}`} className="tree-item"><I.View /><span>{v.name}</span></div>
             ))}
-            {byKind.ENUMS.length > 0 && section("ENUMS", "Enums", byKind.ENUMS, (e) => (
-              <div key={e.id}
+            {byKind.ENUMS.length > 0 && section("ENUMS", "Enums", byKind.ENUMS, (e, index) => (
+              <div key={`${e.id || e.name || "enum"}:${index}`}
                    className={`tree-item ${activeTable === e.id ? "active" : ""}`}
                    onClick={() => onSelectTable(e.id)}>
                 <I.Enum /><span>{e.name}</span>
@@ -723,8 +723,8 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
                   <span>Subject Areas</span><span className="count">({subjectAreas.length})</span>
                 </div>
                 <div className="tree-items">
-                  {subjectAreas.map((s) => (
-                    <div key={s.id || s.label} className="tree-item">
+                  {subjectAreas.map((s, index) => (
+                    <div key={`${s.id || s.label || "subject"}:${index}`} className="tree-item">
                       <span className="swatch" style={{ background: s.color || `var(--cat-${s.cat})` }} />
                       <span>{s.label}</span>
                       <I.Eye />

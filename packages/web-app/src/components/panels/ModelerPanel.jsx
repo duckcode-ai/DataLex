@@ -208,7 +208,7 @@ function buildDomainContractPrompt({ selectedEntity, model, entities, relationsh
     }));
   const selectedRelationships = relationshipSummaryForEntity(relationships, selectedEntity?.name);
   const existingContractPaths = uniqueList((contracts || []).map((contract) => contract.path), 16);
-  const targetPath = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+  const targetPath = `${contractDomain}/contracts/${contractId}.contract.yaml`;
 
   return [
     `You are a specialized DataLex contract designer for the ${domain} domain.`,
@@ -915,7 +915,7 @@ export default function ModelerPanel() {
         open_questions: [],
       },
     };
-    const path = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+    const path = `${contractDomain}/contracts/${contractId}.contract.yaml`;
     if (contracts.some((contract) => contract.path === path || contract.fullPath === path)) {
       addToast?.({ type: "info", message: "A contract for this concept already exists." });
       return;
@@ -936,7 +936,7 @@ export default function ModelerPanel() {
     const domain = selectedEntity.domain || selectedEntity.subject_area || model?.domain || model?.model?.domain || "core";
     const contractDomain = slugify(domain);
     const contractId = slugify(selectedEntity.name || selectedEntity.logical_name || "contract");
-    const targetPath = `DataLex/${contractDomain}/Contracts/${contractId}.contract.yaml`;
+    const targetPath = `${contractDomain}/contracts/${contractId}.contract.yaml`;
     if (contracts.some((contract) => contract.path === targetPath || contract.fullPath === targetPath)) {
       addToast?.({ type: "info", message: "A contract for this concept already exists. Ask AI to improve the existing contract instead." });
       return;
@@ -1666,7 +1666,7 @@ export default function ModelerPanel() {
       logicSql.trim() || "select *\nfrom source_model",
       "",
     ].join("\n");
-    const base = `DataLex/${domainSlug}/Generated/dbt`;
+    const base = `generated/dbt/${domainSlug}`;
     try {
       await createNewFile(`${base}/${modelSlug}.sql`, sqlText);
       await createNewFile(`${base}/${modelSlug}.yml`, yaml.dump(schemaDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
@@ -1779,7 +1779,7 @@ export default function ModelerPanel() {
               Generate dbt SQL/YAML
             </button>
             <div className="rounded-lg bg-bg-primary border border-border-primary px-2 py-2 text-[10px] text-text-muted leading-snug">
-              Output path: DataLex/{targetDomain || "core"}/Generated/dbt/{targetModelName || "model"}.sql and .yml
+              Output path: generated/dbt/{targetDomain || "core"}/{targetModelName || "model"}.sql and .yml
             </div>
           </div>
         </PanelSection>

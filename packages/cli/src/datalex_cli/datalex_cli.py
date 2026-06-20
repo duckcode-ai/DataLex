@@ -546,16 +546,16 @@ def _cmd_manifest_build(args: argparse.Namespace) -> int:
     manifest = build_manifest(project, datalex_version=args.datalex_version)
     summary = manifest_summary(manifest)
 
-    if args.output_json:
-        print(json.dumps(manifest, indent=2))
-        return 1 if project.errors.has_errors() else 0
-
     root = Path(args.root).resolve()
     out = Path(args.out)
     if not out.is_absolute():
         out = root / out
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    if args.output_json:
+        print(json.dumps(manifest, indent=2))
+        return 1 if project.errors.has_errors() else 0
 
     print(f"Built DataLex manifest: {out}")
     print(f"  domains:     {summary['domains']}")

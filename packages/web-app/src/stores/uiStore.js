@@ -54,8 +54,21 @@ const initialBottom = loadBottom();
    Separate blob for shell-wide preferences (view mode, right-panel tab).
    Kept in its own key so the bottom-panel blob stays focused. */
 const SHELL_STORAGE = "datalex.shell";
-const VALID_SHELL_VIEW_MODES = ["diagram", "docs", "table", "views", "enums", "capabilities"];
-const DEFAULT_SHELL = { viewMode: "diagram", rightTab: "COLUMNS", rightWidth: 320 };
+const VALID_SHELL_VIEW_MODES = [
+  "ai-setup",
+  "readiness",
+  "domains",
+  "proposals",
+  "contracts",
+  "publish",
+  "diagram",
+  "docs",
+  "table",
+  "views",
+  "enums",
+  "capabilities",
+];
+const DEFAULT_SHELL = { viewMode: "ai-setup", rightTab: "COLUMNS", rightWidth: 320 };
 const RIGHT_PANEL_MIN = 280;
 const RIGHT_PANEL_MAX_RESERVE = 400; // leave this much room for the rest of the shell
 
@@ -123,7 +136,7 @@ const useUiStore = create((set, get) => ({
   aiReviewDocument: null,
 
   // ── Shell view mode (swaps the main canvas surface) ──
-  shellViewMode: initialShell.viewMode, // "diagram" | "table" | "views" | "enums"
+  shellViewMode: initialShell.viewMode, // workflow modes plus diagram/docs/table drilldowns
 
   // ── Activity feed (bell popover) ──
   // Rolling list of recent notable events (toasts, saves, commits). Separate

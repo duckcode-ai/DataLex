@@ -20,7 +20,7 @@ export function resolveAiProviderConfig(input = {}) {
   if (!meta) {
     throw new AiProviderError(400, "AI_PROVIDER_UNSUPPORTED", `Unsupported AI provider: ${provider}`);
   }
-  const model = String(input.model || process.env.DATALEX_AI_MODEL || meta.defaultModel || "").trim();
+  const model = String(input.model || envValue(meta.modelEnvVar) || process.env.DATALEX_AI_MODEL || meta.defaultModel || "").trim();
   const baseUrl = String(input.baseUrl || envValue(meta.baseUrlEnvVar) || process.env.DATALEX_AI_BASE_URL || "").trim();
   const apiKey = String(input.apiKey || envValue(meta.envVar) || "").trim();
   return {

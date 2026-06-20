@@ -15,6 +15,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 DATALEX_PROJECT_CONFIG = ".dm-project.json"
+SKIP_DIR_NAMES = {
+    "dbt_packages",
+    "dbt_modules",
+    "node_modules",
+    "target",
+    "logs",
+    "dist",
+    "build",
+    "site",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+}
 
 
 def _normalize_subpath(value: Any, fallback: str = "") -> str:
@@ -60,7 +74,7 @@ def to_posix_path(value: Any) -> str:
 
 
 def walk_yaml_files(directory: str) -> List[Dict[str, Any]]:
-    """Recursively list YAML files, sorted, skipping dotdirs and node_modules."""
+    """Recursively list project YAML files, sorted, skipping generated/vendor dirs."""
     base = Path(directory)
     results: List[Dict[str, Any]] = []
     if not base.exists() or not base.is_dir():
@@ -73,7 +87,7 @@ def walk_yaml_files(directory: str) -> List[Dict[str, Any]]:
             return
         for entry in entries:
             if entry.is_dir():
-                if entry.name.startswith(".") or entry.name == "node_modules":
+                if entry.name.startswith(".") or entry.name in SKIP_DIR_NAMES:
                     continue
                 _walk(entry)
             elif entry.is_file() and entry.name.lower().endswith((".yaml", ".yml")):

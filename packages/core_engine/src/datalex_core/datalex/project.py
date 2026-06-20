@@ -39,6 +39,7 @@ class DataLexProject:
     semantic_models: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     contracts: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     proposals: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    metric_contracts: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     file_of: Dict[Tuple[str, str], str] = field(default_factory=dict)
     errors: DataLexErrorBag = field(default_factory=DataLexErrorBag)
     # Phase C: imported packages. Each key is the package's alias; value is a
@@ -317,6 +318,7 @@ class DataLexProject:
             "semantic_models": self.semantic_models,
             "contracts": self.contracts,
             "proposals": self.proposals,
+            "metric_contracts": self.metric_contracts,
             "imports": {
                 alias: {
                     "root": str(sub.root),

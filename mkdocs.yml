@@ -83,6 +83,7 @@ nav:
       - The DataLex + DQL stack: datalex-and-dql.md
   - Concepts:
       - Architecture: architecture.md
+      - Enterprise OSS workflow: enterprise-oss-workflow.md
       - Layered model (conceptual / logical / physical): datalex-layout.md
       - Contracts for DQL blocks: contracts-for-dql-blocks.md
       - Data mesh interfaces: mesh-interfaces.md

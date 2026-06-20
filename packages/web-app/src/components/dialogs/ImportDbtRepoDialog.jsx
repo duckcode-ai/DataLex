@@ -30,7 +30,7 @@ const TABS = [
 ];
 
 export default function ImportDbtRepoDialog() {
-  const { closeModal, addToast } = useUiStore();
+  const { closeModal, addToast, setShellViewMode } = useUiStore();
   const { loadDbtImportTree, loadDbtImportTreeAsProject } = useWorkspaceStore();
 
   const [tab, setTab] = useState("git");
@@ -177,6 +177,7 @@ export default function ImportDbtRepoDialog() {
     const handleOpen = async () => {
       try {
         if (results.openProject) await results.openProject();
+        setShellViewMode("readiness");
       } finally {
         closeModal();
       }

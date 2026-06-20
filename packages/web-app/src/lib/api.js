@@ -260,6 +260,28 @@ export async function testAiSettings(body = {}) {
   });
 }
 
+export async function fetchAiSettings(projectId) {
+  return request(`/ai/settings?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function saveAiSettings(body = {}) {
+  return request("/ai/settings", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function fetchAiContextStatus(projectId) {
+  return request(`/ai/context/status?projectId=${encodeURIComponent(projectId)}`);
+}
+
+export async function buildAiContext(projectId) {
+  return request("/ai/context/build", {
+    method: "POST",
+    body: JSON.stringify({ projectId }),
+  });
+}
+
 export async function fetchAiProviders() {
   return request("/ai/providers");
 }
@@ -586,6 +608,60 @@ export async function aiCanonicalize(projectId, { minRecurrence = 2 } = {}) {
   return request("/ai/canonicalize", {
     method: "POST",
     body: JSON.stringify({ projectId, minRecurrence }),
+  });
+}
+
+export async function fetchEnterpriseScan(projectId, { force = false } = {}) {
+  return request("/enterprise/scan", {
+    method: "POST",
+    body: JSON.stringify({ projectId, force }),
+  });
+}
+
+export async function fetchEnterpriseReadiness(projectId) {
+  const qs = new URLSearchParams({ projectId });
+  return request(`/enterprise/readiness?${qs.toString()}`);
+}
+
+export async function generateEnterpriseProposal(projectId, { domain, packType = "core_certification", scopeSize = "focused", overwrite = false } = {}) {
+  return request("/enterprise/generate", {
+    method: "POST",
+    body: JSON.stringify({ projectId, domain, packType, scopeSize, overwrite }),
+  });
+}
+
+export async function validateProposalChanges(projectId, changes = []) {
+  return request("/proposals/validate", {
+    method: "POST",
+    body: JSON.stringify({ projectId, changes }),
+  });
+}
+
+export async function applyProposalChanges(projectId, changes = []) {
+  return request("/proposals/apply", {
+    method: "POST",
+    body: JSON.stringify({ projectId, changes }),
+  });
+}
+
+export async function certifyProposal(projectId, { proposalPath, status = "certified" } = {}) {
+  return request("/proposals/certify", {
+    method: "POST",
+    body: JSON.stringify({ projectId, proposalPath, status }),
+  });
+}
+
+export async function buildDatalexManifest(projectId, { out = "datalex-manifest.json" } = {}) {
+  return request("/datalex/manifest/build", {
+    method: "POST",
+    body: JSON.stringify({ projectId, out }),
+  });
+}
+
+export async function fetchDqlReadiness(projectId, { force = false } = {}) {
+  return request("/dql/readiness", {
+    method: "POST",
+    body: JSON.stringify({ projectId, force }),
   });
 }
 

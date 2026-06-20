@@ -285,6 +285,49 @@ metrics:
     assert enterprise["contract_opportunities"][0]["model"] == "fct_orders"
 
 
+def test_review_project_skips_vendor_and_generated_yaml(tmp_path):
+    _write(
+        tmp_path / "models" / "marts" / "orders.yml",
+        """
+models:
+  - name: orders
+    description: Orders mart.
+    owner: data
+    domain: commerce
+    columns:
+      - name: order_id
+        description: id
+        data_type: number
+        tests: [unique, not_null]
+""",
+    )
+    _write(
+        tmp_path / "dbt_packages" / "vendor_pkg" / "models.yml",
+        """
+models:
+  - name: vendor_model
+    columns:
+      - name: id
+""",
+    )
+    _write(
+        tmp_path / "target" / "compiled.yml",
+        """
+models:
+  - name: generated_model
+    columns:
+      - name: id
+""",
+    )
+
+    out = review_project("p1", str(tmp_path))
+    assert out["summary"]["total_files"] == 1
+    assert out["enterprise"]["totals"]["models"] == 1
+    assert "models/marts/orders.yml" in out["byPath"]
+    assert "dbt_packages/vendor_pkg/models.yml" not in out["byPath"]
+    assert "target/compiled.yml" not in out["byPath"]
+
+
 def test_summary_empty(tmp_path):
     out = review_project("empty", str(tmp_path))
     assert out["summary"]["total_files"] == 0

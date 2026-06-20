@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { readdir, readFile, writeFile, mkdir, stat, rename, copyFile, unlink as unlinkFile } from "fs/promises";
 import { join, relative, extname, basename, resolve, isAbsolute, dirname } from "path";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync, realpathSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, rmdirSync, rmSync, realpathSync, readdirSync } from "fs";
 import { execFileSync as rawExecFileSync, spawn } from "child_process";
 import { tmpdir } from "os";
 import { createRequire } from "module";
@@ -18,6 +18,14 @@ import {
   resolveAiProviderConfig as resolveConfiguredAiProvider,
 } from "./ai/providers.js";
 import {
+  enterpriseAiGenerationStatus,
+  getEffectiveEnterpriseProviderConfig,
+  listEnterpriseProviderSettings,
+  markEnterpriseProviderTest,
+  providerSettingsFile,
+  saveEnterpriseProviderSettings,
+} from "./ai/providerSettings.js";
+import {
   appendAiChatMessages,
   createAiChat,
   deleteAiMemory,
@@ -30,6 +38,15 @@ import {
   renderMemoryContext,
   upsertAiMemories,
 } from "./ai/agentStore.js";
+import {
+  buildDraftProposalPack,
+  buildEnterpriseScan,
+  canonicalArtifactPath,
+  enterpriseCacheKey,
+  ensureCanonicalWorkspace,
+  pascalize,
+  slugify,
+} from "./enterprise.js";
 const require = createRequire(import.meta.url);
 const yaml = require("js-yaml");
 const jsonpatch = require("fast-json-patch");
@@ -161,6 +178,7 @@ const DATALEX_WORKSPACE_ROOT = "DataLex";
 const DATALEX_SKILLS_DIR = "Skills";
 const AI_INDEX_CACHE = new Map();
 const DBT_REVIEW_CACHE = new Map();
+const ENTERPRISE_SCAN_CACHE = new Map();
 // Doc-block index cache, keyed by absolute project path. Invalidated on
 // `.md` and YAML writes (file create / update / save-all). The index
 // itself is computed by the Python readiness_engine via `python -m
@@ -1682,7 +1700,18 @@ app.get("/api/git/status", async (req, res) => {
   } catch (err) {
     const stderr = (err.stderr || err.message || "").toString();
     if (stderr.includes("not a git repository")) {
-      return res.status(400).json({ error: "Selected project is not a git repository" });
+      return res.json({
+        ok: true,
+        projectId: String(req.query.projectId || "").trim(),
+        isGitRepo: false,
+        branch: "",
+        ahead: 0,
+        behind: 0,
+        staged: [],
+        unstaged: [],
+        untracked: [],
+        message: "Selected project is not a git repository",
+      });
     }
     res.status(500).json({ error: stderr.trim() || String(err.message || err) });
   }
@@ -4042,6 +4071,269 @@ function parseAiJson(text) {
   try { return JSON.parse(match[0]); } catch (_err) { return null; }
 }
 
+function boundedEnterpriseGenerationContext(scan, { domain = "", packType = "core_certification", scopeSize = "focused" } = {}, aiIndex = null) {
+  const domainName = slugify(domain || scan?.domains?.[0]?.name || "unassigned");
+  const selectedDomain = (scan?.domains || []).find((item) => item.name === domainName) || null;
+  const limit = scopeSize === "larger" ? 12 : 5;
+  const opportunities = (scan?.contract_opportunities || [])
+    .filter((item) => item.domain === domainName)
+    .slice(0, limit);
+  const metricFamilies = (scan?.metric_families || [])
+    .filter((family) => family.family === domainName || domainName === "unassigned" || domainName === "semantic")
+    .slice(0, 8);
+  const proposalPack = (scan?.proposal_packs || []).find((pack) => pack.domain === domainName) || null;
+  return {
+    requested_scope: {
+      domain: domainName,
+      pack_type: packType,
+      scope_size: scopeSize,
+      generation_rule: "Generate one small draft proposal pack. Do not model the full project.",
+    },
+    project: scan?.project || {},
+    detected: scan?.detected || {},
+    totals: scan?.totals || {},
+    domain: selectedDomain,
+    proposal_pack: proposalPack,
+    contract_opportunities: opportunities.map((item) => ({
+      model: item.model,
+      unique_id: item.unique_id,
+      path: item.path,
+      maturity: item.maturity,
+      reason: item.reason,
+      grain: item.grain,
+      columns: item.columns,
+      tests: item.tests,
+      semantic_metrics: item.semantic_metrics,
+      confidence: item.confidence,
+    })),
+    metric_families: metricFamilies,
+    existing_proposals: (scan?.proposals || []).filter((item) => item.domain === domainName).slice(0, 12),
+    existing_contracts: (scan?.contracts || []).filter((item) => item.domain === domainName).slice(0, 12),
+    ai_context: aiIndex ? {
+      builtAt: aiIndex.builtAt,
+      recordCount: Array.isArray(aiIndex.records) ? aiIndex.records.length : 0,
+      typedCounts: aiIndex.typedCounts || {},
+      dbtArtifacts: aiIndex.dbtArtifacts || {},
+    } : null,
+  };
+}
+
+function enterpriseGenerationMessages(context) {
+  return [
+    {
+      role: "system",
+      content: [
+        "You are DataLex enterprise AI for dbt adoption.",
+        "Return JSON only. Do not include markdown or code fences.",
+        "DataLex does not replace dbt. dbt remains the source of truth for SQL, YAML, semantic metrics, and enforced physical contracts.",
+        "Generate a small draft proposal pack from the provided dbt manifest/YAML/semantic evidence. Do not invent a full-project model.",
+        "If the requested domain is unassigned, propose business meaning from source model names, columns, semantic metrics, tests, exposures, and descriptions. Mark assumptions clearly.",
+        "Required JSON shape: { business_domain, summary, business_meaning, proposal_type, target, files, evidence: { source_models, columns_used, existing_tests, semantic_metrics, inferred_grain, assumptions, confidence, open_questions }, review_notes }.",
+        "business_domain must be the proposed business domain name, for example commerce, finance, risk, customer, product, or operations.",
+        "files must be exact DataLex paths that would change, using lowercase canonical folders such as commerce/contracts/order_revenue.contract.yaml.",
+        "confidence must be a number from 0 to 1.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: JSON.stringify(context, null, 2),
+    },
+  ];
+}
+
+function cleanStringList(value, fallback = []) {
+  if (typeof value === "string" && value.trim()) return [value.trim()];
+  const list = Array.isArray(value) ? value : fallback;
+  return list.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 80);
+}
+
+function clampConfidence(value, fallback = 0.7) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(1, n));
+}
+
+function normalizeEnterpriseProposalType(value, fallback = "datalex_contract") {
+  const text = String(value || "").trim().toLowerCase();
+  const aliases = {
+    core_certification: "datalex_contract",
+    business_contract: "datalex_contract",
+    contract: "datalex_contract",
+    metric_family: "metric_contract",
+    dbt_model_contract: "dbt_contract",
+    docs: "documentation",
+    glossary_terms: "glossary",
+  };
+  const normalized = aliases[text] || text || fallback;
+  const allowed = new Set([
+    "domain",
+    "conceptual_model",
+    "logical_entity",
+    "relationship",
+    "dbt_contract",
+    "datalex_contract",
+    "metric_contract",
+    "dql_block",
+    "documentation",
+    "glossary",
+  ]);
+  return allowed.has(normalized) ? normalized : fallback;
+}
+
+function aiProposedBusinessDomain(aiPayload) {
+  const evidence = aiPayload?.evidence && typeof aiPayload.evidence === "object" ? aiPayload.evidence : {};
+  const direct = [
+    aiPayload?.business_domain,
+    aiPayload?.proposed_domain,
+    aiPayload?.domain,
+    evidence.business_domain,
+    evidence.proposed_domain,
+    evidence.domain,
+  ];
+  for (const value of direct) {
+    const slug = slugify(value, "");
+    if (slug && slug !== "unassigned") return slug;
+  }
+  const text = [aiPayload?.summary, aiPayload?.business_meaning].map((item) => String(item || "")).join("\n");
+  const patterns = [
+    /["'“”]([A-Za-z][A-Za-z0-9 _-]{2,40})["'“”]\s+domain/i,
+    /\bthe\s+([A-Z][A-Za-z0-9 _-]{2,40})\s+domain\b/,
+    /\b([A-Z][A-Za-z0-9 _-]{2,40})\s+domain\b/,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    const slug = slugify(match?.[1], "");
+    if (slug && slug !== "unassigned") return slug;
+  }
+  return "";
+}
+
+function canonicalEnterpriseProposalFiles({ proposalType, domain, name, opportunities = [], metricFamilies = [] }) {
+  const domainName = slugify(domain || "core");
+  const proposalName = slugify(name || `${domainName}_certification`);
+  const modelName = slugify(opportunities?.[0]?.model || proposalName);
+  const byType = {
+    domain: [`domains/${domainName}.yaml`],
+    conceptual_model: [canonicalArtifactPath(domainName, "conceptual", proposalName, "diagram.yaml")],
+    logical_entity: [canonicalArtifactPath(domainName, "logical", proposalName, "diagram.yaml")],
+    relationship: [
+      canonicalArtifactPath(domainName, "conceptual", proposalName, "diagram.yaml"),
+      canonicalArtifactPath(domainName, "logical", proposalName, "diagram.yaml"),
+      canonicalArtifactPath(domainName, "physical", proposalName, "diagram.yaml"),
+    ],
+    dbt_contract: [
+      canonicalArtifactPath(domainName, "physical", proposalName, "diagram.yaml"),
+      `generated/dbt/${domainName}/${modelName}.contract.yml`,
+    ],
+    metric_contract: metricFamilies.length
+      ? metricFamilies.map((family) => canonicalArtifactPath(domainName, "semantic", `${family.family}_metrics`, "metric.yaml"))
+      : [canonicalArtifactPath(domainName, "semantic", `${domainName}_metrics`, "metric.yaml")],
+    glossary: [canonicalArtifactPath(domainName, "glossary", domainName, "term.yaml")],
+    documentation: [canonicalArtifactPath(domainName, "glossary", domainName, "term.yaml")],
+    datalex_contract: [
+      `domains/${domainName}.yaml`,
+      canonicalArtifactPath(domainName, "conceptual", proposalName, "diagram.yaml"),
+      canonicalArtifactPath(domainName, "logical", proposalName, "diagram.yaml"),
+      canonicalArtifactPath(domainName, "physical", proposalName, "diagram.yaml"),
+      canonicalArtifactPath(domainName, "contracts", proposalName, "contract.yaml"),
+      canonicalArtifactPath(domainName, "semantic", `${domainName}_metrics`, "metric.yaml"),
+      canonicalArtifactPath(domainName, "glossary", domainName, "term.yaml"),
+      `generated/dbt/${domainName}/${modelName}.contract.yml`,
+    ],
+    dql_block: [],
+  };
+  return byType[proposalType] || byType.datalex_contract;
+}
+
+function buildAiGeneratedEnterpriseProposal(scan, options, aiPayload, providerConfig) {
+  const requestedDomain = slugify(options?.domain || scan?.domains?.[0]?.name || "unassigned");
+  const aiDomain = requestedDomain === "unassigned" ? aiProposedBusinessDomain(aiPayload) : "";
+  const effectiveDomain = aiDomain || requestedDomain;
+  const skeleton = buildDraftProposalPack(scan, { ...options, domain: effectiveDomain });
+  const proposal = yaml.load(skeleton.content);
+  const evidence = aiPayload?.evidence && typeof aiPayload.evidence === "object" ? aiPayload.evidence : {};
+  const fallbackEvidence = proposal.evidence || {};
+  const fallbackOpportunity = proposal.meta?.contract_opportunities?.[0] || {};
+  const aiSuggestedFiles = cleanStringList(aiPayload?.files, []);
+  proposal.proposal_type = normalizeEnterpriseProposalType(aiPayload?.proposal_type, proposal.proposal_type);
+  proposal.target = aiPayload?.target || proposal.target;
+  proposal.summary = aiPayload?.summary || aiPayload?.business_meaning || proposal.summary;
+  proposal.evidence = {
+    source_models: cleanStringList(evidence.source_models, fallbackEvidence.source_models || []),
+    columns: cleanStringList(evidence.columns_used || evidence.columns, fallbackEvidence.columns || fallbackOpportunity.columns || []),
+    tests: cleanStringList(evidence.existing_tests || evidence.tests, fallbackEvidence.tests || fallbackOpportunity.tests || []),
+    semantic_metrics: cleanStringList(evidence.semantic_metrics, fallbackEvidence.semantic_metrics || fallbackOpportunity.semantic_metrics || []),
+    inferred_grain: String(evidence.inferred_grain || fallbackEvidence.inferred_grain || fallbackOpportunity.grain || ""),
+    assumptions: cleanStringList(evidence.assumptions, fallbackEvidence.assumptions || []),
+    confidence: clampConfidence(evidence.confidence, fallbackEvidence.confidence || 0.7),
+    open_questions: cleanStringList(evidence.open_questions, fallbackEvidence.open_questions || []),
+  };
+  const sourceModelSet = new Set(proposal.evidence.source_models);
+  const matchedOpportunities = (scan?.contract_opportunities || []).filter((item) => (
+    sourceModelSet.has(item.unique_id) || sourceModelSet.has(item.model)
+  )).slice(0, options.scopeSize === "larger" ? 12 : 5).map((item) => ({
+    ...item,
+    source_domain: item.domain,
+    domain: proposal.domain,
+  }));
+  if (aiDomain) {
+    proposal.evidence.assumptions = Array.from(new Set([
+      `AI proposed business domain '${proposal.domain}' from dbt evidence; source inventory group was '${requestedDomain}'.`,
+      ...proposal.evidence.assumptions,
+    ]));
+  }
+  const metricFamilies = proposal.meta?.metric_families || [];
+  proposal.proposed_change = {
+    ...(proposal.proposed_change || {}),
+    files: canonicalEnterpriseProposalFiles({
+      proposalType: proposal.proposal_type,
+      domain: proposal.domain,
+      name: proposal.name,
+      opportunities: matchedOpportunities,
+      metricFamilies,
+    }),
+    ai_suggested_files: aiSuggestedFiles,
+    ai_business_meaning: aiPayload?.business_meaning || "",
+    review_notes: cleanStringList(aiPayload?.review_notes, []),
+  };
+  proposal.created_by = "datalex-enterprise-ai";
+  proposal.created_at = new Date().toISOString();
+  const proposalPack = proposal.meta?.proposal_pack || {};
+  proposal.meta = {
+    ...(proposal.meta || {}),
+    source_domain: aiDomain ? requestedDomain : proposal.meta?.source_domain || proposal.domain,
+    ai_proposed_domain: aiDomain || "",
+    proposal_pack: {
+      ...proposalPack,
+      domain: proposal.domain,
+      title: `${proposal.domain.replace(/_/g, " ")} Core Certification Pack`,
+      scope: {
+        ...(proposalPack.scope || {}),
+        models: matchedOpportunities.length || proposalPack.scope?.models || 0,
+        fact_tables: matchedOpportunities.filter((item) => item.maturity === "fact_table" || item.maturity === "high_value").length || proposalPack.scope?.fact_tables || 0,
+      },
+      evidence: {
+        ...(proposalPack.evidence || {}),
+        source_models: proposal.evidence.source_models,
+        semantic_metrics: proposal.evidence.semantic_metrics,
+        confidence: proposal.evidence.confidence,
+      },
+    },
+    contract_opportunities: matchedOpportunities.length ? matchedOpportunities : proposal.meta?.contract_opportunities || [],
+    ai: {
+      provider: providerConfig.provider,
+      model: providerConfig.model,
+      generated_at: new Date().toISOString(),
+      advisory_memory_policy: "AI output is draft-only and never overrides certified dbt or DataLex artifacts.",
+    },
+    ai_response: aiPayload,
+  };
+  return {
+    path: skeleton.path,
+    content: yaml.dump(proposal, { lineWidth: 120, noRefs: true, sortKeys: false }),
+  };
+}
+
 function localAiAnswer({ message, sources, memories = [] }) {
   const top = (sources || []).slice(0, 6);
   const sourceLines = top.map((s) => `- ${s.kind}: ${s.name || s.path} (${s.path})`).join("\n");
@@ -4070,6 +4362,706 @@ async function resolveProjectAndStructure(projectId) {
   const structure = await loadProjectStructure(project.path);
   if (!existsSync(structure.modelPath)) await mkdir(structure.modelPath, { recursive: true });
   return { project, structure };
+}
+
+async function getEnterpriseScan(projectId, { force = false } = {}) {
+  const { project, structure } = await resolveProjectAndStructure(projectId);
+  ensureCanonicalWorkspace(structure.modelPath, { projectName: project.name || basename(project.path) });
+  const cacheKey = enterpriseCacheKey({ projectRoot: project.path, modelRoot: structure.modelPath });
+  const cached = ENTERPRISE_SCAN_CACHE.get(project.id);
+  if (!force && cached?.cacheKey === cacheKey) {
+    return { project, structure, scan: cached };
+  }
+
+  let readinessReview = null;
+  try {
+    readinessReview = await buildDbtReadinessReview(project, {
+      scope: "all",
+      paths: [],
+      projectRoot: project.path,
+    });
+  } catch (err) {
+    readinessReview = {
+      ok: false,
+      projectId: project.id,
+      summary: {
+        total_files: 0,
+        red: 0,
+        yellow: 0,
+        green: 0,
+        findings: 0,
+        errors: 0,
+        warnings: 1,
+        infos: 0,
+        score: 100,
+      },
+      warning: String(err?.message || err).slice(0, 500),
+      files: [],
+      byPath: {},
+    };
+  }
+
+  const scan = buildEnterpriseScan({
+    project,
+    modelRoot: structure.modelPath,
+    readinessReview,
+    aiStatus: enterpriseAiGenerationStatus(project),
+  });
+  ENTERPRISE_SCAN_CACHE.set(project.id, scan);
+  return { project, structure, scan };
+}
+
+function readYamlObjectSync(path) {
+  try {
+    const doc = yaml.load(readFileSync(path, "utf-8"));
+    return doc && typeof doc === "object" && !Array.isArray(doc) ? doc : null;
+  } catch (_err) {
+    return null;
+  }
+}
+
+function writeYamlObjectSync(path, doc) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, yaml.dump(doc, { lineWidth: 120, noRefs: true, sortKeys: false }), "utf-8");
+}
+
+function manifestSummaryFromPayload(manifest) {
+  const domains = Array.isArray(manifest?.domains) ? manifest.domains : [];
+  let entities = 0;
+  let contracts = 0;
+  let metrics = 0;
+  for (const domain of domains) {
+    const domainEntities = Array.isArray(domain?.entities) ? domain.entities : [];
+    entities += domainEntities.length;
+    metrics += Array.isArray(domain?.metrics) ? domain.metrics.length : 0;
+    for (const entity of domainEntities) {
+      contracts += Array.isArray(entity?.contracts) ? entity.contracts.length : 0;
+    }
+  }
+  return {
+    domains: domains.length,
+    entities,
+    contracts,
+    metrics,
+    diagnostics: Array.isArray(manifest?.diagnostics) ? manifest.diagnostics.length : 0,
+  };
+}
+
+function resolveOptionalProjectPath(project, basePath, rawPath, fallbackRel) {
+  const requested = rawPath ? String(rawPath) : fallbackRel;
+  const resolved = isAbsolute(requested) ? resolve(requested) : resolve(basePath, requested);
+  if (!isPathInside(project.path, resolved)) {
+    throw new ApiError(400, "PATH_ESCAPE", "DQL path must stay inside the connected project");
+  }
+  return resolved;
+}
+
+function resolveOptionalManifestPath(project, structure, rawPath) {
+  const requested = rawPath ? String(rawPath) : "datalex-manifest.json";
+  const resolved = isAbsolute(requested) ? resolve(requested) : resolve(structure.modelPath, requested);
+  if (!isPathInside(project.path, resolved) && !isPathInside(structure.modelPath, resolved)) {
+    throw new ApiError(400, "PATH_ESCAPE", "DataLex manifest path must stay inside the connected project");
+  }
+  return resolved;
+}
+
+function runDqlCompileReadiness(project, structure, { dqlPath = "", datalexManifest = "" } = {}) {
+  const dqlRoot = resolveOptionalProjectPath(project, project.path, dqlPath, "dql");
+  const manifestPath = resolveOptionalManifestPath(project, structure, datalexManifest);
+  if (!existsSync(dqlRoot)) {
+    return {
+      status: "skipped",
+      reason: "dql_folder_missing",
+      message: "No dql/ folder was found in the connected project.",
+      dqlPath: dqlRoot,
+      datalexManifest: manifestPath,
+    };
+  }
+  if (!existsSync(manifestPath)) {
+    return {
+      status: "skipped",
+      reason: "datalex_manifest_missing",
+      message: "Build datalex-manifest.json before running DQL compile readiness.",
+      dqlPath: dqlRoot,
+      datalexManifest: manifestPath,
+    };
+  }
+  const cli = process.env.DQL_CLI || "dql";
+  const argv = ["compile", dqlRoot, "--datalex-manifest", manifestPath];
+  try {
+    const output = execFileSync(cli, argv, {
+      cwd: dqlRoot,
+      encoding: "utf-8",
+      timeout: 120_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return {
+      status: "passed",
+      command: [cli, ...argv],
+      dqlPath: dqlRoot,
+      datalexManifest: manifestPath,
+      output,
+    };
+  } catch (err) {
+    if (err?.code === "ENOENT") {
+      return {
+        status: "not_configured",
+        reason: "dql_cli_missing",
+        message: "DQL CLI was not found. Set DQL_CLI or install dql to enable compile readiness.",
+        command: [cli, ...argv],
+        dqlPath: dqlRoot,
+        datalexManifest: manifestPath,
+      };
+    }
+    return {
+      status: "failed",
+      reason: "dql_compile_failed",
+      command: [cli, ...argv],
+      dqlPath: dqlRoot,
+      datalexManifest: manifestPath,
+      exitCode: typeof err?.status === "number" ? err.status : 1,
+      stdout: String(err?.stdout || "").slice(0, 4000),
+      stderr: String(err?.stderr || err?.message || "").slice(0, 4000),
+    };
+  }
+}
+
+function contractDocFromProposal(proposal) {
+  const domain = slugify(proposal?.domain || "core");
+  const pack = proposal?.meta?.proposal_pack || {};
+  const opportunity = (proposal?.meta?.contract_opportunities || [])[0] || {};
+  const modelName = slugify(opportunity.model || proposal?.target || proposal?.name || "certified_contract");
+  const entityName = pascalize(modelName, "CertifiedEntity");
+  const name = slugify(proposal?.name || `${modelName}_contract`);
+  const sourceModels = proposal?.evidence?.source_models || (opportunity.unique_id ? [opportunity.unique_id] : []);
+  const columns = proposal?.evidence?.columns || opportunity.columns || [];
+  const tests = proposal?.evidence?.tests || opportunity.tests || [];
+  const semanticMetrics = proposal?.evidence?.semantic_metrics || opportunity.semantic_metrics || [];
+  const inferredGrain = proposal?.evidence?.inferred_grain || opportunity.grain || "";
+  return {
+    kind: "contract",
+    id: `${domain}.${entityName}.${name}`,
+    name,
+    display_name: pack.title || `${entityName} Contract`,
+    domain,
+    entity: entityName,
+    model: modelName,
+    description: proposal?.summary || `Certified business contract for ${entityName}.`,
+    business_definition: proposal?.summary || `Certified business contract for ${entityName}.`,
+    version: 1,
+    status: "certified",
+    owner: proposal?.owner || "analytics",
+    grain: inferredGrain,
+    source: {
+      kind: opportunity.unique_id ? "dbt_model" : "external",
+      ref: opportunity.unique_id || proposal?.target || name,
+    },
+    dbt_contract: {
+      model: opportunity.model || modelName,
+      unique_id: opportunity.unique_id || "",
+      enforced: false,
+      source_of_truth: true,
+    },
+    dimensions: columns.filter((column) => /(_id$|date|at$|status|type|category)/i.test(String(column))).slice(0, 20),
+    required_tests: tests.slice(0, 20),
+    metrics: semanticMetrics.slice(0, 20).map((metric) => ({
+      name: slugify(metric),
+      status: "certified",
+    })),
+    evidence: {
+      source_models: sourceModels,
+      columns,
+      tests,
+      semantic_metrics: semanticMetrics,
+      inferred_grain: inferredGrain,
+      assumptions: proposal?.evidence?.assumptions || [],
+      confidence: Number(proposal?.evidence?.confidence ?? opportunity.confidence ?? 0.7),
+      open_questions: proposal?.evidence?.open_questions || [],
+    },
+    review: {
+      cadence: "git_review",
+      reviewers: [],
+      last_reviewed_at: new Date().toISOString(),
+    },
+    meta: {
+      generated_from_proposal: proposal?.name || "",
+      generated_by: "datalex-enterprise-certify",
+    },
+  };
+}
+
+function titleCase(value, fallback = "Core") {
+  const parts = String(value || fallback)
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  return parts.length
+    ? parts.map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ")
+    : fallback;
+}
+
+function inferDbtDataType(columnName) {
+  const name = String(columnName || "").toLowerCase();
+  if (/(^is_|_flag$|_active$|enabled|disabled)/.test(name)) return "boolean";
+  if (/(^id$|_id$|count|quantity|qty|number|rank|index)/.test(name)) return "integer";
+  if (/(amount|total|revenue|sales|cost|price|rate|pct|percent|ratio|margin|ltv)/.test(name)) return "numeric";
+  if (/(^date$|_date$)/.test(name)) return "date";
+  if (/(^time$|_time$|_at$|timestamp|datetime)/.test(name)) return "timestamp";
+  return "string";
+}
+
+function proposalPackFacts(proposal, contractDoc) {
+  const domain = slugify(proposal?.domain || contractDoc?.domain || "core");
+  const opportunity = (proposal?.meta?.contract_opportunities || [])[0] || {};
+  const opportunities = Array.isArray(proposal?.meta?.contract_opportunities) ? proposal.meta.contract_opportunities : [];
+  const metricFamilies = Array.isArray(proposal?.meta?.metric_families) ? proposal.meta.metric_families : [];
+  const columns = proposal?.evidence?.columns || opportunity.columns || contractDoc?.evidence?.columns || [];
+  const tests = proposal?.evidence?.tests || opportunity.tests || contractDoc?.evidence?.tests || [];
+  const semanticMetrics = proposal?.evidence?.semantic_metrics || opportunity.semantic_metrics || contractDoc?.evidence?.semantic_metrics || [];
+  const modelName = slugify(opportunity.model || contractDoc?.model || proposal?.name || "certified_model");
+  const entityName = pascalize(modelName, "CertifiedEntity");
+  const packName = slugify(proposal?.name || `${domain}_core_certification`);
+  return {
+    domain,
+    opportunity,
+    opportunities,
+    metricFamilies,
+    columns,
+    tests,
+    semanticMetrics,
+    modelName,
+    entityName,
+    packName,
+    owner: proposal?.owner || contractDoc?.owner || "analytics",
+    summary: proposal?.summary || contractDoc?.description || `${titleCase(domain)} certification pack`,
+    confidence: Number(proposal?.evidence?.confidence ?? contractDoc?.evidence?.confidence ?? 0.7),
+    sourceModels: proposal?.evidence?.source_models || contractDoc?.evidence?.source_models || [],
+    inferredGrain: proposal?.evidence?.inferred_grain || contractDoc?.grain || "",
+    assumptions: proposal?.evidence?.assumptions || [],
+    openQuestions: proposal?.evidence?.open_questions || [],
+  };
+}
+
+function domainDocFromProposal(proposal, contractDoc) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  return {
+    kind: "domain",
+    name: facts.domain,
+    description: `Business domain generated from dbt evidence for ${facts.summary}.`,
+    owner: facts.owner,
+    entities: Array.from(new Set([facts.modelName, ...facts.opportunities.map((item) => slugify(item.model)).filter(Boolean)])).slice(0, 20),
+    tags: ["ai-generated", "enterprise-workflow"],
+    meta: {
+      generated_from_proposal: proposal?.name || "",
+      generated_by: "datalex-enterprise-certify",
+      evidence_confidence: facts.confidence,
+    },
+  };
+}
+
+function diagramDocFromProposal(proposal, contractDoc, layer) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  const metricEntity = `${titleCase(facts.domain)} Metrics`;
+  const sourceEntity = facts.modelName;
+  const fields = facts.columns.slice(0, 20).map((column) => ({
+    name: slugify(column, "field"),
+    type: inferDbtDataType(column),
+    tests: facts.tests.filter((test) => String(test).startsWith(`${column}:`)).map((test) => String(test).split(":").pop()),
+  }));
+  const baseEntities = layer === "conceptual"
+    ? [
+      {
+        entity: titleCase(facts.domain),
+        type: "business_domain",
+        description: `Business area containing ${facts.summary}.`,
+        domain: facts.domain,
+        owner: facts.owner,
+        terms: [facts.domain],
+        x: 80,
+        y: 120,
+      },
+      {
+        entity: facts.entityName,
+        type: "concept",
+        description: contractDoc?.business_definition || facts.summary,
+        domain: facts.domain,
+        owner: facts.owner,
+        terms: [facts.modelName],
+        x: 340,
+        y: 120,
+      },
+      {
+        entity: metricEntity,
+        type: "metric_family",
+        description: `Metrics supported by this certification pack: ${facts.semanticMetrics.slice(0, 8).join(", ") || "review required"}.`,
+        domain: facts.domain,
+        owner: facts.owner,
+        terms: facts.semanticMetrics.slice(0, 8).map((metric) => slugify(metric)),
+        x: 620,
+        y: 120,
+      },
+    ]
+    : [
+      {
+        entity: facts.entityName,
+        type: layer === "logical" ? "logical_entity" : "table",
+        description: contractDoc?.business_definition || facts.summary,
+        domain: facts.domain,
+        owner: facts.owner,
+        fields: layer === "logical" ? fields : undefined,
+        columns: layer === "physical" ? fields : undefined,
+        candidate_keys: fields.some((field) => /(^id$|_id$)/i.test(field.name)) ? [[fields.find((field) => /(^id$|_id$)/i.test(field.name))?.name].filter(Boolean)] : undefined,
+        x: 120,
+        y: 120,
+      },
+      {
+        entity: sourceEntity,
+        type: "dbt_model",
+        description: `Physical dbt source for ${facts.entityName}.`,
+        domain: facts.domain,
+        owner: facts.owner,
+        columns: layer === "physical" ? fields : undefined,
+        x: 480,
+        y: 120,
+      },
+    ];
+  const entities = baseEntities.map((entity) => Object.fromEntries(Object.entries(entity).filter(([, value]) => value !== undefined)));
+  const relationships = layer === "conceptual"
+    ? [
+      {
+        name: `${facts.domain}_defines_${facts.modelName}`,
+        from: { entity: titleCase(facts.domain) },
+        to: { entity: facts.entityName },
+        cardinality: "one_to_many",
+        verb: "defines",
+        description: "The business domain defines the certified entity meaning.",
+      },
+      {
+        name: `${facts.modelName}_supports_metrics`,
+        from: { entity: facts.entityName },
+        to: { entity: metricEntity },
+        cardinality: "one_to_many",
+        verb: "supports",
+        description: "The certified entity provides governed context for metric families.",
+      },
+    ]
+    : [
+      {
+        name: `${facts.entityName.toLowerCase()}_maps_to_${sourceEntity}`,
+        from: { entity: facts.entityName },
+        to: { entity: sourceEntity },
+        cardinality: "one_to_one",
+        verb: "maps to",
+        description: "DataLex business contract maps to the dbt model source of truth.",
+      },
+    ];
+  return {
+    kind: "diagram",
+    name: facts.packName,
+    layer,
+    domain: facts.domain,
+    title: `${facts.summary} - ${titleCase(layer)} Diagram`,
+    description: `Generated as part of the reviewed ${facts.summary} proposal pack.`,
+    entities,
+    relationships,
+    tags: ["ai-generated", "enterprise-workflow"],
+    meta: {
+      generated_from_proposal: proposal?.name || "",
+      generated_by: "datalex-enterprise-certify",
+      source_models: facts.sourceModels,
+      confidence: facts.confidence,
+    },
+  };
+}
+
+function metricContractDocsFromProposal(proposal, contractDoc) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  const families = facts.metricFamilies.length
+    ? facts.metricFamilies
+    : [{ family: facts.domain, metrics: facts.semanticMetrics.slice(0, 12), count: facts.semanticMetrics.length }];
+  return families.slice(0, 8).map((family) => {
+    const name = slugify(`${family.family}_metrics`);
+    const metrics = Array.isArray(family.metrics) ? family.metrics : [];
+    return {
+      kind: "metric_contract",
+      id: `${facts.domain}.metric.${name}`,
+      name,
+      display_name: `${titleCase(family.family)} Metrics`,
+      domain: facts.domain,
+      description: `Certified metric family generated from dbt semantic metric evidence: ${metrics.slice(0, 10).join(", ") || "review required"}.`,
+      status: "certified",
+      owner: facts.owner,
+      formula: metrics.length ? `Defined by dbt semantic metrics: ${metrics.slice(0, 20).join(", ")}` : "Review semantic metric formula before publishing.",
+      grain: facts.inferredGrain || "review required",
+      dependencies: facts.sourceModels,
+      source: {
+        kind: "semantic_metric",
+        ref: `family:${family.family}`,
+      },
+      evidence: {
+        source_models: facts.sourceModels,
+        columns: facts.columns,
+        tests: facts.tests,
+        semantic_metrics: metrics,
+        inferred_grain: facts.inferredGrain,
+        assumptions: facts.assumptions,
+        confidence: facts.confidence,
+        open_questions: facts.openQuestions,
+      },
+      tags: ["ai-generated", "enterprise-workflow"],
+      meta: {
+        generated_from_proposal: proposal?.name || "",
+        generated_by: "datalex-enterprise-certify",
+      },
+    };
+  });
+}
+
+function glossaryDocsFromProposal(proposal, contractDoc) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  const terms = [
+    {
+      name: facts.domain,
+      definition: `${titleCase(facts.domain)} is the business domain for this certified dbt adoption pack.`,
+    },
+    {
+      name: facts.modelName,
+      definition: `${titleCase(facts.modelName)} is the source model or governed entity behind this DataLex contract.`,
+    },
+    ...facts.semanticMetrics.slice(0, 10).map((metric) => ({
+      name: slugify(metric),
+      definition: `${titleCase(metric)} is a metric referenced by the dbt semantic layer for this certification pack.`,
+    })),
+  ];
+  const seen = new Set();
+  return terms.filter((term) => {
+    if (!term.name || seen.has(term.name)) return false;
+    seen.add(term.name);
+    return true;
+  }).slice(0, 12).map((term) => ({
+    kind: "term",
+    name: slugify(term.name),
+    definition: term.definition,
+    owner: facts.owner,
+    tags: ["ai-generated", "enterprise-workflow"],
+    related_terms: [facts.domain].filter((item) => slugify(item) !== slugify(term.name)),
+    meta: {
+      domain: facts.domain,
+      generated_from_proposal: proposal?.name || "",
+      generated_by: "datalex-enterprise-certify",
+      confidence: facts.confidence,
+    },
+  }));
+}
+
+function dbtContractSuggestionFromProposal(proposal, contractDoc) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  return {
+    version: 2,
+    models: [
+      {
+        name: facts.modelName,
+        description: `DataLex generated contract suggestion for ${facts.summary}. Review before copying into the dbt model YAML.`,
+        config: {
+          contract: {
+            enforced: true,
+          },
+        },
+        meta: {
+          datalex: {
+            suggested_contract: true,
+            generated_from_proposal: proposal?.name || "",
+            source_of_truth: "dbt_yaml_after_review",
+          },
+        },
+        columns: facts.columns.slice(0, 40).map((column) => ({
+          name: slugify(column, "column"),
+          data_type: inferDbtDataType(column),
+          description: `Review description for ${column}.`,
+          tests: facts.tests.filter((test) => String(test).startsWith(`${column}:`)).map((test) => String(test).split(":").pop()),
+        })),
+      },
+    ],
+  };
+}
+
+function listYamlFilesSync(root, out = []) {
+  if (!root || !existsSync(root)) return out;
+  let entries = [];
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch (_err) {
+    return out;
+  }
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const fullPath = join(root, entry.name);
+    if (entry.isDirectory()) listYamlFilesSync(fullPath, out);
+    else if (/\.ya?ml$/i.test(entry.name)) out.push(fullPath);
+  }
+  return out;
+}
+
+function writeGeneratedArtifact(structure, relPath, doc, proposalName, kind, { allowOverwrite = false } = {}) {
+  const fullPath = resolveAiWorkspacePath(structure, relPath);
+  if (existsSync(fullPath) && !allowOverwrite) {
+    const existing = readYamlObjectSync(fullPath);
+    if (existing?.meta?.generated_from_proposal !== proposalName) {
+      return {
+        kind,
+        path: relative(structure.modelPath, fullPath).replace(/\\/g, "/"),
+        fullPath,
+        skipped: true,
+        reason: "existing_user_file",
+      };
+    }
+  }
+  writeYamlObjectSync(fullPath, doc);
+  return {
+    kind,
+    path: relative(structure.modelPath, fullPath).replace(/\\/g, "/"),
+    fullPath,
+  };
+}
+
+function writeCertifiedProposalPack(structure, proposal, contractDoc) {
+  const facts = proposalPackFacts(proposal, contractDoc);
+  const proposalName = proposal?.name || facts.packName;
+  const proposalType = String(proposal?.proposal_type || "datalex_contract");
+  const writeFullPack = proposalType === "datalex_contract";
+  const shouldWriteDomain = writeFullPack || proposalType === "domain";
+  const shouldWriteConceptual = writeFullPack || proposalType === "conceptual_model" || proposalType === "relationship";
+  const shouldWriteLogical = writeFullPack || proposalType === "logical_entity" || proposalType === "relationship";
+  const shouldWritePhysical = writeFullPack || proposalType === "dbt_contract" || proposalType === "relationship";
+  const shouldWriteContract = writeFullPack;
+  const shouldWriteMetrics = writeFullPack || proposalType === "metric_contract";
+  const shouldWriteGlossary = writeFullPack || proposalType === "glossary" || proposalType === "documentation";
+  const shouldWriteDbtSuggestion = writeFullPack || proposalType === "dbt_contract";
+  const written = [];
+
+  if (shouldWriteDomain) {
+    written.push(writeGeneratedArtifact(
+      structure,
+      `domains/${facts.domain}.yaml`,
+      domainDocFromProposal(proposal, contractDoc),
+      proposalName,
+      "domain",
+    ));
+  }
+
+  for (const layer of ["conceptual", "logical", "physical"]) {
+    const shouldWriteLayer =
+      (layer === "conceptual" && shouldWriteConceptual) ||
+      (layer === "logical" && shouldWriteLogical) ||
+      (layer === "physical" && shouldWritePhysical);
+    if (shouldWriteLayer) {
+      written.push(writeGeneratedArtifact(
+        structure,
+        `${facts.domain}/${layer}/${facts.packName}.diagram.yaml`,
+        diagramDocFromProposal(proposal, contractDoc, layer),
+        proposalName,
+        "diagram",
+      ));
+    }
+  }
+
+  if (shouldWriteContract) {
+    written.push(writeGeneratedArtifact(
+      structure,
+      `${facts.domain}/contracts/${slugify(contractDoc.name)}.contract.yaml`,
+      contractDoc,
+      proposalName,
+      "contract",
+      { allowOverwrite: true },
+    ));
+  }
+
+  if (shouldWriteMetrics) {
+    for (const metricDoc of metricContractDocsFromProposal(proposal, contractDoc)) {
+      written.push(writeGeneratedArtifact(
+        structure,
+        `${facts.domain}/semantic/${metricDoc.name}.metric.yaml`,
+        metricDoc,
+        proposalName,
+        "metric_contract",
+      ));
+    }
+  }
+
+  if (shouldWriteGlossary) {
+    for (const termDoc of glossaryDocsFromProposal(proposal, contractDoc)) {
+      written.push(writeGeneratedArtifact(
+        structure,
+        `${facts.domain}/glossary/${termDoc.name}.term.yaml`,
+        termDoc,
+        proposalName,
+        "term",
+      ));
+    }
+  }
+
+  if (shouldWriteDbtSuggestion) {
+    written.push(writeGeneratedArtifact(
+      structure,
+      `generated/dbt/${facts.domain}/${facts.modelName}.contract.yml`,
+      dbtContractSuggestionFromProposal(proposal, contractDoc),
+      proposalName,
+      "dbt_contract_suggestion",
+    ));
+  }
+
+  return written;
+}
+
+function syncGeneratedArtifactStatus(structure, proposal, status) {
+  const proposalName = proposal?.name || "";
+  if (!proposalName) return [];
+  const written = [];
+  for (const filePath of listYamlFilesSync(structure.modelPath)) {
+    const doc = readYamlObjectSync(filePath);
+    if (doc?.meta?.generated_from_proposal !== proposalName) continue;
+    if (["contract", "metric_contract"].includes(doc.kind)) {
+      doc.status = status;
+      writeYamlObjectSync(filePath, doc);
+      written.push({
+        kind: doc.kind,
+        path: relative(structure.modelPath, filePath).replace(/\\/g, "/"),
+        fullPath: filePath,
+        status,
+      });
+    }
+  }
+  return written;
+}
+
+function validateProposalArtifact(proposal) {
+  const errors = [];
+  const warnings = [];
+  if (!proposal || typeof proposal !== "object") {
+    return { valid: false, errors: [{ code: "VALIDATION", message: "Proposal file could not be parsed." }], warnings: [] };
+  }
+  if (proposal.kind !== "proposal") errors.push({ code: "VALIDATION", message: "Artifact must be kind: proposal." });
+  if (!proposal.name) errors.push({ code: "VALIDATION", message: "Proposal needs a name." });
+  if (!proposal.proposal_type) errors.push({ code: "VALIDATION", message: "Proposal needs proposal_type." });
+  if (!["draft", "reviewed", "certified", "rejected"].includes(String(proposal.status || "").toLowerCase())) {
+    errors.push({ code: "VALIDATION", message: "Proposal status must be draft, reviewed, certified, or rejected." });
+  }
+  const evidence = proposal.evidence || {};
+  if (!Array.isArray(evidence.source_models) || !evidence.source_models.length) {
+    warnings.push({ code: "MISSING_EVIDENCE", message: "Proposal has no source dbt models in evidence.source_models." });
+  }
+  if (typeof evidence.confidence !== "number") {
+    warnings.push({ code: "MISSING_CONFIDENCE", message: "Proposal should include numeric evidence.confidence." });
+  }
+  if (!Array.isArray(evidence.assumptions)) {
+    warnings.push({ code: "MISSING_ASSUMPTIONS", message: "Proposal should include evidence.assumptions for review." });
+  }
+  const proposedFiles = proposal.proposed_change?.files || proposal.proposed_change?.applied_files || [];
+  if (!Array.isArray(proposedFiles) || !proposedFiles.length) {
+    warnings.push({ code: "MISSING_FILES", message: "Proposal should list exact files in proposed_change.files before review." });
+  }
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 function resolveAiWorkspacePath(structure, rawPath) {
@@ -4433,6 +5425,387 @@ app.get("/api/dbt/review", requireAdmin, async (req, res, next) => {
   }
 });
 
+app.post("/api/enterprise/scan", requireAdmin, async (req, res, next) => {
+  try {
+    const { scan } = await getEnterpriseScan(req.body?.projectId, { force: Boolean(req.body?.force) });
+    res.json(scan);
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/enterprise/readiness", requireAdmin, async (req, res, next) => {
+  try {
+    const { scan } = await getEnterpriseScan(req.query?.projectId);
+    res.json({
+      ok: true,
+      projectId: scan.projectId,
+      generatedAt: scan.generatedAt,
+      detected: scan.detected,
+      totals: scan.totals,
+      domains: scan.domains,
+      metric_families: scan.metric_families,
+      proposal_packs: scan.proposal_packs,
+      readiness: scan.readiness,
+      publish: scan.publish,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/enterprise/generate", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure, scan } = await getEnterpriseScan(req.body?.projectId);
+    const options = {
+      domain: req.body?.domain,
+      packType: req.body?.packType || "core_certification",
+      scopeSize: req.body?.scopeSize || "focused",
+    };
+    const aiStatus = enterpriseAiGenerationStatus(project, req.body?.provider);
+    if (!aiStatus.ready) {
+      throw new ApiError(409, "AI_PROVIDER_REQUIRED", aiStatus.message, {
+        reason: aiStatus.reason,
+        provider: aiStatus.provider || "",
+        settings: aiStatus.settings,
+      });
+    }
+    const providerConfig = getEffectiveEnterpriseProviderConfig(project, req.body?.provider);
+    const aiIndex = await buildAiIndex(project);
+    const context = boundedEnterpriseGenerationContext(scan, options, aiIndex);
+    const raw = await callAiProvider(providerConfig, enterpriseGenerationMessages(context));
+    const aiPayload = parseAiJson(raw);
+    if (!aiPayload || typeof aiPayload !== "object") {
+      throw new ApiError(502, "AI_GENERATION_FAILED", "AI provider did not return a valid DataLex proposal payload.");
+    }
+    const generated = buildAiGeneratedEnterpriseProposal(scan, options, aiPayload, providerConfig);
+    const outPath = resolveAiWorkspacePath(structure, generated.path);
+    if (existsSync(outPath) && !req.body?.overwrite) {
+      return res.json({
+        ok: true,
+        projectId: project.id,
+        status: "already_exists",
+        path: generated.path,
+        fullPath: outPath,
+        message: "A draft proposal already exists for this pack.",
+      });
+    }
+    mkdirSync(dirname(outPath), { recursive: true });
+    writeFileSync(outPath, generated.content, "utf-8");
+    ENTERPRISE_SCAN_CACHE.delete(project.id);
+    const files = await walkYamlFiles(structure.modelPath);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      status: "generated",
+      path: generated.path,
+      fullPath: outPath,
+      files,
+      proposal: readYamlObjectSync(outPath),
+      ai: {
+        provider: providerConfig.provider,
+        model: providerConfig.model,
+        context: context.ai_context,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/proposals/validate", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    if (req.body?.proposalPath || req.body?.path) {
+      const proposalPath = resolveAiWorkspacePath(structure, req.body?.proposalPath || req.body?.path);
+      if (!existsSync(proposalPath)) throw new ApiError(404, "NOT_FOUND", "Proposal file not found");
+      const proposal = readYamlObjectSync(proposalPath);
+      const validation = validateProposalArtifact(proposal);
+      return res.json({
+        ok: true,
+        projectId: project.id,
+        path: relative(structure.modelPath, proposalPath).replace(/\\/g, "/"),
+        ...validation,
+        summary: {
+          errors: validation.errors.length,
+          warnings: validation.warnings.length,
+        },
+      });
+    }
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    if (!changes.length) throw new ApiError(400, "VALIDATION", "changes array is required");
+    const results = changes.map((change) => validateAiProposalChangeDryRun(structure, change));
+    const valid = results.every((item) => item.valid);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      valid,
+      results,
+      summary: {
+        total: results.length,
+        valid: results.filter((item) => item.valid).length,
+        errors: results.reduce((sum, item) => sum + item.errors.length, 0),
+        warnings: results.reduce((sum, item) => sum + item.warnings.length, 0),
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/proposals/apply", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    if (req.body?.proposalPath || req.body?.path) {
+      const proposalPath = resolveAiWorkspacePath(structure, req.body?.proposalPath || req.body?.path);
+      if (!existsSync(proposalPath)) throw new ApiError(404, "NOT_FOUND", "Proposal file not found");
+      const proposal = readYamlObjectSync(proposalPath);
+      if (proposal?.kind !== "proposal") throw new ApiError(400, "VALIDATION", "Target file is not a kind: proposal artifact");
+      const status = String(req.body?.status || "reviewed").toLowerCase();
+      if (!["draft", "reviewed", "rejected"].includes(status)) {
+        throw new ApiError(400, "VALIDATION", "proposalPath apply supports status draft, reviewed, or rejected; use /api/proposals/certify for certification");
+      }
+      proposal.status = status;
+      const written = syncGeneratedArtifactStatus(structure, proposal, status);
+      writeYamlObjectSync(proposalPath, proposal);
+      written.unshift({
+        kind: "proposal",
+        path: relative(structure.modelPath, proposalPath).replace(/\\/g, "/"),
+        fullPath: proposalPath,
+      });
+      ENTERPRISE_SCAN_CACHE.delete(project.id);
+      const files = await walkYamlFiles(structure.modelPath);
+      return res.json({
+        ok: true,
+        projectId: project.id,
+        status,
+        written,
+        files,
+        proposal,
+      });
+    }
+    const changes = Array.isArray(req.body?.changes) ? req.body.changes : [];
+    if (!changes.length) throw new ApiError(400, "VALIDATION", "changes array is required");
+    const validationResults = changes.map((change) => validateAiProposalChangeDryRun(structure, change));
+    const failed = validationResults.find((item) => !item.valid);
+    if (failed) {
+      const firstError = failed.errors?.[0] || {};
+      const status = firstError.code === "PATH_ESCAPE" ? 400 : 422;
+      throw new ApiError(status, firstError.code || "AI_PROPOSAL_INVALID", firstError.message || "AI proposal validation failed.", { results: validationResults });
+    }
+    const applied = [];
+    for (const change of changes) {
+      applied.push(await applyAiProposalChange(project, structure, change));
+    }
+    ENTERPRISE_SCAN_CACHE.delete(project.id);
+    const files = await walkYamlFiles(structure.modelPath);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      applied,
+      validation: { valid: true, results: validationResults },
+      files,
+      primaryFile: applied.find((item) => item.fullPath && item.type !== "delete_file") || null,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/proposals/certify", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const proposalPath = resolveAiWorkspacePath(structure, req.body?.proposalPath || req.body?.path);
+    if (!existsSync(proposalPath)) throw new ApiError(404, "NOT_FOUND", "Proposal file not found");
+    const proposal = readYamlObjectSync(proposalPath);
+    if (proposal?.kind !== "proposal") throw new ApiError(400, "VALIDATION", "Target file is not a kind: proposal artifact");
+    const status = String(req.body?.status || "certified").toLowerCase();
+    if (!["draft", "reviewed", "certified", "rejected"].includes(status)) {
+      throw new ApiError(400, "VALIDATION", "status must be one of: draft, reviewed, certified, rejected");
+    }
+    proposal.status = status;
+
+    let written = [];
+    if (status === "certified") {
+      const contractDoc = contractDocFromProposal(proposal);
+      written = writeCertifiedProposalPack(structure, proposal, contractDoc);
+      proposal.proposed_change = {
+        ...(proposal.proposed_change || {}),
+        applied_files: written.filter((item) => !item.skipped).map((item) => item.path),
+        skipped_files: written.filter((item) => item.skipped).map((item) => ({ path: item.path, reason: item.reason })),
+      };
+    } else if (["draft", "reviewed", "rejected"].includes(status)) {
+      written = syncGeneratedArtifactStatus(structure, proposal, status);
+    }
+
+    writeYamlObjectSync(proposalPath, proposal);
+    written.unshift({
+      kind: "proposal",
+      path: relative(structure.modelPath, proposalPath).replace(/\\/g, "/"),
+      fullPath: proposalPath,
+    });
+    ENTERPRISE_SCAN_CACHE.delete(project.id);
+    const files = await walkYamlFiles(structure.modelPath);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      status,
+      written,
+      files,
+      proposal,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/datalex/manifest/build", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    ensureCanonicalWorkspace(structure.modelPath, { projectName: project.name || basename(project.path) });
+    const out = String(req.body?.out || "datalex-manifest.json");
+    const outPath = isAbsolute(out) ? out : join(structure.modelPath, out);
+    if (!isPathInside(structure.modelPath, outPath)) {
+      throw new ApiError(400, "PATH_ESCAPE", "Manifest output must stay inside the DataLex workspace");
+    }
+    const { cmd, argv } = dmExec("datalex", "manifest", "build", structure.modelPath, "--out", outPath);
+    const output = execFileSync(cmd, argv, {
+      encoding: "utf-8",
+      timeout: 120_000,
+      cwd: SOURCE_REPO_ROOT,
+    });
+    const manifest = JSON.parse(readFileSync(outPath, "utf-8"));
+    ENTERPRISE_SCAN_CACHE.delete(project.id);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      path: relative(structure.modelPath, outPath).replace(/\\/g, "/"),
+      fullPath: outPath,
+      summary: manifestSummaryFromPayload(manifest),
+      manifest,
+      output,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/dql/readiness", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure, scan } = await getEnterpriseScan(req.body?.projectId, { force: Boolean(req.body?.force) });
+    const compile = runDqlCompileReadiness(project, structure, {
+      dqlPath: req.body?.dqlPath,
+      datalexManifest: req.body?.datalexManifest,
+    });
+    const publish = compile.status === "failed"
+      ? {
+        ...scan.publish,
+        status: "blocked",
+        warnings: [...(scan.publish?.warnings || []), "DQL compile failed with the configured DataLex manifest."],
+      }
+      : scan.publish;
+    res.json({
+      ok: true,
+      projectId: scan.projectId,
+      dql: scan.dql,
+      publish,
+      compile,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+async function aiContextStatusForProject(project) {
+  const storage = await getAiRuntimeStorageInfo(project);
+  const indexPath = join(project.path, ".datalex", "agent", "index.json");
+  let snapshot = null;
+  if (existsSync(indexPath)) {
+    try {
+      snapshot = JSON.parse(readFileSync(indexPath, "utf-8"));
+    } catch {
+      snapshot = null;
+    }
+  }
+  return {
+    ok: true,
+    exists: Boolean(snapshot),
+    builtAt: snapshot?.builtAt || "",
+    recordCount: Number(snapshot?.recordCount || 0),
+    typedCounts: snapshot?.typedCounts || {},
+    dbtArtifacts: snapshot?.dbtArtifacts || {},
+    storage,
+  };
+}
+
+app.get("/api/ai/settings", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    res.json({
+      ok: true,
+      projectId: project.id,
+      settings: listEnterpriseProviderSettings(project),
+      generation: enterpriseAiGenerationStatus(project),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/settings", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.body?.projectId);
+    let settings;
+    try {
+      settings = saveEnterpriseProviderSettings(project, req.body || {});
+    } catch (err) {
+      throw new ApiError(400, "VALIDATION", err?.message || "Invalid AI provider settings");
+    }
+    res.json({
+      ok: true,
+      projectId: project.id,
+      settings,
+      generation: enterpriseAiGenerationStatus(project),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.get("/api/ai/context/status", requireAdmin, async (req, res, next) => {
+  try {
+    const { project } = await resolveProjectAndStructure(req.query?.projectId);
+    res.json({
+      projectId: project.id,
+      ...(await aiContextStatusForProject(project)),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+app.post("/api/ai/context/build", requireAdmin, async (req, res, next) => {
+  try {
+    const { project, structure } = await resolveProjectAndStructure(req.body?.projectId);
+    const index = await buildAiIndex(project);
+    res.json({
+      ok: true,
+      exists: true,
+      projectId: project.id,
+      modelPath: structure.modelPath,
+      builtAt: index.builtAt,
+      recordCount: index.records.length,
+      typedCounts: index.typedCounts || {},
+      dbtArtifacts: index.dbtArtifacts || {},
+      storage: await getAiRuntimeStorageInfo(project),
+      settings: listEnterpriseProviderSettings(project),
+      generation: enterpriseAiGenerationStatus(project),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Doc-block index for the project. Powers the AI-assist round-trip
 // preservation flow (P1.C) and the inspector's "this column comes from a
 // shared doc block" indicator. Cache is populated lazily and invalidated
@@ -4516,18 +5889,44 @@ app.put("/api/policy/packs", requireAdmin, async (req, res, next) => {
 
 app.post("/api/ai/settings/test", requireAdmin, async (req, res, next) => {
   try {
-    const config = resolveAiProviderConfig(req.body || {});
+    let project = null;
+    let config = null;
+    if (req.body?.projectId) {
+      ({ project } = await resolveProjectAndStructure(req.body.projectId));
+      try {
+        saveEnterpriseProviderSettings(project, req.body || {});
+      } catch (err) {
+        throw new ApiError(400, "VALIDATION", err?.message || "Invalid AI provider settings");
+      }
+      config = getEffectiveEnterpriseProviderConfig(project, req.body?.provider);
+    } else {
+      config = resolveAiProviderConfig(req.body || {});
+    }
     if (!config.provider || config.provider === "local") {
       return res.json({ ok: true, provider: "local", message: "Local deterministic retrieval is available. Configure a provider for generative proposals." });
     }
     if (config.provider !== "ollama" && !config.apiKey) {
       return apiFail(res, 400, "AI_PROVIDER_NOT_CONFIGURED", `Missing ${config.envKey || "API key"} for ${config.provider}.`);
     }
-    await callAiProvider(config, [
-      { role: "system", content: "Return JSON only." },
-      { role: "user", content: "Return {\"ok\":true,\"message\":\"ready\"}." },
-    ]);
-    res.json({ ok: true, provider: config.provider, model: config.model || null });
+    try {
+      await callAiProvider(config, [
+        { role: "system", content: "Return JSON only." },
+        { role: "user", content: "Return {\"ok\":true,\"message\":\"ready\"}." },
+      ]);
+      const payload = { ok: true, provider: config.provider, model: config.model || null, message: "AI provider is ready." };
+      if (project) {
+        payload.projectId = project.id;
+        payload.settings = markEnterpriseProviderTest(project, config.provider, { status: "passed", message: payload.message });
+        payload.generation = enterpriseAiGenerationStatus(project, config.provider);
+        payload.settingsPath = providerSettingsFile(project);
+      }
+      res.json(payload);
+    } catch (err) {
+      if (project && config?.provider) {
+        markEnterpriseProviderTest(project, config.provider, { status: "failed", message: String(err?.message || err).slice(0, 400) });
+      }
+      throw err;
+    }
   } catch (err) {
     next(err);
   }
@@ -5213,6 +6612,7 @@ app.post("/api/ai/proposals/apply", requireAdmin, async (req, res, next) => {
     for (const change of changes) {
       applied.push(await applyAiProposalChange(project, structure, change));
     }
+    ENTERPRISE_SCAN_CACHE.delete(project.id);
     const files = await walkYamlFiles(structure.modelPath);
     const index = await buildAiIndex(project);
     res.json({
@@ -5419,33 +6819,17 @@ async function resolveProjectAndModelPath(projectId) {
 // later doc declares the same entity. The CLI still uses the richer Python
 // merge for two-way sync; this JS variant is scoped to the "N candidates,
 // no prior current" save-all path.
-// Ensure the conventional DataLex workspace folders exist under the current
+// Ensure the canonical domain-first DataLex workspace exists under the current
 // model root. Idempotent — never touches existing files; writes `.gitkeep`
 // only when a folder is freshly created so the empty structure round-trips
 // through git. Silent on errors (callers are project-open hooks, not actionable).
 function ensureWorkspaceFolders(rootPath) {
   try {
-    for (const rel of [
-      "core/conceptual",
-      "core/logical",
-      "core/physical",
-      "imported/physical",
-      "generated-sql/ddl",
-      "generated-sql/migrations",
-      "domains",
-      "projects",
-      DATALEX_SKILLS_DIR,
-    ]) {
-      const fullDir = join(rootPath, rel);
-      if (!existsSync(fullDir)) {
-        mkdirSync(fullDir, { recursive: true });
-        const keepFile = join(fullDir, ".gitkeep");
-        if (!existsSync(keepFile)) writeFileSync(keepFile, "", "utf-8");
-      }
-    }
+    ensureCanonicalWorkspace(rootPath, { projectName: basename(dirname(rootPath)) || basename(rootPath) || "datalex_project" });
     for (const skill of DEFAULT_AI_SKILL_FILES) {
       const target = join(rootPath, DATALEX_SKILLS_DIR, skill.path);
       if (!existsSync(target)) {
+        mkdirSync(dirname(target), { recursive: true });
         writeFileSync(target, skill.content, "utf-8");
       }
     }
@@ -6030,23 +7414,22 @@ app.post("/api/import", requireAdmin, express.json({ limit: "10mb" }), async (re
     const tmpFile = join(tmpDir, `import_${Date.now()}${ext}`);
     writeFileSync(tmpFile, content, "utf-8");
 
-    const args = [
-      join(REPO_ROOT, "datalex"),
+    const { cmd, argv } = dmExec(
       "import",
       importFormat,
       tmpFile,
       "--model-name",
       modelName || "imported_model",
-    ];
+    );
 
     let commandOutput = "";
     let commandError = "";
     let hadCliIssues = false;
     try {
-      commandOutput = execFileSync(PYTHON, args, {
+      commandOutput = execFileSync(cmd, argv, {
         encoding: "utf-8",
         timeout: 30000,
-        cwd: REPO_ROOT,
+        cwd: SOURCE_REPO_ROOT,
         maxBuffer: CLI_MAX_BUFFER,
       });
     } catch (err) {

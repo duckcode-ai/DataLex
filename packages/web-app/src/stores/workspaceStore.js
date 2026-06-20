@@ -1238,6 +1238,19 @@ const useWorkspaceStore = create((set, get) => ({
     }
   },
 
+  refreshProjectFiles: async (projectId = get().activeProjectId) => {
+    if (!projectId) return null;
+    const data = await fetchProjectFiles(projectId);
+    set({
+      projectFiles: data.files || [],
+      optimisticFolders: [],
+      projectPath: data.projectPath || "",
+      projectModelPath: data.projectModelPath || data.projectPath || "",
+      projectConfig: data.projectConfig || null,
+    });
+    return data;
+  },
+
   // Close a project tab. If the tab was active, move to the neighbor.
   closeProject: async (projectId) => {
     const { openProjects, activeProjectId, projectCache } = get();

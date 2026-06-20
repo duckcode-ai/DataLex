@@ -78,6 +78,14 @@ def build_manifest(
             }
         )
 
+    for metric in _sorted_docs(project.metric_contracts.values()):
+        status = str(metric.get("status") or "").lower()
+        if status != "certified":
+            continue
+        domain_name = _domain_of(metric)
+        domain = ensure_domain(domain_name)
+        domain.setdefault("metrics", []).append(_metric_contract_to_manifest(metric, domain_name))
+
     diagnostics: List[Dict[str, Any]] = []
     for contract in _sorted_docs(project.contracts.values()):
         status = str(contract.get("status") or "").lower()
@@ -139,15 +147,18 @@ def manifest_summary(manifest: Dict[str, Any]) -> Dict[str, int]:
     domains = manifest.get("domains") if isinstance(manifest, dict) else []
     entity_count = 0
     contract_count = 0
+    metric_count = 0
     for domain in domains or []:
         entities = domain.get("entities") or []
         entity_count += len(entities)
+        metric_count += len(domain.get("metrics") or [])
         for entity in entities:
             contract_count += len(entity.get("contracts") or [])
     return {
         "domains": len(domains or []),
         "entities": entity_count,
         "contracts": contract_count,
+        "metrics": metric_count,
         "diagnostics": len(manifest.get("diagnostics") or []),
     }
 
@@ -264,6 +275,29 @@ def _contract_to_manifest(contract: Dict[str, Any], domain: str, entity_name: st
     return out
 
 
+def _metric_contract_to_manifest(metric: Dict[str, Any], domain: str) -> Dict[str, Any]:
+    metric_id = metric.get("id") or f"{_snake(domain)}.metric.{_snake(metric.get('name'))}"
+    out: Dict[str, Any] = {
+        "id": metric_id,
+        "name": metric.get("display_name") or metric.get("name") or metric_id.rsplit(".", 1)[-1],
+    }
+    for key in (
+        "description",
+        "owner",
+        "formula",
+        "grain",
+        "time_dimension",
+        "dependencies",
+        "dimensions",
+        "source",
+        "evidence",
+        "tags",
+    ):
+        if metric.get(key):
+            out[key] = metric[key]
+    return out
+
+
 def _sort_domain(domain: Dict[str, Any]) -> Dict[str, Any]:
     domain["entities"] = sorted(domain.get("entities") or [], key=lambda e: e.get("name") or "")
     for entity in domain["entities"]:
@@ -276,4 +310,6 @@ def _sort_domain(domain: Dict[str, Any]) -> Dict[str, Any]:
             entity["fields"] = sorted(entity["fields"], key=lambda f: f.get("name") or "")
     if domain.get("glossary"):
         domain["glossary"] = sorted(domain["glossary"], key=lambda t: t.get("term") or "")
+    if domain.get("metrics"):
+        domain["metrics"] = sorted(domain["metrics"], key=lambda m: m.get("id") or m.get("name") or "")
     return domain

@@ -11,14 +11,16 @@ export const PROVIDER_META = {
     label: "OpenAI",
     envVar: "OPENAI_API_KEY",
     baseUrlEnvVar: "OPENAI_BASE_URL",
+    modelEnvVar: "OPENAI_MODEL",
     defaultModel: "gpt-4o-mini",
     apiKey: "required",
     models: ["gpt-4o-mini", "gpt-4.1-mini", "gpt-4.1", "gpt-5-mini"],
   },
   anthropic: {
-    label: "Anthropic",
+    label: "Claude",
     envVar: "ANTHROPIC_API_KEY",
     baseUrlEnvVar: "ANTHROPIC_BASE_URL",
+    modelEnvVar: "ANTHROPIC_MODEL",
     defaultModel: "claude-3-5-sonnet-latest",
     apiKey: "required",
     models: ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
@@ -27,6 +29,7 @@ export const PROVIDER_META = {
     label: "Gemini",
     envVar: "GEMINI_API_KEY",
     baseUrlEnvVar: "GEMINI_BASE_URL",
+    modelEnvVar: "GEMINI_MODEL",
     defaultModel: "gemini-1.5-flash",
     apiKey: "required",
     models: ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"],
@@ -35,6 +38,7 @@ export const PROVIDER_META = {
     label: "Mistral",
     envVar: "MISTRAL_API_KEY",
     baseUrlEnvVar: "MISTRAL_BASE_URL",
+    modelEnvVar: "MISTRAL_MODEL",
     defaultModel: "mistral-small-latest",
     apiKey: "required",
     models: ["mistral-small-latest", "mistral-large-latest"],
@@ -43,6 +47,7 @@ export const PROVIDER_META = {
     label: "OpenRouter",
     envVar: "OPENROUTER_API_KEY",
     baseUrlEnvVar: "OPENROUTER_BASE_URL",
+    modelEnvVar: "OPENROUTER_MODEL",
     defaultModel: "openai/gpt-4.1-mini",
     apiKey: "required",
     models: ["openai/gpt-4.1-mini", "anthropic/claude-3.5-sonnet", "google/gemini-flash-1.5"],
@@ -51,6 +56,7 @@ export const PROVIDER_META = {
     label: "Ollama",
     envVar: "",
     baseUrlEnvVar: "OLLAMA_BASE_URL",
+    modelEnvVar: "OLLAMA_MODEL",
     defaultModel: "llama3.1",
     apiKey: "none",
     models: ["llama3.1", "llama3.2", "qwen2.5", "mistral"],
@@ -60,6 +66,7 @@ export const PROVIDER_META = {
 export function normalizeProviderName(provider) {
   const value = String(provider || "").trim().toLowerCase();
   if (value === "google") return "gemini";
+  if (value === "claude") return "anthropic";
   if (!value) return "local";
   return value;
 }

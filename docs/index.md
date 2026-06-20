@@ -18,8 +18,9 @@ DataLex is the layer that turns that "no" into "yes" — by giving your dbt proj
 
 - **Sits above dbt, never replaces it.** Reads `target/manifest.json`, never writes back without a reviewable diff. Your dbt project stays the source of truth for transformations.
 - **Conceptual, logical, and physical layers stay connected.** Business meaning, data structure, and dbt implementation share one YAML graph instead of drifting across SQL, tickets, and tribal knowledge.
-- **Reviewable AI authoring.** `datalex draft` proposes contracts from a dbt project; you accept, edit, and commit. No silent rewrites of project files.
-- **Compile-time contract checks.** When a [DQL block](datalex-and-dql.md) references a contract by id, the DQL compiler resolves it against your DataLex manifest and refuses to ship if the binding breaks.
+- **AI-first enterprise adoption.** Connect a dbt repo, configure OpenAI, Claude, or Ollama, scan readiness, then generate small reviewable packs for domains, contracts, diagrams, glossary terms, and metric contracts.
+- **Reviewable AI authoring.** DataLex proposes contracts from manifest/YAML/semantic evidence; you accept, edit, certify, and commit. No silent rewrites of project files.
+- **Optional DQL checks.** When a [DQL block](datalex-and-dql.md) references a contract by id, the DQL compiler can resolve it against your DataLex manifest. DQL stays optional in OSS and is enabled explicitly.
 - **Open source forever.** Apache 2.0. No closed-source language features.
 
 ---
@@ -80,12 +81,13 @@ Ollama fallback. Pin a specific provider explicitly with the flag.
 
 ## Five-minute path
 
-1. **[End-to-end DataLex + DQL tutorial](tutorials/datalex-plus-dql-end-to-end.md)** — feel the wedge in 5 minutes using both example repos. The fastest way to understand the product.
+1. **[Enterprise OSS workflow](enterprise-oss-workflow.md)** — connect an existing dbt repo, set up AI, scan readiness, generate proposal packs, certify, and publish.
 2. **[Get started](getting-started.md)** — install, scaffold a project, compile your first model.
 3. **[Walk through Jaffle Shop](tutorials/jaffle-shop-walkthrough.md)** — full dbt + DuckDB + DataLex example.
 4. **[Layered modeling](datalex-layout.md)** — when to use conceptual vs. logical vs. physical.
-5. **[The DataLex + DQL stack](datalex-and-dql.md)** — how the two languages combine for certified AI analytics.
-6. **[Contracts for DQL blocks](contracts-for-dql-blocks.md)** - what a contract means for a DQL block, where it comes from, and how it supports fast draft work plus trusted publish gates.
+5. **[End-to-end DataLex + DQL tutorial](tutorials/datalex-plus-dql-end-to-end.md)** — optional companion flow using both example repos.
+6. **[The DataLex + DQL stack](datalex-and-dql.md)** — how the two languages can combine for certified AI analytics.
+7. **[Contracts for DQL blocks](contracts-for-dql-blocks.md)** - what a contract means for a DQL block, where it comes from, and how it supports fast draft work plus trusted publish gates.
 
 ---
 
@@ -97,14 +99,16 @@ flowchart LR
     dbt --> Manifest[dbt manifest.json]
     Manifest --> DataLex[DataLex compiler]
     DataLex --> ContractsManifest[DataLex manifest]
-    ContractsManifest --> DQL[DQL compiler]
-    DQL --> Blocks[Certified blocks]
-    Blocks --> MCP[DQL MCP for AI agents]
-    Blocks --> Apps[Apps + dashboards]
+    ContractsManifest -. optional .-> DQL[DQL compiler]
+    DQL -. optional .-> Blocks[Certified blocks]
+    Blocks -. optional .-> MCP[DQL MCP for AI agents]
+    Blocks -. optional .-> Apps[Apps + dashboards]
     ContractsManifest --> Catalog[Atlan / Marquez / Monte Carlo]
 ```
 
-DataLex is the green-field substrate above dbt. DQL consumes the manifest below dbt. Both speak the [public manifest spec](https://github.com/duckcode-ai/manifest-spec).
+DataLex is the business/domain contract layer above dbt. DQL can consume the
+published DataLex manifest when you enable that companion flow. Both speak the
+[public manifest spec](https://github.com/duckcode-ai/manifest-spec).
 
 ---
 

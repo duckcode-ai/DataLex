@@ -27,8 +27,11 @@ describe("GET /api/projects/:id/files — ensureWorkspaceFolders hook", () => {
     assert.equal(existsSync(join(project.modelPath, "core", "conceptual")), true);
     assert.equal(existsSync(join(project.modelPath, "core", "logical")), true);
     assert.equal(existsSync(join(project.modelPath, "core", "physical")), true);
-    assert.equal(existsSync(join(project.modelPath, "imported", "physical")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "contracts")), true);
+    assert.equal(existsSync(join(project.modelPath, "core", "proposals")), true);
+    assert.equal(existsSync(join(project.modelPath, "imported", "dbt", "core")), true);
     assert.equal(existsSync(join(project.modelPath, "generated-sql", "ddl")), true);
+    assert.equal(existsSync(join(project.modelPath, "datalex.yaml")), true);
     assert.equal(existsSync(join(project.modelPath, "core", "conceptual", ".gitkeep")), true);
   });
 

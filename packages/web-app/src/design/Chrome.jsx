@@ -25,10 +25,11 @@ import {
   Sun,
   Layers,
   FileText as LucideFileText,
-  Table as LucideTable,
-  Eye as LucideEye,
-  Hash as LucideHash,
-  Boxes as LucideBoxes,
+  ClipboardCheck,
+  Network,
+  Inbox,
+  ShieldCheck,
+  Rocket,
 } from "lucide-react";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
@@ -41,12 +42,14 @@ import DiffToggle from "./DiffToggle";
    Docs view, the table list, the views manager, or the enums manager.
    Icons sourced from lucide-react for consistent stroke weight + meaning. */
 const VIEW_MODES = [
-  { id: "diagram",      label: "Diagram",      Icon: Layers,         tooltip: "Visual ER diagram" },
-  { id: "docs",         label: "Docs",         Icon: LucideFileText, tooltip: "Readable model docs (rendered from YAML, AI-assisted)" },
-  { id: "capabilities", label: "Capabilities", Icon: LucideBoxes,    tooltip: "Domain capability map — concepts grouped by bounded context, click to drill in" },
-  { id: "table",        label: "Table",        Icon: LucideTable,    tooltip: "Tabular entity list" },
-  { id: "views",        label: "Views",        Icon: LucideEye,      tooltip: "Database views & matviews" },
-  { id: "enums",        label: "Enums",        Icon: LucideHash,     tooltip: "Enumerations" },
+  { id: "ai-setup",  label: "AI Setup",  Icon: Sparkles,       tooltip: "Configure OpenAI, Claude, or Ollama before generating domains, contracts, and diagrams" },
+  { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tooltip: "Enterprise readiness by domain, contracts, metrics, owners, grains, and DQL status" },
+  { id: "domains",   label: "Domains",   Icon: Network,        tooltip: "Domain-level model groups and certification priorities" },
+  { id: "proposals", label: "Proposals", Icon: Inbox,          tooltip: "AI-generated proposal packs ready for review" },
+  { id: "contracts", label: "Contracts", Icon: ShieldCheck,    tooltip: "Business contracts, metric contracts, statuses, evidence, and blockers" },
+  { id: "publish",   label: "Publish",   Icon: Rocket,         tooltip: "Build the DataLex manifest and optional integration readiness" },
+  { id: "diagram",   label: "Diagram",   Icon: Layers,         tooltip: "Diagram drilldown for the selected domain or file" },
+  { id: "docs",      label: "Docs",      Icon: LucideFileText, tooltip: "Readable model docs rendered from YAML and dbt metadata" },
 ];
 
 function ViewSwitcher() {

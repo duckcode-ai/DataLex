@@ -43,6 +43,7 @@ KINDS = (
     "semantic_model",
     "contract",
     "proposal",
+    "metric_contract",
 )
 
 
@@ -342,12 +343,22 @@ def load_project(
         )
 
     globs = {
-        "models": (manifest or {}).get("models", "models/**/*.yaml"),
+        "models": (manifest or {}).get("models", [
+            "models/**/*.yaml",
+            "*/conceptual/**/*.yaml",
+            "*/logical/**/*.yaml",
+            "*/physical/**/*.yaml",
+            "imported/dbt/**/*.yaml",
+        ]),
         "sources": (manifest or {}).get("sources", "sources/**/*.yaml"),
         "glossary": (manifest or {}).get("glossary", "glossary/**/*.yaml"),
+        "domains": (manifest or {}).get("domains", "domains/**/*.yaml"),
         "snippets": (manifest or {}).get("snippets", ".datalex/snippets/**/*.yaml"),
         "policies": (manifest or {}).get("policies", "policies/**/*.yaml"),
         "diagrams": (manifest or {}).get("diagrams", [
+            "*/conceptual/**/*.yaml",
+            "*/logical/**/*.yaml",
+            "*/physical/**/*.yaml",
             "DataLex/*/conceptual/**/*.yaml",
             "DataLex/*/logical/**/*.yaml",
             "DataLex/*/physical/**/*.yaml",
@@ -360,13 +371,16 @@ def load_project(
         "relationships": (manifest or {}).get("relationships", "relationships/**/*.yaml"),
         "data_types": (manifest or {}).get("data_types", "data_types/**/*.yaml"),
         "semantic_models": (manifest or {}).get("semantic_models", "semantic/**/*.yaml"),
+        "metric_contracts": (manifest or {}).get("metric_contracts", "*/semantic/**/*.yaml"),
         "contracts": (manifest or {}).get("contracts", [
+            "*/contracts/**/*.yaml",
             "contracts/**/*.yaml",
             "DataLex/*/Contracts/**/*.yaml",
             "DataLex/*/contracts/**/*.yaml",
             "datalex/contracts/**/*.yaml",
         ]),
         "proposals": (manifest or {}).get("proposals", [
+            "*/proposals/**/*.yaml",
             "proposals/**/*.yaml",
             ".datalex/proposals/**/*.yaml",
             "DataLex/*/Proposals/**/*.yaml",
@@ -387,7 +401,9 @@ def load_project(
     semantic_models: Dict[str, Dict[str, Any]] = {}
     contracts: Dict[str, Dict[str, Any]] = {}
     proposals: Dict[str, Dict[str, Any]] = {}
+    metric_contracts: Dict[str, Dict[str, Any]] = {}
     file_of: Dict[Tuple[str, str], str] = {}
+    diagram_identity_file: Dict[str, str] = {}
 
     def _register(doc: Dict[str, Any], path: Path) -> None:
         kind = doc.get("kind")
@@ -408,11 +424,33 @@ def load_project(
             "semantic_model": semantic_models,
             "contract": contracts,
             "proposal": proposals,
+            "metric_contract": metric_contracts,
         }.get(kind)
         if bucket is None:
             return
-        # layer uniqueness for entities — name is unique *per layer*
-        key = name if kind != "entity" else f"{doc.get('layer', 'physical')}:{name}"
+        # Layered artifacts can reuse the same business name across conceptual,
+        # logical, and physical folders in the domain-first layout.
+        if kind == "entity":
+            key = f"{doc.get('layer', 'physical')}:{name}"
+        elif kind == "diagram":
+            identity = f"{doc.get('domain', 'core')}:{doc.get('layer', 'conceptual')}:{name}"
+            if identity in diagram_identity_file:
+                bag.add(
+                    DataLexError(
+                        code="DUPLICATE_NAME",
+                        message=f"Duplicate {kind} '{name}' — first defined in {diagram_identity_file.get(identity)}",
+                        location=SourceLocation(
+                            file=str(path),
+                            line=_mark_of(doc)[0] if _mark_of(doc) else None,
+                        ),
+                        suggested_fix="Rename one of the duplicates or merge them.",
+                    )
+                )
+                return
+            diagram_identity_file[identity] = str(path)
+            key = name if name not in bucket else identity
+        else:
+            key = name
         if key in bucket:
             bag.add(
                 DataLexError(
@@ -429,9 +467,16 @@ def load_project(
         bucket[key] = doc
         file_of[(kind, key)] = str(path)
 
-    # Walk the trees in a stable order
+    # Walk the trees in a stable order. Different compatibility globs can match
+    # the same physical file, especially in the domain-first layout where
+    # conceptual/logical/physical folders may contain both entities and diagrams.
+    loaded_paths: set[str] = set()
     for group, pattern in sorted(globs.items()):
         for p in iter_yaml_files(root, pattern):
+            seen_key = str(p.resolve()).lower()
+            if seen_key in loaded_paths:
+                continue
+            loaded_paths.add(seen_key)
             doc = load_file(p, schemas_root, bag, cache=cache)
             if doc is not None:
                 _register(doc, p)
@@ -452,6 +497,7 @@ def load_project(
         semantic_models={k: _strip_marks(v) for k, v in semantic_models.items()},
         contracts={k: _strip_marks(v) for k, v in contracts.items()},
         proposals={k: _strip_marks(v) for k, v in proposals.items()},
+        metric_contracts={k: _strip_marks(v) for k, v in metric_contracts.items()},
         file_of=file_of,
         errors=bag,
     )

@@ -18,36 +18,44 @@
     },
     "default_dialect": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
     "glossary": {
-      "type": "string",
-      "description": "Glob for glossary files, e.g. 'glossary/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for glossary files, e.g. 'glossary/**/*.yaml'."
     },
     "models": {
-      "type": "string",
-      "description": "Glob for entity/source/model files, e.g. 'models/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for entity/source/model files, e.g. 'models/**/*.yaml'."
     },
     "sources": {
-      "type": "string",
-      "description": "Glob for kind:source files, e.g. 'sources/**/*.yaml'. Optional."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:source files, e.g. 'sources/**/*.yaml'. Optional."
+    },
+    "domains": {
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:domain files, default 'domains/**/*.yaml'."
     },
     "snippets": {
-      "type": "string",
-      "description": "Glob for snippet files, default '.datalex/snippets/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for snippet files, default '.datalex/snippets/**/*.yaml'."
     },
     "policies": {
-      "type": "string",
-      "description": "Glob for policy files."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for policy files."
     },
     "relationships": {
-      "type": "string",
-      "description": "Glob for kind:relationship files, default 'relationships/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:relationship files, default 'relationships/**/*.yaml'."
     },
     "data_types": {
-      "type": "string",
-      "description": "Glob for kind:data_type files, default 'data_types/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:data_type files, default 'data_types/**/*.yaml'."
     },
     "semantic_models": {
-      "type": "string",
-      "description": "Glob for kind:semantic_model files, default 'semantic/**/*.yaml'."
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:semantic_model files, default 'semantic/**/*.yaml'."
+    },
+    "metric_contracts": {
+      "$ref": "#/$defs/globOrGlobs",
+      "description": "Glob(s) for kind:metric_contract files, default '*/semantic/**/*.yaml'."
     },
     "contracts": {
       "oneOf": [
@@ -110,6 +118,14 @@
     "meta": {
       "type": "object",
       "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "globOrGlobs": {
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
     }
   }
 }

@@ -167,6 +167,67 @@ class ProjectLoaderTests(unittest.TestCase):
             ]
             self.assertEqual(["commerce.Order.monthly_orders"], [c["id"] for c in contracts])
 
+    def test_loads_domain_first_contracts_proposals_and_metric_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(
+                root / "datalex.yaml",
+                "kind: project\nname: t\nversion: '1'\n"
+                "models:\n"
+                "  - '*/conceptual/**/*.yaml'\n"
+                "  - '*/logical/**/*.yaml'\n"
+                "  - '*/physical/**/*.yaml'\n"
+                "domains: domains/**/*.yaml\n"
+                "diagrams:\n"
+                "  - '*/conceptual/**/*.yaml'\n"
+                "  - '*/logical/**/*.yaml'\n"
+                "  - '*/physical/**/*.yaml'\n"
+                "contracts: '*/contracts/**/*.yaml'\n"
+                "proposals: '*/proposals/**/*.yaml'\n"
+                "metric_contracts: '*/semantic/**/*.yaml'\n",
+            )
+            _write(
+                root / "domains" / "commerce.yaml",
+                "kind: domain\nname: commerce\ndescription: Commercial order and revenue logic.\n",
+            )
+            _write(
+                root / "commerce" / "conceptual" / "revenue.diagram.yaml",
+                "kind: diagram\nname: revenue\nlayer: conceptual\ndomain: commerce\nentities: []\nrelationships: []\n",
+            )
+            _write(
+                root / "commerce" / "contracts" / "orders.contract.yaml",
+                "kind: contract\nname: order_revenue\ndomain: commerce\nentity: OrderRevenue\n"
+                "version: 1\nstatus: certified\nsource: {kind: dbt_model, ref: model.acme.fct_orders}\n",
+            )
+            _write(
+                root / "commerce" / "proposals" / "orders.proposal.yaml",
+                "kind: proposal\nname: orders_pack\nproposal_type: datalex_contract\nstatus: draft\n"
+                "domain: commerce\ntarget: fct_orders\n",
+            )
+            _write(
+                root / "commerce" / "semantic" / "revenue.metric.yaml",
+                "kind: metric_contract\nname: revenue\ndomain: commerce\nstatus: certified\n"
+                "formula: sum(order_item_revenue)\ngrain: order_item_id\ntime_dimension: ordered_at\n"
+                "dependencies: [\"ref('order_items')\"]\nowner: analytics\n",
+            )
+            _write(
+                root / "commerce" / "semantic" / "draft.metric.yaml",
+                "kind: metric_contract\nname: draft_metric\ndomain: commerce\nstatus: draft\nformula: count(*)\n",
+            )
+
+            project = load_project(root, strict=True)
+            self.assertEqual({"revenue"}, set(project.diagrams.keys()))
+            self.assertEqual(1, len(project.contracts))
+            self.assertEqual(1, len(project.proposals))
+            self.assertEqual(2, len(project.metric_contracts))
+
+            manifest = build_manifest(project)
+            summary = manifest_summary(manifest)
+            self.assertEqual(1, summary["contracts"])
+            self.assertEqual(1, summary["metrics"])
+            commerce = next(d for d in manifest["domains"] if d["name"] == "commerce")
+            self.assertEqual(["commerce.metric.revenue"], [m["id"] for m in commerce["metrics"]])
+
     def test_relationship_validation_is_layer_aware(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

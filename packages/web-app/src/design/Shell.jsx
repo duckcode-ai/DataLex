@@ -145,6 +145,7 @@ const ViewsView           = React.lazy(() => import("./views/ViewsView"));
 const EnumsView           = React.lazy(() => import("./views/EnumsView"));
 const DocsView            = React.lazy(() => import("../components/docs/DocsView"));
 const CapabilityMap       = React.lazy(() => import("./views/CapabilityMap"));
+const EnterpriseWorkbench = React.lazy(() => import("../components/enterprise/EnterpriseWorkbench"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -159,6 +160,7 @@ const DENSITY_STORAGE = "datalex.density";
 const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
 const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 520;
+const ENTERPRISE_VIEW_MODES = new Set(["ai-setup", "readiness", "domains", "proposals", "contracts", "publish"]);
 
 /* Bottom-drawer tab order.
    - Validation comes first so "what's broken / missing" is the default answer.
@@ -951,12 +953,13 @@ export default function Shell() {
     if (
       shouldOpenDiagramSurface &&
       diagramSurfaceFileKey &&
-      lastAutoOpenedDiagramFileRef.current !== diagramSurfaceFileKey
+      lastAutoOpenedDiagramFileRef.current !== diagramSurfaceFileKey &&
+      !ENTERPRISE_VIEW_MODES.has(shellViewMode)
     ) {
       lastAutoOpenedDiagramFileRef.current = diagramSurfaceFileKey;
       setShellViewMode("diagram");
     }
-  }, [diagramSurfaceFileKey, shouldOpenDiagramSurface, setShellViewMode]);
+  }, [diagramSurfaceFileKey, shouldOpenDiagramSurface, setShellViewMode, shellViewMode]);
 
   /* Merge `fileContentCache` contents into the projectFiles list so both
      the diagram adapter and semantic-model type resolver can inspect
@@ -1827,10 +1830,12 @@ export default function Shell() {
     }
   }, [activeBottomTabs, bottomPanelTab, setBottomPanelTab]);
 
+  const isEnterpriseView = ENTERPRISE_VIEW_MODES.has(shellViewMode);
+
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
     <div
-      className={`app ${bottomPanelOpen ? "with-bottom" : ""} ${rightPanelOpen ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
+      className={`app ${(bottomPanelOpen && !isEnterpriseView) ? "with-bottom" : ""} ${(rightPanelOpen && !isEnterpriseView) ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
       style={{ "--left-w": `${leftPanelWidth}px` }}
     >
       <TopBar
@@ -1937,6 +1942,11 @@ export default function Shell() {
       {/* Main canvas cell swaps based on the top-bar ViewSwitcher.
           Only one surface mounts at a time; the others lazy-load on first
           click so the diagram path is not penalised. */}
+      {isEnterpriseView && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading enterprise workflow...</div>}>
+          <EnterpriseWorkbench mode={shellViewMode} />
+        </React.Suspense>
+      )}
       {shellViewMode === "diagram" && (
         <Canvas
           tables={filteredTables}
@@ -2000,7 +2010,7 @@ export default function Shell() {
         />
       )}
 
-      {rightPanelOpen && (
+      {!isEnterpriseView && rightPanelOpen && (
         <RightPanel
           table={activeTable}
           rel={activeRel}
@@ -2017,7 +2027,7 @@ export default function Shell() {
         />
       )}
 
-      {bottomPanelOpen && (
+      {!isEnterpriseView && bottomPanelOpen && (
         <BottomDrawer tabs={activeBottomTabs}>
           <BottomPanelContent
             tab={bottomPanelTab}
@@ -2031,7 +2041,7 @@ export default function Shell() {
         </BottomDrawer>
       )}
 
-      {!bottomPanelOpen && (
+      {!isEnterpriseView && !bottomPanelOpen && (
         <button className="bottom-reopen" onClick={toggleBottomPanel} title="Open panel (⌘J)">
           <ChevronUp size={12} /> Panel
         </button>
@@ -2150,7 +2160,7 @@ export default function Shell() {
         {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
-        {showOnboarding                       && (
+        {showOnboarding && !isEnterpriseView && (
           <OnboardingJourney
             onClose={() => setShowOnboarding(false)}
             hasActiveProject={!!activeProjectId}
