@@ -19,7 +19,7 @@ MANIFEST_SPEC_VERSION = "1.0.0"
 def build_manifest(
     project: DataLexProject,
     *,
-    datalex_version: str = "1.10.0",
+    datalex_version: str = "1.11.0",
     manifest_spec_version: str = MANIFEST_SPEC_VERSION,
 ) -> Dict[str, Any]:
     """Compile a loaded DataLexProject into the v1 manifest shape.

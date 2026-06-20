@@ -157,7 +157,7 @@ See [cli.md](./cli.md) for the current cheat sheet.
                                          └──────────────────────┘
 ```
 
-Full walkthrough: [tutorial-dbt-sync.md](./tutorial-dbt-sync.md).
+Start with the current guided path: [Getting Started](./getting-started.md).
 
 ## 6. Repository layout
 

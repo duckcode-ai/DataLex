@@ -445,9 +445,10 @@ function HelpPane({ onClose }) {
         >
           {[
             ["Getting started", "docs/getting-started.md"],
-            ["Jaffle-shop walkthrough (3 min)", "docs/tutorials/jaffle-shop-walkthrough.md"],
-            ["Import an existing dbt project", "docs/tutorials/import-existing-dbt.md"],
-            ["Pull a live warehouse", "docs/tutorials/warehouse-pull.md"],
+            ["Install and run", "docs/tutorials/01-install-and-run.md"],
+            ["Connect an existing dbt project", "docs/tutorials/02-connect-existing-dbt.md"],
+            ["Configure AI", "docs/tutorials/03-configure-ai.md"],
+            ["Publish the manifest", "docs/tutorials/05-publish-manifest.md"],
             ["CLI cheat sheet", "docs/cli.md"],
           ].map(([label, path]) => (
             <li key={path}>

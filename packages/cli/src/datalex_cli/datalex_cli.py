@@ -159,7 +159,7 @@ def register_datalex(parent_sub: argparse._SubParsersAction) -> None:
     )
     manifest_build.add_argument(
         "--datalex-version",
-        default="1.10.0",
+        default="1.11.0",
         help="Version string to write into the manifest",
     )
     manifest_build.add_argument(

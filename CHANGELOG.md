@@ -7,6 +7,38 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-06-20
+
+Minor release - AI-first enterprise OSS workflow and documentation reset.
+
+### Added
+
+- AI Setup is now a first-class enterprise workflow step before generation.
+  DataLex supports OpenAI, Claude, and Ollama provider cards in the OSS flow,
+  project-private provider settings, redacted secret responses, and local AI
+  context indexing from dbt evidence.
+- Enterprise proposal generation now requires a saved and tested AI provider.
+  Readiness still works without AI, but Generate returns
+  `AI_PROVIDER_REQUIRED` instead of producing fake domains or placeholder
+  contracts.
+- Added the unified enterprise scan, readiness, generate, proposal lifecycle,
+  certify, manifest build, and optional integration readiness APIs.
+- Added first-class metric contract schema support and certified manifest
+  export for DataLex contracts and metric contracts.
+
+### Changed
+
+- Repositioned the OSS UI around
+  `Connect -> AI Setup -> Readiness -> Generate -> Review -> Contracts -> Publish`.
+- DQL readiness is now default-off in DataLex OSS and only appears when the
+  project explicitly enables a DQL integration in `datalex.yaml`.
+- Rebuilt the README, docs landing page, getting started guide, and tutorials
+  from scratch around the current dbt adoption flow, PyPI install, Docker
+  install, AI setup, proposal review, and manifest publish path.
+- Replaced the older tutorial set with a numbered sequence:
+  install, connect dbt, configure AI, generate/review/certify, publish, and
+  Docker.
+
 ## [1.10.0] - 2026-05-01
 
 Minor release — multi-provider support for `datalex draft`. The CLI is no
@@ -1970,7 +2002,9 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/duckcode-ai/DataLex/compare/v1.10.0...v1.11.0
+[1.10.0]: https://github.com/duckcode-ai/DataLex/compare/v1.8.2...v1.10.0
 [1.5.0]: https://github.com/duckcode-ai/DataLex/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/duckcode-ai/DataLex/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/duckcode-ai/DataLex/compare/v1.3.7...v1.4.0

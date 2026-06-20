@@ -5,10 +5,15 @@
 
 # DataLex
 
-**Git-native data modeling for dbt users.**
+**AI-first dbt adoption, contracts, diagrams, and manifest publishing.**
 
-Point us at your dbt project and warehouse — we produce versioned, reviewable YAML
-with contracts, lineage, ERDs, and clean round-trip back to dbt.
+DataLex is a local-first OSS workflow for teams that already use dbt. It scans
+your existing dbt project, lets AI propose business domains and contracts from
+dbt evidence, and writes reviewed DataLex artifacts back to Git.
+
+DataLex does not replace dbt. dbt remains the source of truth for SQL, model
+YAML, semantic metrics, tests, exposures, and enforced physical contracts.
+DataLex adds the business/domain layer above dbt.
 
 <p align="center">
   <a href="https://pypi.org/project/datalex-cli/">
@@ -20,269 +25,44 @@ with contracts, lineage, ERDs, and clean round-trip back to dbt.
   <a href="https://discord.gg/Dnm6bUvk">
     <img src="https://img.shields.io/badge/Discord-Join%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord Community" />
   </a>
-  <a href="https://github.com/duckcode-ai/DataLex/stargazers">
-    <img src="https://img.shields.io/github/stars/duckcode-ai/DataLex?style=for-the-badge&color=f59e0b" alt="GitHub Stars" />
-  </a>
 </p>
 </div>
 
-<p align="center">
-  <img src="Assets/datalex-main-demo.gif" alt="DataLex Visual Studio showing dbt readiness scores, model diagrams, validation findings, and AI-assisted YAML fixes" width="100%" />
-</p>
+## Install from PyPI
 
-## Quickstart — two commands
-
-```bash
-pip install -U 'datalex-cli[serve]'    # CLI + bundled Node — one command, no prereqs
-datalex serve                          # opens http://localhost:3030
-```
-
-That's it for most machines. No Docker, no database, and only one
-terminal. The `[serve]` extra pulls a portable Node runtime. If you
-already have Node 20+ on PATH, plain `pip install datalex-cli` works
-too.
-
-### Prefer Docker?
-
-Skip the local Python/Node setup — clone the repo, build the image once,
-run it. Useful when a company laptop blocks `pip install`, or when
-you'd rather not pin a venv:
+Use this path when you want DataLex on your machine or inside an existing dbt
+repo.
 
 ```bash
-git clone https://github.com/duckcode-ai/DataLex.git
-cd DataLex
-docker build -t datalex:local .
-docker run --rm -p 3030:3001 datalex:local       # opens http://localhost:3030
+python3 -m pip install -U 'datalex-cli[serve]'
+datalex --version
+datalex serve
 ```
 
-To point Docker at an existing dbt repo on your host, mount it and set
-`REPO_ROOT`:
+Open `http://localhost:3030`.
+
+To open DataLex directly on an existing dbt repo:
 
 ```bash
 cd ~/path/to/your-dbt-project
-docker run --rm -p 3030:3001 \
-  -v "$PWD":/workspace \
-  -e REPO_ROOT=/workspace \
-  -e DM_CLI=/app/datalex \
-  datalex:local
-```
-
-In the UI, use `/workspace` as the dbt repository path. Full Docker
-notes (env vars, troubleshooting) live in
-[Install → Docker Fallback](#docker-fallback-optional).
-
-### When the app opens — the Onboarding Journey
-
-A **480px right-rail panel** slides in on first launch and walks you
-through six concrete actions. Each step has a primary button that opens
-the right dialog and **auto-advances** when the underlying event fires.
-Progress is saved — close the panel anytime and resume where you left off.
-
-| # | Step | What it does |
-|---|---|---|
-| 1 | **Welcome to DataLex** | Two-line value prop — click **Let's go** |
-| 2 | **Connect your project** | Opens the Import dialog. Paste a Git URL (try `https://github.com/duckcode-ai/jaffle-shop-DataLex`) or pick a local dbt folder. **Edit in place** writes back to your real YAML. |
-| 3 | **See what's missing** | Activates the Validation drawer; click any red file to view readiness gaps |
-| 4 | **Design your first business domain** | `+` opens the New Logical Entity dialog (Customer, Order, …) |
-| 5 | **Add your AI provider** | Opens Settings → AI; paste an OpenAI / Anthropic / local-LLM key |
-| 6 | **Ask AI to draw a diagram** | One-click **Conceptualizer** proposes entities + relationships from your staging models |
-
-Replay anytime via **Settings → Replay onboarding**. The deeper 13-step
-spotlight tour is still there under **Settings → Deep feature tour**.
-
-### What's new in 1.8
-
-Three release threads landed across `1.8.0` → `1.8.2`. Each is on by
-default; no config flags or migrations needed.
-
-| Phase | Feature | Where to find it |
-|---|---|---|
-| 3 (1.8.0) | **Capability Map** top-tab — boxes-in-boxes hierarchy of `Domain → Subject area → Concept` for the active model | `Capabilities` tab in the workspace, peer of Diagram / Docs / Table |
-| 4a (1.8.1) | **EventStorming entity types** — five new types (`event`, `command`, `actor`, `policy`, `aggregate`) with the canonical Brandolini sticky-note palette on the canvas | Build panel type picker on conceptual diagrams |
-| 4b (1.8.2) | **EventStorming flow narrative** in DocsView — numbered story grouped Actors → Commands → Aggregates → Events → Policies, sticky-note swatches matching the canvas | DocsView, between the ER diagram and per-entity tables (auto-hides for plain ER models) |
-| 5a (1.8.2) | **Markdown export** from DocsView — portable `.md` with mermaid blocks embedded; renders inline on GitHub, GitLab, Confluence-with-mermaid, Notion, and inside any LLM context window | `Export Markdown` button next to `Export OSI` in DocsView's header |
-
-Walked through end-to-end in the [jaffle-shop tutorial](https://github.com/duckcode-ai/jaffle-shop-DataLex). Full release notes in [CHANGELOG.md](CHANGELOG.md).
-
-**Point it at your dbt repo:**
-
-```bash
-cd ~/my-dbt-project                    # folder containing dbt_project.yml
 datalex serve --project-dir .
 ```
 
-The folder auto-registers as your active project; the browser opens
-straight into your real file tree. Every UI edit writes back to the
-original `.yml` files — `git status` shows real diffs.
-
-See **[docs/getting-started.md](docs/getting-started.md)** for the full
-path matrix (demo → local dbt → git URL → live warehouse).
-
-**Want your warehouse drivers too?**
+For warehouse drivers, add the matching extra:
 
 ```bash
-pip install 'datalex-cli[serve,postgres]'        # or snowflake, bigquery, databricks…
-pip install 'datalex-cli[serve,all]'             # every driver + Node
+python3 -m pip install -U 'datalex-cli[serve,duckdb]'
+python3 -m pip install -U 'datalex-cli[serve,postgres]'
+python3 -m pip install -U 'datalex-cli[serve,snowflake]'
+python3 -m pip install -U 'datalex-cli[serve,all]'
 ```
 
-### Pick a tutorial
+Requirements: Python 3.9+ and Git. The `[serve]` extra includes a portable Node
+runtime for the local UI.
 
-Once `datalex serve` is running, follow the path that matches what you
-have in hand:
+## Run with Docker
 
-| You have...                                | Tutorial                                                           | Time  |
-|--------------------------------------------|--------------------------------------------------------------------|-------|
-| Nothing — want to try with a known-good dbt repo | [Walk through jaffle-shop end-to-end](docs/tutorials/jaffle-shop-walkthrough.md) | 5 min |
-| An existing dbt project (folder or git)    | [Import an existing dbt project](docs/tutorials/import-existing-dbt.md)        | 5 min |
-| A live warehouse (Snowflake/Postgres/…)    | [Pull a warehouse schema](docs/tutorials/warehouse-pull.md)                    | 7 min |
-| CLI-only, no UI                            | [CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)                             | 5 min |
-
-New here? Start with **[docs/getting-started.md](docs/getting-started.md)** —
-it's the map across all four paths plus the mental model.
-
-## 60-second demo (offline, no warehouse)
-
-<p align="center">
-  <img src="demo/demo.gif" alt="DataLex dbt sync demo — build a DuckDB warehouse, sync into DataLex YAML, emit back to dbt with contracts enforced" width="100%" />
-</p>
-
-```bash
-pip install 'datalex-cli[duckdb]'
-git clone https://github.com/duckcode-ai/DataLex.git
-cd DataLex
-
-# 1. Build a local DuckDB warehouse (no external credentials)
-python examples/jaffle_shop_demo/setup.py
-
-# 2. Sync the dbt project into DataLex YAML
-datalex datalex dbt sync examples/jaffle_shop_demo \
-    --out-root examples/jaffle_shop_demo/datalex-out
-
-# 3. Emit dbt-parseable YAML back, with contracts enforced
-datalex datalex dbt emit examples/jaffle_shop_demo/datalex-out \
-    --out-dir examples/jaffle_shop_demo/dbt-out
-```
-
-Open `examples/jaffle_shop_demo/datalex-out/sources/jaffle_shop_raw.yaml` —
-every column has its warehouse type, descriptions from the manifest, and a
-`meta.datalex.dbt.unique_id` stamp so re-running the sync never clobbers
-anything you've hand-authored.
-
-## What it does
-
-DataLex treats your data models as code. On top of a stricter YAML
-substrate (the **DataLex** layout — one file per entity, `kind:`-dispatched,
-streaming-safe for 10K+ entities), it gives you:
-
-- **`datalex datalex dbt sync <project>`** — reads `target/manifest.json` + your
-  `profiles.yml`, introspects live column types, and merges them into
-  DataLex YAML. Idempotent: user-authored `description:`, `tags:`,
-  `sensitivity:`, and `tests:` survive re-sync.
-- **`datalex datalex dbt emit`** — writes `sources.yml` and `schema.yml` with
-  `contract.enforced: true` and `data_type:` on every column. `dbt parse`
-  succeeds out of the box.
-- **`datalex datalex emit ddl --dialect ...`** — Postgres, Snowflake, BigQuery,
-  Databricks, MySQL, SQL Server, Redshift. Same source, all dialects.
-- **`datalex datalex diff`** — semantic diff with explicit rename tracking
-  (`previous_name:`), breaking-change gate for CI.
-- **`datalex datalex mesh check <repo> --strict`** — verifies dbt mesh
-  Interface readiness for shared models declared with
-  `meta.datalex.interface`. See [docs/mesh-interfaces.md](docs/mesh-interfaces.md).
-- **Cross-repo package imports** — pin `acme/warehouse-core@1.4.0` in
-  `imports:`, lockfile + content hash drift detection, Git-or-path
-  resolution, on-disk parse cache for large projects.
-- **Visual studio** — React Flow UI for editing entities, relationships,
-  and metadata; same YAML files as the CLI.
-- **Agentic modeling assistant** — local-first AI workflow for explaining
-  selected objects, reverse-engineering dbt repos into conceptual/logical
-  views, proposing focused YAML patches, and applying approved changes
-  through the same guarded save APIs as manual edits. Context comes from
-  structured dbt/DataLex facts, manifest/catalog metadata, BM25 lexical
-  search, validation output, project memory, and team skills under
-  `DataLex/Skills/*.md`; no vector search is used for code/YAML retrieval.
-
-## Supported warehouses
-
-| Warehouse | `dbt sync` introspection | Forward DDL | Reverse engineering |
-|---|:---:|:---:|:---:|
-| DuckDB | ✓ | — | — |
-| PostgreSQL | ✓ | ✓ | ✓ |
-| Snowflake | (fallback) | ✓ | ✓ |
-| BigQuery | (fallback) | ✓ | ✓ |
-| Databricks | (fallback) | ✓ | ✓ |
-| MySQL | (fallback) | ✓ | ✓ |
-| SQL Server / Azure SQL | (fallback) | ✓ | ✓ |
-| Redshift | (fallback) | ✓ | ✓ |
-
-"Fallback" = uses the existing full-schema connector (slower than the
-per-table path but already works today; a narrow introspection path ships
-per-dialect over time).
-
-## Install
-
-Use the path that matches what you are trying to do:
-
-| Goal | Recommended path |
-|---|---|
-| Try DataLex or use it with your dbt repo | [PyPI install](#pypi-install-recommended) |
-| Develop DataLex itself from this repo | [Source checkout](#source-checkout-for-contributors) |
-| Avoid local Python/Node setup differences | [Docker fallback](#docker-fallback-optional) |
-
-### PyPI Install (Recommended)
-
-From [PyPI](https://pypi.org/project/datalex-cli/):
-
-```bash
-pip install -U 'datalex-cli[serve]'                 # CLI + UI (recommended)
-pip install -U 'datalex-cli[serve,postgres]'        # add a warehouse driver
-pip install -U 'datalex-cli[serve,all]'             # every driver + UI
-pip install -U datalex-cli                          # CLI-only, no UI
-```
-
-Available extras: `serve`, `duckdb`, `postgres`, `mysql`, `snowflake`,
-`bigquery`, `databricks`, `sqlserver`, `redshift`, `all`.
-
-**Prereqs:** Python 3.9+ and Git. Node 20+ is optional because
-`[serve]` bundles a portable Node runtime.
-
-Verify the installed package:
-
-```bash
-datalex --version
-```
-
-Configure AI providers in **Settings → AI**. DataLex supports local
-fallback responses plus OpenAI, Anthropic, Gemini, and Ollama-compatible
-endpoints. Provider keys are stored locally in the browser; generated YAML
-is never written until you approve an explicit proposal.
-
-For the local DuckDB-based example repo, install the matching driver too:
-
-```bash
-pip install -U 'datalex-cli[serve,duckdb]'
-```
-
-### Source Checkout For Contributors
-
-```bash
-git clone https://github.com/duckcode-ai/DataLex.git
-cd DataLex
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e '.[serve,duckdb]'
-npm --prefix packages/api-server install
-npm --prefix packages/web-app install
-datalex serve                                    # auto-builds the UI on first run
-```
-
-Source checkouts need Node 20+ with `npm`. If you skip the npm install
-commands, `datalex serve` will try to install missing API/web
-dependencies on first run.
-
-### Docker Fallback (Optional)
-
-Docker is useful when you want to avoid local Python/Node version drift
-or when a company laptop blocks global installs. It is not required for
-normal use.
+Use Docker when you do not want to install Python packages on the host.
 
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
@@ -291,10 +71,7 @@ docker build -t datalex:local .
 docker run --rm -p 3030:3001 datalex:local
 ```
 
-Open `http://localhost:3030`.
-
-To run DataLex against an existing dbt repo from Docker, mount that repo
-and point `REPO_ROOT` at the mounted path:
+To use Docker with an existing dbt repo:
 
 ```bash
 cd ~/path/to/your-dbt-project
@@ -305,143 +82,142 @@ docker run --rm -p 3030:3001 \
   datalex:local
 ```
 
-In the UI, use `/workspace` as the dbt repository path.
+In the UI, choose `/workspace` as the dbt project path.
 
-### Update to the latest
-
-When you want to pick up the newest fixes (or a fix that's already on
-`main` but not yet on PyPI), run:
-
-```bash
-bash scripts/update.sh
-```
-
-The script auto-detects how `datalex-cli` is installed in your active
-Python environment and runs the right upgrade — `git pull` + `pip
-install -e .` for source checkouts, `pip install -U` from PyPI for
-PyPI installs, and a re-install from `main` for git-based installs.
-
-To force-pull the very latest from GitHub (skipping PyPI), pass:
-
-```bash
-bash scripts/update.sh --from-source
-```
-
-That's the workaround when a recent fix has merged to `main` but the
-next PyPI release hasn't shipped yet. Equivalent one-liner without the
-script:
-
-```bash
-pip install -U "git+https://github.com/duckcode-ai/DataLex.git"
-```
-
-### Install Troubleshooting
-
-If `datalex serve` fails with:
+## Core workflow
 
 ```text
-ERR_MODULE_NOT_FOUND ... datalex_core/_server/ai/providerMeta.js
+Connect dbt repo -> AI Setup -> Readiness -> Generate -> Review -> Contracts -> Publish
 ```
 
-you are using a wheel that did not include the full API server runtime.
-Upgrade to `datalex-cli` 1.3.4 or newer:
+1. **Connect** your dbt repo.
+2. **Set up AI** with OpenAI, Claude, or Ollama.
+3. **Scan readiness** from dbt manifest, YAML, metrics, tests, exposures, owners, and contracts.
+4. **Generate focused proposal packs** for one domain, model group, or metric family.
+5. **Review and certify** proposals before anything becomes trusted.
+6. **Publish** `datalex-manifest.json` from certified contracts.
+
+Generation requires a tested AI provider. Readiness works without AI, but
+DataLex will not create fake domains or placeholder contracts.
+
+## AI setup
+
+DataLex uses your dbt evidence to generate proposals:
+
+- `target/manifest.json`
+- dbt model YAML
+- semantic models and metrics
+- tests and relationships
+- exposures
+- owners and descriptions
+- existing dbt contracts
+- existing DataLex artifacts
+
+Provider settings are project-private and stored under:
+
+```text
+<your-dbt-project>/.datalex/agent/provider-settings.json
+```
+
+They are not written under versioned `DataLex/`, and API responses redact
+secrets.
+
+### Ollama example
 
 ```bash
-pip install -U 'datalex-cli[serve]'
+ollama pull gemma4:12b
+ollama serve
 ```
 
-Until that patch is available in your package index, install from the
-current source checkout:
+In DataLex, open **AI Setup**, choose **Ollama**, set:
+
+```text
+Base URL: http://localhost:11434
+Model: gemma4:12b
+```
+
+Then click **Save** and **Test**.
+
+## What DataLex writes
+
+New OSS artifacts use this domain-first layout:
+
+```text
+DataLex/
+  datalex.yaml
+  domains/
+    commerce.yaml
+  commerce/
+    conceptual/
+    logical/
+    physical/
+    contracts/
+    proposals/
+    glossary/
+    semantic/
+  imported/
+    dbt/
+  generated/
+    dbt/
+  generated-sql/
+  Skills/
+```
+
+DataLex still reads older layouts for compatibility, but new UI actions write
+lowercase canonical paths.
+
+Only certified contracts and metric contracts enter `datalex-manifest.json`.
+Draft, reviewed, and rejected proposals stay out of the publish manifest.
+
+## Publish a manifest
+
+```bash
+datalex datalex manifest build DataLex --out DataLex/datalex-manifest.json
+```
+
+The manifest is the stable OSS handoff for downstream tools and future cloud
+flows. DQL is not required in the OSS repo. DataLex only shows DQL readiness
+when a project explicitly enables that integration.
+
+## Tutorials
+
+Start here:
+
+1. [Install and run DataLex](docs/tutorials/01-install-and-run.md)
+2. [Connect an existing dbt repo](docs/tutorials/02-connect-existing-dbt.md)
+3. [Configure AI with OpenAI, Claude, or Ollama](docs/tutorials/03-configure-ai.md)
+4. [Generate, review, and certify a proposal pack](docs/tutorials/04-generate-review-certify.md)
+5. [Publish the DataLex manifest](docs/tutorials/05-publish-manifest.md)
+6. [Run DataLex with Docker](docs/tutorials/06-docker.md)
+
+For the full flow in one place, read [Getting started](docs/getting-started.md).
+
+## For contributors
 
 ```bash
 git clone https://github.com/duckcode-ai/DataLex.git
 cd DataLex
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e '.[serve,duckdb]'
+npm --prefix packages/api-server install
+npm --prefix packages/web-app install
 datalex serve
 ```
 
-## Project layout
-
-```text
-DataLex/
-  packages/
-    core_engine/           # Python: loader, dialects, dbt integration, packages
-      src/datalex_core/
-        _schemas/datalex/  # JSON Schema per `kind:` — bundled with the package
-    cli/                   # `datalex` entry point
-    api-server/            # Node.js API (UI backend)
-    web-app/               # React Flow studio
-  examples/
-    jaffle_shop_demo/      # zero-setup dbt-sync demo (DuckDB)
-  model-examples/          # sample projects and scenario walkthroughs
-  docs/                    # architecture, specs, runbooks
-  tests/                   # unittest suite (core engine + datalex)
-```
-
-## Visual Studio
-
-`datalex serve` ships the full UI — no extra setup. If you're hacking
-on the web app itself and want hot-reload, run the two dev servers from
-a source checkout:
+Useful checks:
 
 ```bash
-# Terminal 1 — api (port 3030)
-npm --prefix packages/api-server run dev
-# Terminal 2 — web (port 5173)
-npm --prefix packages/web-app run dev
+npm --prefix packages/api-server test
+npm --prefix packages/web-app run build
+python3 -m pytest tests/datalex packages/readiness_engine/tests
 ```
 
-The UI reads and writes the same YAML files the CLI does — no database,
-no hosted service.
+## Links
 
-## CI / GitOps
-
-DataLex is designed to live in your repo next to your dbt project.
-A typical CI step:
-
-```bash
-./datalex datalex validate datalex/
-./datalex datalex diff datalex-main/ datalex/ --exit-on-breaking
-./datalex datalex dbt emit datalex/ --out-dir dbt/
-dbt parse
-```
-
-## Documentation
-
-**Onboarding**
-
-- **[Getting started](docs/getting-started.md)** — the one-page map
-  covering install, the three GUI paths, and the mental model.
-- **[Jaffle-shop walkthrough](docs/tutorials/jaffle-shop-walkthrough.md)** —
-  end-to-end demo: clone the DataLex-ready jaffle-shop repo, build it
-  with DuckDB, review conceptual/logical/physical diagrams, and commit
-  normal dbt/DataLex YAML diffs.
-- **[Import an existing dbt project](docs/tutorials/import-existing-dbt.md)** —
-  5-minute bring-your-own-repo flow (local folder or git URL).
-- **[Pull a warehouse schema](docs/tutorials/warehouse-pull.md)** —
-  7-minute live-connection flow with inferred PKs/FKs and streaming
-  progress.
-- **[Agentic AI modeling](docs/ai-agentic-modeling.md)** — how Ask AI,
-  skills, memory, search/indexing, proposal review, and auto-refresh work.
-- **[CLI dbt-sync tutorial](docs/tutorial-dbt-sync.md)** — original
-  CLI-only jaffle_shop walkthrough.
-
-**Reference**
-
-- **[DataLex layout reference](docs/datalex-layout.md)** — what each
-  `kind:` file looks like and how the loader discovers them.
-- **[CLI cheat sheet](docs/cli.md)** — every `datalex datalex …` subcommand on
-  one page.
-- **[API contracts](docs/api-contracts.md)** — HTTP API reference for
-  integrators.
-- **[Architecture](docs/architecture.md)** — core engine modules and
-  end-to-end data flow.
-- Pre-DataLex specs have moved to [docs/archive/](docs/archive/).
-
-## Community
-
-- Discord: [![Join Discord](https://img.shields.io/badge/Discord-Join%20DuckCode%20AI-5865F2?logo=discord&logoColor=white)](https://discord.gg/Dnm6bUvk)
-- Issues: [![GitHub Issues](https://img.shields.io/badge/Issues-Report%20or%20Request-0ea5e9)](https://github.com/duckcode-ai/DataLex/issues)
-- Contributing: `CONTRIBUTING.md`
-- License: [![MIT](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
+- Docs: [docs/index.md](docs/index.md)
+- CLI reference: [docs/cli.md](docs/cli.md)
+- Enterprise OSS workflow: [docs/enterprise-oss-workflow.md](docs/enterprise-oss-workflow.md)
+- DataLex layout: [docs/datalex-layout.md](docs/datalex-layout.md)
+- Issues: [GitHub Issues](https://github.com/duckcode-ai/DataLex/issues)
+- Community: [Discord](https://discord.gg/Dnm6bUvk)

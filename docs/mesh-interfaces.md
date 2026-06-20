@@ -123,7 +123,8 @@ datalex readiness-gate --project /path/to/dbt-repo \
   --sarif datalex-readiness.sarif --pr-comment datalex-readiness.md
 ```
 
-→ Wire it into CI: [Tutorial: CI readiness gate](./tutorials/ci-readiness-gate.md).
+→ For the current OSS adoption path, start with
+[Generate, review, and certify](./tutorials/04-generate-review-certify.md).
 
 ## Bulk-toggle contract enforcement (1.4)
 
@@ -210,8 +211,8 @@ ls out/catalog/
 
 ## See also
 
-- [Tutorial: CI readiness gate](./tutorials/ci-readiness-gate.md) (1.4)
-- [Tutorial: Custom policy packs](./tutorials/policy-packs.md) (1.4)
+- [Generate, review, and certify](./tutorials/04-generate-review-certify.md)
+- [Publish the DataLex manifest](./tutorials/05-publish-manifest.md)
 - [Agentic AI modeling](./ai-agentic-modeling.md) — including the
   conceptualizer + canonicalizer agents that ship glossary-aware
   proposals

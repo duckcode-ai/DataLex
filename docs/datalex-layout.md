@@ -424,7 +424,7 @@ entity of the same name.
 
 ## See also
 
-- [Tutorial: dbt sync in 5 minutes](./tutorial-dbt-sync.md)
+- [Tutorial: connect an existing dbt repo](./tutorials/02-connect-existing-dbt.md)
 - [CLI cheat sheet](./cli.md)
 - [Architecture](./architecture.md)
 - [JSON Schemas](../packages/core_engine/src/datalex_core/_schemas/datalex/) — machine-readable reference

@@ -1,5 +1,5 @@
 site_name: DataLex
-site_description: YAML-first data modeling that makes contracts machine-checkable for the AI era.
+site_description: AI-first dbt adoption, contracts, diagrams, and manifest publishing.
 site_url: https://datalex.duckcode.ai
 repo_url: https://github.com/duckcode-ai/DataLex
 repo_name: duckcode-ai/DataLex
@@ -78,24 +78,23 @@ exclude_docs: |
 
 nav:
   - Home: index.md
-  - Getting started:
-      - Quickstart: getting-started.md
-      - The DataLex + DQL stack: datalex-and-dql.md
+  - Getting Started: getting-started.md
+  - Tutorials:
+      - Overview: tutorials/index.md
+      - 1. Install and run: tutorials/01-install-and-run.md
+      - 2. Connect dbt: tutorials/02-connect-existing-dbt.md
+      - 3. Configure AI: tutorials/03-configure-ai.md
+      - 4. Generate and certify: tutorials/04-generate-review-certify.md
+      - 5. Publish manifest: tutorials/05-publish-manifest.md
+      - 6. Docker: tutorials/06-docker.md
   - Concepts:
-      - Architecture: architecture.md
       - Enterprise OSS workflow: enterprise-oss-workflow.md
-      - Layered model (conceptual / logical / physical): datalex-layout.md
+      - AI-agentic modeling: ai-agentic-modeling.md
+      - Layered model and layout: datalex-layout.md
+      - Optional DataLex + DQL stack: datalex-and-dql.md
       - Contracts for DQL blocks: contracts-for-dql-blocks.md
       - Data mesh interfaces: mesh-interfaces.md
-      - AI-agentic modeling: ai-agentic-modeling.md
-  - Tutorials:
-      - 5-minute DataLex + DQL tutorial: tutorials/datalex-plus-dql-end-to-end.md
-      - Jaffle Shop walkthrough: tutorials/jaffle-shop-walkthrough.md
-      - Import an existing dbt project: tutorials/import-existing-dbt.md
-      - dbt round-trip: tutorial-dbt-sync.md
-      - Pull from your warehouse: tutorials/warehouse-pull.md
-      - Author a policy pack: tutorials/policy-packs.md
-      - CI readiness gate: tutorials/ci-readiness-gate.md
+      - Architecture: architecture.md
   - Reference:
       - CLI: cli.md
       - API contracts: api-contracts.md
