@@ -692,7 +692,13 @@ export default function Shell() {
   const [density, setDensity] = React.useState(() => localStorage.getItem(DENSITY_STORAGE) || "comfortable");
 
   React.useEffect(() => {
+    // Set the attribute on BOTH <html> and <body>. The CSS theme tokens
+    // live on `[data-theme="…"]`; index.html ships a static data-theme on
+    // <body> for first paint, and since <body> is the nearer ancestor of
+    // the app it would otherwise win the custom-property cascade and pin
+    // the theme to that static value. Updating both keeps switching live.
     document.documentElement.setAttribute("data-theme", theme);
+    document.body.setAttribute("data-theme", theme);
     localStorage.setItem(THEME_STORAGE, theme);
   }, [theme]);
 
@@ -735,7 +741,7 @@ export default function Shell() {
   const {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
-    rightPanelOpen, rightPanelTab, rightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
+    rightPanelOpen, rightPanelTab, rightPanelWidth, setRightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
     shellViewMode, setShellViewMode,
     openAiPanel,
     addToast,
@@ -1632,6 +1638,25 @@ export default function Shell() {
     } catch (_err) {}
   }, [leftPanelWidth]);
 
+  /* Inspector (right panel) resize — mirrors the left handle. Dragging the
+     strip leftward widens the inspector; the store clamps and persists the
+     width, and the `--right-w` effect above flows it into the grid column.
+     Phase 6 of the enterprise UI migration. */
+  const handleStartRightResize = React.useCallback((event) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = rightPanelWidth;
+    const onMove = (moveEvent) => {
+      setRightPanelWidth(startWidth + (startX - moveEvent.clientX));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [rightPanelWidth, setRightPanelWidth]);
+
   const handleGroupMoveEnd = React.useCallback((movedTables) => {
     const moved = Array.isArray(movedTables) ? movedTables.filter(Boolean) : [];
     if (moved.length === 0) return;
@@ -2025,6 +2050,17 @@ export default function Shell() {
         <AiPlanReviewEditor
           document={aiReviewDocument}
           onClose={closeAiReviewDocument}
+        />
+      )}
+
+      {!isEnterpriseView && rightPanelOpen && (
+        <div
+          className="right-resizer"
+          onMouseDown={handleStartRightResize}
+          title="Drag to resize inspector"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize inspector panel"
         />
       )}
 

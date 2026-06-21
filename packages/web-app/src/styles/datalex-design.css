@@ -466,6 +466,33 @@ input { font: inherit; color: inherit; }
   background: var(--accent);
 }
 
+/* Inspector (right panel) resizer — mirror of .left-resizer, pinned to
+   the inspector's left edge. */
+.right-resizer {
+  position: absolute;
+  top: 112px;
+  bottom: 26px;
+  right: calc(var(--right-w, 320px) - 3px);
+  width: 7px;
+  cursor: col-resize;
+  z-index: 30;
+  background: transparent;
+}
+.right-resizer::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: var(--border-default);
+  transition: background 120ms var(--ease);
+}
+.right-resizer:hover::before,
+.right-resizer:active::before {
+  background: var(--accent);
+}
+
 /* ============================================================
    Activity rail — primary navigation (see ActivityRail.jsx)
    ============================================================ */

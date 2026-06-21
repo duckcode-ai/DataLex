@@ -22,64 +22,19 @@ import {
   Sparkles,
   GitCommit,
   Settings as LucideSettings,
-  Sun,
-  Layers,
-  FileText as LucideFileText,
-  ClipboardCheck,
-  Network,
-  Inbox,
   ShieldCheck,
-  Rocket,
   GitBranch,
   GitCommit as LucideGitCommit,
 } from "lucide-react";
 import { THEMES } from "./notation";
-import useUiStore from "../stores/uiStore";
 import BellMenu from "./BellMenu";
 import DomainSwitcher from "./DomainSwitcher";
 import DiffToggle from "./DiffToggle";
 
-/* Segmented view-mode switcher. Drives `uiStore.shellViewMode`, which the
-   Shell inspects to decide whether to render the diagram, the readable
-   Docs view, the table list, the views manager, or the enums manager.
-   Icons sourced from lucide-react for consistent stroke weight + meaning. */
-const VIEW_MODES = [
-  { id: "ai-setup",  label: "AI Setup",  Icon: Sparkles,       tooltip: "Configure OpenAI, Claude, or Ollama before generating domains, contracts, and diagrams" },
-  { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tooltip: "Enterprise readiness by domain, contracts, metrics, owners, grains, and DQL status" },
-  { id: "domains",   label: "Domains",   Icon: Network,        tooltip: "Domain-level model groups and certification priorities" },
-  { id: "proposals", label: "Proposals", Icon: Inbox,          tooltip: "AI-generated proposal packs ready for review" },
-  { id: "contracts", label: "Contracts", Icon: ShieldCheck,    tooltip: "Business contracts, metric contracts, statuses, evidence, and blockers" },
-  { id: "publish",   label: "Publish",   Icon: Rocket,         tooltip: "Build the DataLex manifest and optional integration readiness" },
-  { id: "diagram",   label: "Diagram",   Icon: Layers,         tooltip: "Diagram drilldown for the selected domain or file" },
-  { id: "docs",      label: "Docs",      Icon: LucideFileText, tooltip: "Readable model docs rendered from YAML and dbt metadata" },
-];
-
-function ViewSwitcher() {
-  const shellViewMode = useUiStore((s) => s.shellViewMode);
-  const setShellViewMode = useUiStore((s) => s.setShellViewMode);
-  return (
-    <div className="view-switcher" role="tablist" aria-label="Main view">
-      {VIEW_MODES.map((m) => {
-        const Ico = m.Icon;
-        const active = shellViewMode === m.id;
-        return (
-          <button
-            key={m.id}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            className={`view-seg ${active ? "active" : ""}`}
-            onClick={() => setShellViewMode(m.id)}
-            title={m.tooltip}
-          >
-            <Ico size={14} strokeWidth={1.8} />
-            {m.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+/* The segmented view-mode switcher that used to live here was retired in
+   the enterprise UI migration: workflow destinations moved to the left
+   activity rail (ActivityRail.jsx) and the Diagram/Table/Docs object-view
+   toggles moved to the layer spine (LayerSpine.jsx). */
 
 export function TopBar({
   onOpenCmd, theme, setTheme, onNewTable, onNewFile, onOpenFile, onSave, onSaveAll,

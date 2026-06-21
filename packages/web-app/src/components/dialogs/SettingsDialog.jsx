@@ -45,7 +45,12 @@ export default function SettingsDialog() {
 
   const pickTheme = (id) => {
     localStorage.setItem(THEME_STORAGE, id);
+    // Set both <html> and <body>: <body> carries a static data-theme from
+    // index.html and is the nearer ancestor of the app, so it must be
+    // updated too or it pins the theme. (Shell also does this on the
+    // broadcast event below; kept here so the change is immediate.)
     document.documentElement.setAttribute("data-theme", id);
+    document.body.setAttribute("data-theme", id);
     setCurrentTheme(id);
     window.dispatchEvent(
       new CustomEvent("datalex:theme-change", { detail: { theme: id } })
