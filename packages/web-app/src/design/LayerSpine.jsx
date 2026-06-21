@@ -9,12 +9,20 @@
    to a sibling file in another layer) and the per-layer view toggles are
    tracked as follow-up increments in the spec. */
 import React from "react";
-import { Lightbulb, Workflow, Database, ChevronRight } from "lucide-react";
+import { Lightbulb, Workflow, Database, ChevronRight, Layers, Table2, FileText } from "lucide-react";
 
 const LAYERS = [
   { id: "conceptual", label: "Conceptual", Icon: Lightbulb, token: "--layer-conceptual", soft: "--layer-conceptual-soft", hint: "Business ideas, concepts, and contracts — platform-free." },
   { id: "logical",    label: "Logical",    Icon: Workflow,  token: "--layer-logical",    soft: "--layer-logical-soft",    hint: "Platform-neutral entities, attributes, keys, and relationships." },
   { id: "physical",   label: "Physical",   Icon: Database,  token: "--layer-physical",   soft: "--layer-physical-soft",   hint: "Dialect-typed tables, constraints, and dbt model targets." },
+];
+
+/* Object-view toggles — how to render the active layer. Moved here from
+   the old top-bar ViewSwitcher; they drive shellViewMode. */
+const VIEWS = [
+  { id: "diagram", label: "Diagram", Icon: Layers },
+  { id: "table",   label: "Table",   Icon: Table2 },
+  { id: "docs",    label: "Docs",    Icon: FileText },
 ];
 
 function normalizeLayer(modelKind) {
@@ -23,7 +31,7 @@ function normalizeLayer(modelKind) {
   return "physical";
 }
 
-export default function LayerSpine({ modelKind, objectCount = 0, fileName = "" }) {
+export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", viewMode = "diagram", onSelectView }) {
   const active = normalizeLayer(modelKind);
   const activeMeta = LAYERS.find((l) => l.id === active) || LAYERS[2];
   return (
@@ -46,6 +54,26 @@ export default function LayerSpine({ modelKind, objectCount = 0, fileName = "" }
                 {layer.label}
               </span>
             </React.Fragment>
+          );
+        })}
+      </div>
+      <div className="layer-spine-views" role="tablist" aria-label="Object view">
+        {VIEWS.map((v) => {
+          const Ico = v.Icon;
+          const on = viewMode === v.id;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              role="tab"
+              aria-selected={on}
+              className={`layer-spine-view ${on ? "active" : ""}`}
+              onClick={() => onSelectView?.(v.id)}
+              title={`${v.label} view`}
+            >
+              <Ico size={13} strokeWidth={1.8} />
+              {v.label}
+            </button>
           );
         })}
       </div>

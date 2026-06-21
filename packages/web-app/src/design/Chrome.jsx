@@ -154,8 +154,10 @@ export function TopBar({
             <Redo2 size={15} strokeWidth={1.8} />
           </button>
         </div>
-        {/* View-mode switcher replaces the old Diagram/View/Enum triple. */}
-        <ViewSwitcher />
+        {/* Navigation moved out of the top bar (enterprise UI migration):
+            workflow destinations now live in the left activity rail, and
+            the Diagram/Table/Docs object-view toggles live on the layer
+            spine. See ActivityRail.jsx / LayerSpine.jsx. */}
         <div className="tool-group">
           <DomainSwitcher
             domains={domains}

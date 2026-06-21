@@ -16,6 +16,7 @@ import yaml from "js-yaml";
 import { TopBar, ProjectTabs, StatusBar } from "./Chrome";
 import LeftPanel from "./LeftPanel";
 import LayerSpine from "./LayerSpine";
+import ActivityRail from "./ActivityRail";
 import Canvas from "./Canvas";
 import RightPanel from "./RightPanel";
 import CommandPalette from "./CommandPalette";
@@ -1016,6 +1017,15 @@ export default function Shell() {
     });
   }, [activeFile, activeModelKind, openAiPanel, selectedEntityId]);
 
+  /* Version destination (activity rail) — opens the consolidated git
+     surface. The diff/history tabs live in the bottom drawer, which is
+     hidden in enterprise workflow modes, so drop back to the diagram
+     workspace first when needed. setBottomPanelTab force-opens the drawer. */
+  const openVersionSurface = React.useCallback(() => {
+    if (ENTERPRISE_VIEW_MODES.has(shellViewMode)) setShellViewMode("diagram");
+    setBottomPanelTab("diff");
+  }, [shellViewMode, setShellViewMode, setBottomPanelTab]);
+
   React.useEffect(() => {
     const updateSelectionTarget = () => {
       const selection = window.getSelection?.();
@@ -1877,10 +1887,19 @@ export default function Shell() {
         onBranchClick={() => activeProjectId && openModal("gitBranch")}
       />
 
+      <ActivityRail
+        activeMode={shellViewMode}
+        onSelectMode={setShellViewMode}
+        onOpenVersion={openVersionSurface}
+        versionActive={bottomPanelOpen && (bottomPanelTab === "diff" || bottomPanelTab === "history")}
+      />
+
       <LayerSpine
         modelKind={activeModelKind}
         objectCount={Array.isArray(tables) ? tables.length : 0}
         fileName={activeFile?.name || ""}
+        viewMode={shellViewMode}
+        onSelectView={setShellViewMode}
       />
 
       <LeftPanel

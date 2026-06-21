@@ -423,13 +423,13 @@ input { font: inherit; color: inherit; }
   --left-w: 280px;
   display: grid;
   grid-template-rows: 44px 36px 32px 1fr 26px;
-  grid-template-columns: var(--left-w, 280px) 1fr var(--right-w, 320px);
+  grid-template-columns: 56px var(--left-w, 280px) 1fr var(--right-w, 320px);
   grid-template-areas:
-    "topbar topbar topbar"
-    "tabs   tabs   tabs"
-    "spine  spine  spine"
-    "left   canvas right"
-    "status status status";
+    "topbar topbar topbar topbar"
+    "tabs   tabs   tabs   tabs"
+    "spine  spine  spine  spine"
+    "rail   left   canvas right"
+    "status status status status";
   height: 100vh;
   background: var(--bg-0);
   position: relative;
@@ -438,14 +438,14 @@ input { font: inherit; color: inherit; }
    giving the canvas the extra horizontal room. The JSX sets this class on
    `.app` via `!rightPanelOpen`. */
 .app.no-right {
-  grid-template-columns: var(--left-w, 280px) 1fr 0;
+  grid-template-columns: 56px var(--left-w, 280px) 1fr 0;
 }
 
 .left-resizer {
   position: absolute;
   top: 112px;
   bottom: 26px;
-  left: calc(var(--left-w, 280px) - 3px);
+  left: calc(56px + var(--left-w, 280px) - 3px);
   width: 7px;
   cursor: col-resize;
   z-index: 30;
@@ -464,6 +464,55 @@ input { font: inherit; color: inherit; }
 .left-resizer:hover::before,
 .left-resizer:active::before {
   background: var(--accent);
+}
+
+/* ============================================================
+   Activity rail — primary navigation (see ActivityRail.jsx)
+   ============================================================ */
+.activity-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 8px 0;
+  background: var(--bg-1);
+  border-right: 1px solid var(--border-default);
+  overflow-y: auto;
+}
+.activity-rail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.activity-rail-divider {
+  height: 1px;
+  margin: 8px 12px;
+  background: var(--border-subtle);
+}
+.activity-rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 2px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.activity-rail-item:hover { color: var(--text-secondary); background: var(--bg-hover); }
+.activity-rail-item.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  background: var(--accent-dim);
+}
+.activity-rail-label {
+  font-size: 9px;
+  letter-spacing: 0.01em;
+  line-height: 1;
 }
 
 /* ============================================================
@@ -512,8 +561,36 @@ input { font: inherit; color: inherit; }
   font-weight: 600;
 }
 .layer-spine-seg.active svg { opacity: 1; }
-.layer-spine-context {
+.layer-spine-views {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-default);
+}
+.layer-spine-view {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.layer-spine-view:hover { color: var(--text-secondary); }
+.layer-spine-view.active {
+  color: var(--accent-fg);
+  background: var(--accent);
+}
+.layer-spine-context {
   display: flex;
   align-items: center;
   gap: 12px;
