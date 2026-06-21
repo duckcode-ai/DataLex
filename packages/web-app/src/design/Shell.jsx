@@ -1945,6 +1945,7 @@ export default function Shell() {
         onSelectMode={setShellViewMode}
         onOpenVersion={openVersionSurface}
         onConnect={() => openModal("importDbtRepo")}
+        onOpenAi={() => openModal("settings", { initialTab: "ai" })}
         versionActive={bottomPanelOpen && (bottomPanelTab === "diff" || bottomPanelTab === "history")}
       />
 

@@ -12,9 +12,16 @@ import {
   CircleAlert, RefreshCw,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
 import { emitJourneyEvent } from "../../lib/onboardingJourney";
 import { testAiSettings, testConnector, fetchConnections } from "../../lib/api";
 import Modal from "./Modal";
+
+/* Broadcast so any open page (Home, the enterprise workbench) re-reads AI
+   readiness the moment a provider is connected — no manual refresh. */
+function announceAiChanged() {
+  try { window.dispatchEvent(new CustomEvent("datalex:ai-changed")); } catch { /* ignore */ }
+}
 
 const TABS = [
   { id: "ai",          label: "AI provider",        icon: Bot },
@@ -84,6 +91,7 @@ const AI_PROVIDERS = [
 ];
 
 function AiProviderPane() {
+  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
   const [provider, setProvider] = React.useState(() => readStorage("datalex.ai.provider", "local"));
   const [model, setModel] = React.useState(() => readStorage("datalex.ai.model", ""));
   const [baseUrl, setBaseUrl] = React.useState(() => readStorage("datalex.ai.baseUrl", ""));
@@ -111,11 +119,37 @@ function AiProviderPane() {
     return () => clearTimeout(t);
   }, [provider, model, baseUrl, apiKey, saveKey]);
 
+  // Test == connect. Passing the projectId is what makes the api-server
+  // persist the provider config AND mark testStatus=passed, which is what
+  // every page reads for "AI ready". Without it the test would pass but
+  // the pages would keep showing "Set up AI".
   const runTest = async () => {
     setBusy(true); setTest(null);
     try {
-      const res = await testAiSettings({ provider, model: model || undefined, baseUrl: baseUrl || undefined, apiKey: apiKey || undefined });
-      setTest({ ok: !!res?.ok, message: res?.ok ? `Provider ready: ${res.provider || provider}` : (res?.message || "Test returned no status.") });
+      const payload = {
+        provider, enabled: true,
+        model: model || undefined,
+        baseUrl: baseUrl || undefined,
+        apiKey: apiKey || undefined,
+      };
+      if (activeProjectId) payload.projectId = activeProjectId;
+      const res = await testAiSettings(payload);
+      const ready = res?.generation?.ready;
+      const ok = !!res?.ok;
+      setTest({
+        ok,
+        message: ok
+          ? (provider === "local"
+              ? "Local search ready. Add a provider for AI generation."
+              : ready
+                ? "Connected — AI is ready across DataLex."
+                : `Provider ready: ${res.provider || provider}`)
+          : (res?.message || "Test returned no status."),
+      });
+      if (ok) {
+        if ((saveKey && apiKey.trim()) || provider !== "local") emitJourneyEvent("ai:settings:saved", { provider });
+        announceAiChanged();
+      }
     } catch (err) {
       setTest({ ok: false, message: err?.message || String(err) });
     } finally {

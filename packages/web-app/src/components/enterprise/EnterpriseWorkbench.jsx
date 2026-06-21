@@ -448,7 +448,7 @@ function Header({ scan, mode, loading, onRefresh }) {
   );
 }
 
-function ReadinessView({ scan, onGenerate, generating, onOpenMode, aiReady }) {
+function ReadinessView({ scan, onGenerate, generating, onOpenMode, onOpenAiSetup, aiReady }) {
   const totals = scan?.totals || {};
   const topDomains = (scan?.domains || []).slice(0, 6);
   const topPacks = (scan?.proposal_packs || []).slice(0, 4);
@@ -470,8 +470,8 @@ function ReadinessView({ scan, onGenerate, generating, onOpenMode, aiReady }) {
       </section>
       {!aiReady && (
         <div className="enterprise-warning">
-          <Sparkles size={16} /> AI generation is not ready yet. Scan results are available, but proposal generation starts after AI Setup passes.
-          <button className="enterprise-secondary" type="button" onClick={() => onOpenMode("ai-setup")}>Open AI Setup</button>
+          <Sparkles size={16} /> AI generation is not ready yet. Scan results are available, but proposal generation starts after you connect AI.
+          <button className="enterprise-secondary" type="button" onClick={onOpenAiSetup}>Set up AI</button>
         </div>
       )}
       <section className="enterprise-two-col">
@@ -502,7 +502,7 @@ function ReadinessView({ scan, onGenerate, generating, onOpenMode, aiReady }) {
                   className={aiReady ? "enterprise-primary" : "enterprise-secondary"}
                   type="button"
                   disabled={aiReady && generating === pack.domain}
-                  onClick={() => aiReady ? onGenerate(pack.domain) : onOpenMode("ai-setup")}
+                  onClick={() => aiReady ? onGenerate(pack.domain) : onOpenAiSetup?.()}
                 >
                   <Sparkles size={14} /> {aiReady ? "Generate draft" : "Set up AI"}
                 </button>
@@ -890,6 +890,16 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
     refreshAiSetup();
   }, [refreshAiSetup]);
 
+  // AI is configured in the Settings dialog now. When it changes, re-read
+  // readiness and re-scan so these pages flip from "Set up AI" to
+  // "Generate" without a manual refresh.
+  const openAiSettings = React.useCallback(() => openModal?.("settings", { initialTab: "ai" }), [openModal]);
+  React.useEffect(() => {
+    const onAiChanged = () => { refreshAiSetup(); refresh({ force: true }); };
+    window.addEventListener("datalex:ai-changed", onAiChanged);
+    return () => window.removeEventListener("datalex:ai-changed", onAiChanged);
+  }, [refreshAiSetup, refresh]);
+
   React.useEffect(() => {
     const providers = aiSettings?.settings?.providers || [];
     if (!providers.length) return;
@@ -918,7 +928,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
     if (!activeProjectId) return;
     if (!aiReady) {
       addToast?.({ type: "info", message: "Set up and test AI before generating proposals." });
-      setShellViewMode("ai-setup");
+      openAiSettings();
       return;
     }
     const selectedDomain = domain || options.domain || generationOptions.domain || "core";
@@ -942,7 +952,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
     } finally {
       setGenerating("");
     }
-  }, [activeProjectId, addToast, aiReady, generationOptions, refreshProjectFiles, refresh, refreshAiSetup, setShellViewMode]);
+  }, [activeProjectId, addToast, aiReady, generationOptions, refreshProjectFiles, refresh, refreshAiSetup, setShellViewMode, openAiSettings]);
 
   const handleProviderChange = React.useCallback((provider, patch) => {
     setProviderInputs((prev) => ({
@@ -1075,7 +1085,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
         />
       )}
       {scan && activeMode === "readiness" && (
-        <ReadinessView scan={scan} onGenerate={handleGenerate} generating={generating} onOpenMode={setShellViewMode} aiReady={aiReady} />
+        <ReadinessView scan={scan} onGenerate={handleGenerate} generating={generating} onOpenMode={setShellViewMode} onOpenAiSetup={openAiSettings} aiReady={aiReady} />
       )}
       {scan && activeMode === "domains" && (
         <DomainsView
@@ -1085,7 +1095,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
           query={domainQuery}
           onQueryChange={setDomainQuery}
           aiReady={aiReady}
-          onOpenSetup={() => setShellViewMode("ai-setup")}
+          onOpenSetup={openAiSettings}
         />
       )}
       {scan && activeMode === "proposals" && (
@@ -1100,7 +1110,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
           filters={proposalFilters}
           setFilters={setProposalFilters}
           aiReady={aiReady}
-          onOpenSetup={() => setShellViewMode("ai-setup")}
+          onOpenSetup={openAiSettings}
         />
       )}
       {scan && activeMode === "contracts" && <ContractsView scan={scan} filters={contractFilters} setFilters={setContractFilters} />}

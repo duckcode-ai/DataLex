@@ -51,20 +51,31 @@ export default function HomeView({
 }) {
   const [scan, setScan] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
-  const aiReady = aiConfigured();
+  const [tick, setTick] = React.useState(0);
 
   React.useEffect(() => {
     if (!projectId) { setScan(null); return; }
     let cancelled = false;
     setLoading(true);
-    fetchEnterpriseScan(projectId)
+    fetchEnterpriseScan(projectId, tick ? { force: true } : {})
       .then((res) => { if (!cancelled) setScan(res?.scan || res || null); })
       .catch(() => { if (!cancelled) setScan(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, tick]);
+
+  // Re-scan when AI is connected in Settings so the status flips live.
+  React.useEffect(() => {
+    const onChanged = () => setTick((n) => n + 1);
+    window.addEventListener("datalex:ai-changed", onChanged);
+    return () => window.removeEventListener("datalex:ai-changed", onChanged);
+  }, []);
 
   const totals = scan?.totals || {};
+  // Use the server's readiness (provider saved + tested) when a project is
+  // loaded, so Home agrees with the enterprise pages. Fall back to the
+  // browser-config check only before a project exists.
+  const aiReady = projectId ? Boolean(scan?.ai?.ready) : aiConfigured();
   const detected = (totals.datalex_contracts || 0) > 0 || (totals.proposals || 0) > 0;
   const modeled = (totals.diagrams || 0) > 0;
   const certified = (totals.certified_contracts || 0) > 0;

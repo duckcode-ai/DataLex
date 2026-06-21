@@ -38,7 +38,7 @@ const GROUPS = [
     key: "setup",
     items: [
       { id: "__connect", label: "Connect", Icon: FolderGit2, tip: "Attach a dbt project — a Git URL or a local folder. Start here." },
-      { id: "ai-setup",  label: "AI",      Icon: Sparkles,   tip: "Configure the AI provider DataLex uses to detect domains and contracts and to draw diagrams." },
+      { id: "__ai",      label: "AI",      Icon: Sparkles,   tip: "Connect the AI provider DataLex uses to detect domains and contracts and to draw diagrams." },
     ],
   },
   {
@@ -65,16 +65,17 @@ const GROUPS = [
   },
 ];
 
-export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, onConnect, versionActive = false }) {
+export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, onConnect, onOpenAi, versionActive = false }) {
   const isActive = (item) => {
     if (item.id === "__version") return versionActive;
-    if (item.id === "__connect") return false;
+    if (item.id === "__connect" || item.id === "__ai") return false;
     if (item.rail === "model") return MODEL_MODES.has(activeMode);
     return activeMode === item.id;
   };
   const handle = (item) => {
     if (item.id === "__version") return onOpenVersion?.();
     if (item.id === "__connect") return onConnect?.();
+    if (item.id === "__ai") return onOpenAi?.();
     onSelectMode?.(item.id);
   };
   return (
