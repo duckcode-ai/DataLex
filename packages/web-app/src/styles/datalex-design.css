@@ -620,6 +620,98 @@ input { font: inherit; color: inherit; }
 .home-step-cta:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* ============================================================
+   Settings — AI provider + database connection (see SettingsDialog.jsx)
+   ============================================================ */
+.set-card {
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  background: var(--bg-1);
+  padding: 16px;
+  margin-top: 14px;
+}
+.set-card-title {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px;
+}
+.set-saved {
+  display: inline-flex; align-items: center; gap: 4px; margin-left: auto;
+  font-size: 10px; font-weight: 600; color: var(--status-success);
+  background: var(--status-success-bg); padding: 2px 7px; border-radius: 999px;
+}
+.set-mini {
+  margin-left: auto; display: inline-flex; padding: 3px; border-radius: 5px;
+  background: transparent; border: 1px solid var(--border-default); color: var(--text-tertiary); cursor: pointer;
+}
+.set-mini:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.set-provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.set-provider-tile {
+  display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+  padding: 10px 12px; border-radius: 9px; cursor: pointer; text-align: left;
+  background: var(--bg-2); border: 1px solid var(--border-default); color: var(--text-secondary);
+  transition: border-color 120ms var(--ease), background 120ms var(--ease);
+}
+.set-provider-tile:hover { border-color: var(--border-strong); }
+.set-provider-tile.active { border-color: var(--accent); background: var(--accent-dim); color: var(--text-primary); }
+.set-provider-name { font-size: 12px; font-weight: 600; }
+.set-provider-tag {
+  font-size: 9px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--status-success); background: var(--status-success-bg); padding: 1px 6px; border-radius: 999px;
+}
+
+.set-form { display: grid; gap: 10px; margin-top: 12px; }
+.set-row { display: grid; gap: 5px; }
+.set-label { font-size: 11px; font-weight: 600; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
+.set-opt { font-size: 10px; font-weight: 400; color: var(--text-muted); }
+.set-req { color: var(--status-error); }
+.set-input {
+  width: 100%; box-sizing: border-box; height: 32px; padding: 0 10px;
+  font-size: 12px; color: var(--text-primary);
+  background: var(--bg-2); border: 1px solid var(--border-default); border-radius: 7px;
+  font-family: inherit;
+}
+.set-input:focus { outline: none; border-color: var(--border-focus); }
+select.set-input { height: 32px; cursor: pointer; }
+
+.set-check {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 12px;
+  font-size: 11px; line-height: 1.45; color: var(--text-secondary); cursor: pointer;
+}
+.set-check input { margin-top: 2px; }
+
+.set-actions { display: flex; gap: 8px; margin-top: 14px; }
+.set-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 13px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+  background: var(--bg-2); border: 1px solid var(--border-default); color: var(--text-primary);
+}
+.set-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.set-btn:disabled { opacity: 0.55; cursor: default; }
+
+.set-status {
+  display: flex; align-items: center; gap: 7px; margin-top: 12px;
+  font-size: 12px; padding: 8px 11px; border-radius: 8px;
+}
+.set-status.ok   { color: var(--status-success); background: var(--status-success-bg); }
+.set-status.bad  { color: var(--status-error);   background: var(--status-error-bg); }
+.set-status.warn { color: var(--status-warning); background: var(--status-warning-bg); }
+
+.set-conn-list { display: grid; gap: 6px; }
+.set-conn-row {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 11px; border-radius: 8px; background: var(--bg-2); border: 1px solid var(--border-default);
+}
+.set-conn-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-success); flex-shrink: 0; }
+.set-conn-name { font-size: 12px; color: var(--text-primary); font-weight: 500; }
+.set-conn-type {
+  margin-left: auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-tertiary); font-family: var(--font-mono);
+}
+
+.spin { animation: dlx-spin 1s linear infinite; }
+@keyframes dlx-spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
    Layer spine — conceptual → logical → physical (see LayerSpine.jsx)
    ============================================================ */
 .layer-spine {

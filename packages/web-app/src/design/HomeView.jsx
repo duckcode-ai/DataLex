@@ -76,9 +76,9 @@ export default function HomeView({
       done: hasProject, cta: hasProject ? "Reconnect" : "Connect repo", onClick: onConnect,
     },
     {
-      id: "ai", icon: Sparkles, title: "Set up your AI provider",
-      desc: "DataLex is AI-first. Add an OpenAI / Anthropic / local-LLM key once; every agent — detection, drafting, readiness — uses it.",
-      done: aiReady, cta: aiReady ? "AI settings" : "Set up AI", onClick: onOpenAi,
+      id: "ai", icon: Sparkles, title: "Connect AI & your database",
+      desc: "Add an AI provider (OpenAI / Anthropic / local) and, optionally, a warehouse connection. Both test in place and save automatically — no other setup.",
+      done: aiReady, cta: aiReady ? "Open settings" : "Set up AI & database", onClick: onOpenAi,
     },
     {
       id: "detect", icon: ScanSearch, title: "Detect domains, contracts & proposals",

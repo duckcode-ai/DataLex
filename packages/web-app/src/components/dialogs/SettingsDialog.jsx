@@ -1,66 +1,34 @@
-/* SettingsDialog — user-facing workspace settings.
-   Ported to the shared `<Modal>` chrome with a Luna-aware sidebar, theme
-   tiles (Midnight / Obsidian / Paper / Arctic), and consistent spacing.
+/* SettingsDialog — deliberately just two things: the AI provider and the
+   database connection. Everything else (themes, shortcuts, tour, about)
+   was removed so setup is obvious. Both panes test in place and auto-save:
+   AI defaults persist to the browser as you type; a warehouse connection
+   saves when its test passes (the api-server persists on a passing test).
 
-   Theme changes are broadcast via a `datalex:theme-change` CustomEvent so
-   the shell picks them up without either side knowing about the other. */
+   Theme switching lives in the top-bar theme menu; density in the status
+   bar — neither needs a settings page. */
 import React from "react";
 import {
-  Sun, Moon, Sparkles, Snowflake,
-  Keyboard, Info, SlidersHorizontal, Plug, Check, Compass,
-  Bot, KeyRound, RefreshCw, Save, BookOpen,
+  Bot, KeyRound, Check, Plug, Database, Loader2, CircleCheck,
+  CircleAlert, RefreshCw,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
-import useWorkspaceStore from "../../stores/workspaceStore";
-import { THEMES } from "../../design/notation";
-import { startOnboardingTour, resetOnboardingSeen } from "../../lib/onboardingTour";
-import { resetJourney, emitJourneyEvent } from "../../lib/onboardingJourney";
-import { testAiSettings, rebuildAiIndex } from "../../lib/api";
+import { emitJourneyEvent } from "../../lib/onboardingJourney";
+import { testAiSettings, testConnector, fetchConnections } from "../../lib/api";
 import Modal from "./Modal";
 
 const TABS = [
-  { id: "ai",          label: "AI Agent",    icon: Bot },
-  { id: "appearance",  label: "Appearance",  icon: SlidersHorizontal },
-  { id: "keyboard",    label: "Keyboard",    icon: Keyboard },
-  { id: "connections", label: "Connections", icon: Plug },
-  { id: "help",        label: "Help & Tour", icon: Compass },
-  { id: "about",       label: "About",       icon: Info },
+  { id: "ai",          label: "AI provider",        icon: Bot },
+  { id: "connections", label: "Database connection", icon: Database },
 ];
-
-const THEME_STORAGE = "datalex.theme";
-
-const THEME_ICONS = {
-  midnight: Moon,
-  obsidian: Sparkles,
-  paper:    Sun,
-  arctic:   Snowflake,
-};
 
 export default function SettingsDialog() {
   const { closeModal, modalPayload } = useUiStore();
-  const [active, setActive] = React.useState(modalPayload?.initialTab || "ai");
-  const [currentTheme, setCurrentTheme] = React.useState(
-    () => localStorage.getItem(THEME_STORAGE) || "paper"
-  );
-
-  const pickTheme = (id) => {
-    localStorage.setItem(THEME_STORAGE, id);
-    // Set both <html> and <body>: <body> carries a static data-theme from
-    // index.html and is the nearer ancestor of the app, so it must be
-    // updated too or it pins the theme. (Shell also does this on the
-    // broadcast event below; kept here so the change is immediate.)
-    document.documentElement.setAttribute("data-theme", id);
-    document.body.setAttribute("data-theme", id);
-    setCurrentTheme(id);
-    window.dispatchEvent(
-      new CustomEvent("datalex:theme-change", { detail: { theme: id } })
-    );
-  };
+  const [active, setActive] = React.useState(modalPayload?.initialTab === "connections" ? "connections" : "ai");
 
   return (
     <Modal
       title="Settings"
-      subtitle="Configure provider access, appearance, shortcuts, and connections."
+      subtitle="Connect your AI provider and your database. That's all you need."
       size="xl"
       onClose={closeModal}
       bodyClassName="pad-0"
@@ -72,7 +40,6 @@ export default function SettingsDialog() {
       }
     >
       <div className="dlx-settings-grid">
-        {/* Sidebar */}
         <nav className="dlx-settings-nav" role="tablist" aria-label="Settings sections">
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
@@ -87,409 +54,343 @@ export default function SettingsDialog() {
             </button>
           ))}
         </nav>
-
-        {/* Content */}
         <div className="dlx-settings-content">
-          {active === "ai"          && <AiAgentPane />}
-          {active === "appearance"  && <AppearancePane currentTheme={currentTheme} onPickTheme={pickTheme} />}
-          {active === "keyboard"    && <KeyboardPane />}
-          {active === "connections" && <ConnectionsPane />}
-          {active === "help"        && <HelpPane onClose={closeModal} />}
-          {active === "about"       && <AboutPane />}
+          {active === "ai"          && <AiProviderPane />}
+          {active === "connections" && <ConnectionPane />}
         </div>
       </div>
     </Modal>
   );
 }
 
-/* ─────────────────────────── AI Agent ─────────────────────────── */
+/* ─────────────────────────── helpers ─────────────────────────── */
 function readStorage(key, fallback = "") {
-  try {
-    return localStorage.getItem(key) || fallback;
-  } catch (_err) {
-    return fallback;
-  }
+  try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
 }
-
 function writeStorage(key, value) {
   try {
     if (value == null || value === "") localStorage.removeItem(key);
     else localStorage.setItem(key, value);
-  } catch (_err) {
-    // Browser storage can be unavailable in private profiles.
-  }
+  } catch { /* private mode */ }
 }
 
-function AiAgentPane() {
-  const activeProjectId = useWorkspaceStore((s) => s.activeProjectId);
-  const closeModal = useUiStore((s) => s.closeModal);
+/* ─────────────────────────── AI provider ─────────────────────────── */
+const AI_PROVIDERS = [
+  { id: "local",     label: "Local search only", needsKey: false, hint: "No external calls — keyword search over your model." },
+  { id: "openai",    label: "OpenAI",            needsKey: true,  hint: "Set OPENAI_API_KEY or paste a key below." },
+  { id: "anthropic", label: "Anthropic Claude",  needsKey: true,  hint: "Set ANTHROPIC_API_KEY or paste a key below." },
+  { id: "gemini",    label: "Google Gemini",     needsKey: true,  hint: "Set GEMINI_API_KEY or paste a key below." },
+  { id: "ollama",    label: "Ollama (local LLM)", needsKey: false, hint: "Runs against a local Ollama server; set the base URL." },
+];
+
+function AiProviderPane() {
   const [provider, setProvider] = React.useState(() => readStorage("datalex.ai.provider", "local"));
   const [model, setModel] = React.useState(() => readStorage("datalex.ai.model", ""));
   const [baseUrl, setBaseUrl] = React.useState(() => readStorage("datalex.ai.baseUrl", ""));
   const [apiKey, setApiKey] = React.useState(() => readStorage("datalex.ai.apiKey", ""));
   const [saveKey, setSaveKey] = React.useState(() => Boolean(readStorage("datalex.ai.apiKey", "")));
-  const [status, setStatus] = React.useState("");
+  const [test, setTest] = React.useState(null); // {ok, message}
   const [busy, setBusy] = React.useState(false);
+  const [savedFlash, setSavedFlash] = React.useState(false);
+  const mounted = React.useRef(false);
 
-  const saveSettings = () => {
+  const meta = AI_PROVIDERS.find((p) => p.id === provider) || AI_PROVIDERS[0];
+
+  // Auto-save on every change — no save button. Skip the very first run so
+  // we don't flash "Saved" before the user touches anything.
+  React.useEffect(() => {
     writeStorage("datalex.ai.provider", provider);
     writeStorage("datalex.ai.model", model);
     writeStorage("datalex.ai.baseUrl", baseUrl);
-    if (saveKey) writeStorage("datalex.ai.apiKey", apiKey);
-    else writeStorage("datalex.ai.apiKey", "");
-    setStatus(saveKey ? "Saved AI defaults in this browser." : "Saved AI defaults. API key remains session-only.");
-    // Onboarding journey: counts as "configured" when the user has either
-    // saved an API key or selected the local provider (which needs no key).
-    const configured = (saveKey && apiKey.trim()) || provider === "local";
+    writeStorage("datalex.ai.apiKey", saveKey ? apiKey : "");
+    if (!mounted.current) { mounted.current = true; return; }
+    const configured = (saveKey && apiKey.trim()) || provider === "local" || provider === "ollama";
     if (configured) emitJourneyEvent("ai:settings:saved", { provider });
-  };
+    setSavedFlash(true);
+    const t = setTimeout(() => setSavedFlash(false), 1400);
+    return () => clearTimeout(t);
+  }, [provider, model, baseUrl, apiKey, saveKey]);
 
-  const testProvider = async () => {
-    setBusy(true);
-    setStatus("");
+  const runTest = async () => {
+    setBusy(true); setTest(null);
     try {
-      saveSettings();
-      const res = await testAiSettings({
-        provider,
-        model: model || undefined,
-        baseUrl: baseUrl || undefined,
-        apiKey: apiKey || undefined,
-      });
-      setStatus(res?.ok ? `Provider ready: ${res.provider || provider}` : "Provider test returned no status.");
+      const res = await testAiSettings({ provider, model: model || undefined, baseUrl: baseUrl || undefined, apiKey: apiKey || undefined });
+      setTest({ ok: !!res?.ok, message: res?.ok ? `Provider ready: ${res.provider || provider}` : (res?.message || "Test returned no status.") });
     } catch (err) {
-      setStatus(`Provider test failed: ${err?.message || err}`);
+      setTest({ ok: false, message: err?.message || String(err) });
     } finally {
       setBusy(false);
     }
   };
 
-  const rebuildIndex = async () => {
-    if (!activeProjectId) {
-      setStatus("Open a project before rebuilding the AI index.");
-      return;
-    }
-    setBusy(true);
-    setStatus("");
-    try {
-      const res = await rebuildAiIndex(activeProjectId);
-      setStatus(`Indexed ${res?.recordCount ?? res?.count ?? 0} modeling records, dbt facts, and skills.`);
-    } catch (err) {
-      setStatus(`Index rebuild failed: ${err?.message || err}`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="dlx-settings-pane ai-settings-pane">
-      <header>
-        <h3 className="dlx-settings-pane-title">AI Agent</h3>
-        <p className="dlx-settings-pane-sub">
-          Configure provider access and refresh the local modeling index. Skills now live in the left sidebar for faster authoring.
-        </p>
-      </header>
-
-      <section className="ai-settings-card ai-provider-settings-card">
-        <div className="ai-settings-card-title"><KeyRound size={13} /> Provider defaults</div>
-        <div className="panel-form-grid">
-          <label className="panel-form-row">
-            <span className="panel-form-label">Provider</span>
-            <select className="panel-select" value={provider} onChange={(e) => setProvider(e.target.value)}>
-              <option value="local">Local search only</option>
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Anthropic Claude</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="ollama">Ollama</option>
-            </select>
-          </label>
-          <label className="panel-form-row">
-            <span className="panel-form-label">Model</span>
-            <input className="panel-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default or model id" />
-          </label>
-          <label className="panel-form-row">
-            <span className="panel-form-label">Base URL</span>
-            <input className="panel-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="Ollama or gateway URL" />
-          </label>
-          <label className="panel-form-row">
-            <span className="panel-form-label">API key</span>
-            <input className="panel-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Prefer env vars for regular use" autoComplete="off" />
-          </label>
-        </div>
-        <label className={`dlx-check ${saveKey ? "on" : ""}`}>
-          <input type="checkbox" checked={saveKey} onChange={(e) => setSaveKey(e.target.checked)} />
-          <span className="dlx-check-text">Save API key in this browser profile. Leave off to use only environment variables or one chat session.</span>
-        </label>
-        <div className="panel-btn-row">
-          <button className="panel-btn primary" type="button" onClick={saveSettings} disabled={busy}>
-            <Save size={12} /> Save defaults
-          </button>
-          <button className="panel-btn" type="button" onClick={testProvider} disabled={busy}>
-            <Check size={12} /> Test provider
-          </button>
-          <button className="panel-btn" type="button" onClick={rebuildIndex} disabled={busy || !activeProjectId}>
-            <RefreshCw size={12} /> Rebuild index
-          </button>
-        </div>
-        <p className="dlx-settings-pane-sub">
-          Environment variables also work: <code>OPENAI_API_KEY</code>, <code>ANTHROPIC_API_KEY</code>, <code>GEMINI_API_KEY</code>.
-          Ollama defaults to localhost.
-        </p>
-      </section>
-
-      <section className="ai-settings-card ai-settings-skills-link">
-        <div>
-          <div className="ai-settings-card-title"><BookOpen size={13} /> Skills moved to sidebar</div>
-          <p className="dlx-settings-pane-sub">
-            Create business, dbt, governance, and YAML patch skills from the new <code>Skills</code> tab in the left sidebar.
-            Skills are still indexed automatically and selected by intent during agent runs.
-          </p>
-        </div>
-        <button
-          className="panel-btn primary"
-          type="button"
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("datalex:left-tab", { detail: { tab: "SKILLS" } }));
-            closeModal?.();
-          }}
-        >
-          <BookOpen size={12} /> Open Skills
-        </button>
-      </section>
-
-      {status && <div className="dlx-modal-alert info">{status}</div>}
-    </div>
-  );
-}
-
-/* ─────────────────────────── Appearance ─────────────────────────── */
-function AppearancePane({ currentTheme, onPickTheme }) {
   return (
     <div className="dlx-settings-pane">
       <header>
-        <h3 className="dlx-settings-pane-title">Appearance</h3>
-        <p className="dlx-settings-pane-sub">Theme and density for the workspace.</p>
+        <h3 className="dlx-settings-pane-title">AI provider</h3>
+        <p className="dlx-settings-pane-sub">DataLex uses this to detect domains and contracts, draft models, and explain readiness gaps. Changes save automatically.</p>
       </header>
 
-      <section>
-        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>Theme</div>
-        <div className="dlx-theme-grid">
-          {THEMES.map((t) => (
-            <ThemeTile
-              key={t.id}
-              theme={t}
-              active={currentTheme === t.id}
-              onClick={() => onPickTheme(t.id)}
-            />
+      <section className="set-card">
+        <div className="set-card-title"><KeyRound size={13} /> Provider {savedFlash && <span className="set-saved"><Check size={11} /> Saved</span>}</div>
+
+        <div className="set-provider-grid">
+          {AI_PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              className={`set-provider-tile ${provider === p.id ? "active" : ""}`}
+              onClick={() => setProvider(p.id)}
+            >
+              <span className="set-provider-name">{p.label}</span>
+              {!p.needsKey && <span className="set-provider-tag">no key</span>}
+            </button>
           ))}
         </div>
-      </section>
+        <p className="dlx-settings-pane-sub" style={{ marginTop: 4 }}>{meta.hint}</p>
 
-      <section>
-        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>Density</div>
-        <p className="dlx-settings-pane-sub" style={{ maxWidth: 420 }}>
-          Density tuning arrives in a later phase. Defaults currently favor a comfortable
-          grid for modeling sessions.
-        </p>
-      </section>
-    </div>
-  );
-}
-
-function ThemeTile({ theme, active, onClick }) {
-  const Icon = THEME_ICONS[theme.id] || Sun;
-  const [bg, accent, accent2, ok] = theme.colors || [];
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`dlx-theme-tile ${active ? "active" : ""}`}
-      aria-pressed={active}
-      title={theme.sub}
-    >
-      <div
-        className="dlx-theme-swatch"
-        style={{
-          background: bg,
-          borderColor: active ? accent : "var(--border-default)",
-        }}
-      >
-        <div className="dlx-theme-swatch-dots">
-          <span style={{ background: accent }} />
-          <span style={{ background: accent2 }} />
-          <span style={{ background: ok }} />
+        <div className="set-form">
+          <label className="set-row">
+            <span className="set-label">Model <span className="set-opt">optional</span></span>
+            <input className="set-input" value={model} onChange={(e) => setModel(e.target.value)} placeholder="default or model id" />
+          </label>
+          {(provider === "ollama") && (
+            <label className="set-row">
+              <span className="set-label">Base URL</span>
+              <input className="set-input" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="http://localhost:11434" />
+            </label>
+          )}
+          {meta.needsKey && (
+            <label className="set-row">
+              <span className="set-label">API key</span>
+              <input className="set-input" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="sk-… (or use an env var)" autoComplete="off" />
+            </label>
+          )}
         </div>
-        {active && (
-          <span className="dlx-theme-swatch-check" style={{ background: accent }}>
-            <Check size={10} />
-          </span>
+
+        {meta.needsKey && (
+          <label className={`set-check ${saveKey ? "on" : ""}`}>
+            <input type="checkbox" checked={saveKey} onChange={(e) => setSaveKey(e.target.checked)} />
+            <span>Remember the key in this browser. Leave off to use an environment variable or a single session.</span>
+          </label>
         )}
-      </div>
-      <div className="dlx-theme-label">
-        <Icon size={12} />
-        <span>{theme.name}</span>
-      </div>
-      <div className="dlx-theme-sub">{theme.sub}</div>
-    </button>
-  );
-}
 
-/* ─────────────────────────── Keyboard ─────────────────────────── */
-function KeyboardPane() {
-  const shortcuts = [
-    ["Save",                "⌘S"],
-    ["Global search",       "⌘K"],
-    ["Toggle sidebar",      "⌘\\"],
-    ["Toggle bottom panel", "⌘J"],
-    ["Toggle dark mode",    "⌘D"],
-    ["Show shortcuts",      "?"],
-    ["Model activity",      "⌘1"],
-    ["Connect activity",    "⌘2"],
-    ["Settings activity",   "⌘3"],
-  ];
-  return (
-    <div className="dlx-settings-pane">
-      <header>
-        <h3 className="dlx-settings-pane-title">Keyboard shortcuts</h3>
-        <p className="dlx-settings-pane-sub">Remapping lands in a later phase.</p>
-      </header>
-      <div className="dlx-shortcut-list">
-        {shortcuts.map(([label, key]) => (
-          <div key={label} className="dlx-shortcut-row">
-            <span>{label}</span>
-            <code>{key}</code>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/* ─────────────────────────── Connections ─────────────────────────── */
-function ConnectionsPane() {
-  const { openModal } = useUiStore();
-  return (
-    <div className="dlx-settings-pane">
-      <header>
-        <h3 className="dlx-settings-pane-title">Connections</h3>
-        <p className="dlx-settings-pane-sub">
-          Manage warehouse credentials and schema imports.
-        </p>
-      </header>
-      <button
-        className="panel-btn primary"
-        onClick={() => openModal("connectionsManager")}
-      >
-        <Plug size={12} />
-        Open connections manager
-      </button>
-    </div>
-  );
-}
-
-/* ─────────────────────────── Help & Tour ─────────────────────────── */
-function HelpPane({ onClose }) {
-  const handleReplayJourney = () => {
-    // Reset journey state and seen-flags, then reload so the Shell's
-    // first-run effect re-mounts the journey panel from step 1.
-    resetJourney();
-    resetOnboardingSeen();
-    onClose?.();
-    setTimeout(() => {
-      // A reload guarantees the journey re-mounts cleanly even if the
-      // user previously dismissed it within this session.
-      try { window.location.reload(); } catch { /* noop */ }
-    }, 80);
-  };
-  const handleDeepTour = () => {
-    onClose?.();
-    // The 13-step driver.js spotlight tour — runs against the underlying
-    // shell, so we let the modal close first.
-    setTimeout(() => startOnboardingTour(), 120);
-  };
-  return (
-    <div className="dlx-settings-pane">
-      <header>
-        <h3 className="dlx-settings-pane-title">Onboarding</h3>
-        <p className="dlx-settings-pane-sub">
-          Replay the new six-step journey panel, or take the legacy
-          spotlight tour that highlights every panel and dialog.
-        </p>
-      </header>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button
-          type="button"
-          className="panel-btn primary"
-          onClick={handleReplayJourney}
-          title="Restarts the 6-step right-rail journey panel from step 1"
-        >
-          <Compass size={12} /> Replay 6-step onboarding journey
-        </button>
-        <button
-          type="button"
-          className="panel-btn"
-          onClick={handleDeepTour}
-          title="Legacy 13-step driver.js spotlight tour across the import, explorer, modeling, validation, and save flows"
-        >
-          Legacy spotlight tour (13 steps)
-        </button>
-      </div>
-
-      <section style={{ marginTop: 22 }}>
-        <div className="dlx-modal-section-heading" style={{ marginBottom: 8 }}>
-          Documentation
+        <div className="set-actions">
+          <button className="set-btn primary" type="button" onClick={runTest} disabled={busy}>
+            {busy ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Test provider
+          </button>
         </div>
-        <ul
-          style={{
-            margin: 0,
-            padding: 0,
-            listStyle: "none",
-            display: "grid",
-            gap: 6,
-            fontSize: 13,
-          }}
-        >
-          {[
-            ["Getting started", "docs/getting-started.md"],
-            ["Install and run", "docs/tutorials/01-install-and-run.md"],
-            ["Connect an existing dbt project", "docs/tutorials/02-connect-existing-dbt.md"],
-            ["Configure AI", "docs/tutorials/03-configure-ai.md"],
-            ["Publish the manifest", "docs/tutorials/05-publish-manifest.md"],
-            ["CLI cheat sheet", "docs/cli.md"],
-          ].map(([label, path]) => (
-            <li key={path}>
-              <code style={{ fontSize: 12, color: "var(--text-tertiary)" }}>{path}</code>
-              <span style={{ marginLeft: 8, color: "var(--text-secondary)" }}>— {label}</span>
-            </li>
-          ))}
-        </ul>
+        {test && (
+          <div className={`set-status ${test.ok ? "ok" : "bad"}`}>
+            {test.ok ? <CircleCheck size={14} /> : <CircleAlert size={14} />} {test.message}
+          </div>
+        )}
       </section>
     </div>
   );
 }
 
-/* ─────────────────────────── About ─────────────────────────── */
-function AboutPane() {
+/* ─────────────────────────── Database connection ─────────────────────────── */
+const DB_CONNECTORS = [
+  { type: "postgres",  label: "PostgreSQL" },
+  { type: "mysql",     label: "MySQL" },
+  { type: "snowflake", label: "Snowflake", connector: "snowflake_password" },
+  { type: "bigquery",  label: "BigQuery" },
+  { type: "databricks",label: "Databricks" },
+  { type: "sqlserver", label: "SQL Server" },
+  { type: "redshift",  label: "Redshift" },
+];
+
+const DB_FIELDS = {
+  postgres: [
+    { key: "host", label: "Host", placeholder: "localhost", required: true },
+    { key: "port", label: "Port", placeholder: "5432" },
+    { key: "database", label: "Database", placeholder: "mydb", required: true },
+    { key: "user", label: "User", placeholder: "postgres", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+  ],
+  mysql: [
+    { key: "host", label: "Host", placeholder: "localhost", required: true },
+    { key: "port", label: "Port", placeholder: "3306" },
+    { key: "database", label: "Database", placeholder: "mydb", required: true },
+    { key: "user", label: "User", placeholder: "root", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+  ],
+  snowflake_password: [
+    { key: "host", label: "Account", placeholder: "ORGID-ACCTNAME", required: true },
+    { key: "user", label: "User", placeholder: "MY_USER", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+    { key: "database", label: "Database", placeholder: "MY_DB", required: true },
+    { key: "warehouse", label: "Warehouse", placeholder: "COMPUTE_WH" },
+  ],
+  bigquery: [
+    { key: "project", label: "Project ID", placeholder: "my-gcp-project", required: true },
+  ],
+  databricks: [
+    { key: "host", label: "Server Hostname", placeholder: "adb-xxx.azuredatabricks.net", required: true },
+    { key: "http_path", label: "HTTP Path", placeholder: "/sql/1.0/warehouses/xxxx", required: true },
+    { key: "token", label: "Access Token", placeholder: "dapi…", secret: true, required: true },
+    { key: "catalog", label: "Catalog", placeholder: "main" },
+  ],
+  sqlserver: [
+    { key: "host", label: "Host", placeholder: "sqlserver.company.internal", required: true },
+    { key: "port", label: "Port", placeholder: "1433" },
+    { key: "database", label: "Database", placeholder: "warehouse", required: true },
+    { key: "user", label: "User", placeholder: "svc_user", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+  ],
+  redshift: [
+    { key: "host", label: "Cluster Endpoint", placeholder: "mycluster.abc123.us-east-1.redshift.amazonaws.com", required: true },
+    { key: "port", label: "Port", placeholder: "5439" },
+    { key: "database", label: "Database", placeholder: "dev", required: true },
+    { key: "user", label: "User", placeholder: "awsuser", required: true },
+    { key: "password", label: "Password", placeholder: "••••••••", secret: true },
+  ],
+};
+
+function draftKey(connector) { return `datalex.conn.draft.${connector}`; }
+
+function ConnectionPane() {
+  const [type, setType] = React.useState("postgres");
+  const selected = DB_CONNECTORS.find((c) => c.type === type) || DB_CONNECTORS[0];
+  const connector = selected.connector || selected.type;
+  const fields = DB_FIELDS[connector] || [];
+
+  const [values, setValues] = React.useState({});
+  const [busy, setBusy] = React.useState(false);
+  const [test, setTest] = React.useState(null); // {ok, message}
+  const [saved, setSaved] = React.useState([]);
+  const [drivers, setDrivers] = React.useState({});
+
+  // Load the saved draft for this connector (auto-restore unsaved input).
+  React.useEffect(() => {
+    setTest(null);
+    try {
+      const raw = localStorage.getItem(draftKey(connector));
+      setValues(raw ? JSON.parse(raw) : {});
+    } catch { setValues({}); }
+  }, [connector]);
+
+  // Auto-save the draft (minus secrets) as the user types.
+  React.useEffect(() => {
+    try {
+      const safe = {};
+      for (const f of fields) if (!f.secret) safe[f.key] = values[f.key] || "";
+      localStorage.setItem(draftKey(connector), JSON.stringify(safe));
+    } catch { /* ignore */ }
+  }, [values, connector, fields]);
+
+  const refreshSaved = React.useCallback(() => {
+    fetchConnections().then(setSaved).catch(() => setSaved([]));
+  }, []);
+
+  React.useEffect(() => {
+    refreshSaved();
+    // Driver availability — shows why a test might fail before you try.
+    fetch("/api/connectors").then((r) => r.json()).then((d) => {
+      const list = Array.isArray(d) ? d : (d.connectors || []);
+      const map = {};
+      for (const c of list) map[c.type] = c;
+      setDrivers(map);
+    }).catch(() => {});
+  }, [refreshSaved]);
+
+  const setField = (key, val) => setValues((v) => ({ ...v, [key]: val }));
+
+  const driver = drivers[type];
+  const driverMissing = driver && driver.installed === false;
+
+  const testAndSave = async () => {
+    setBusy(true); setTest(null);
+    try {
+      const payload = { connector, ...values };
+      const res = await testConnector(payload);
+      if (res?.ok) {
+        const detail = res.serverVersion ? ` · ${res.serverVersion}` : "";
+        const ping = typeof res.pingMs === "number" ? ` (${res.pingMs}ms)` : "";
+        setTest({ ok: true, message: `Connected and saved${ping}${detail}` });
+        refreshSaved();
+      } else {
+        setTest({ ok: false, message: res?.error || res?.message || "Connection test failed." });
+      }
+    } catch (err) {
+      setTest({ ok: false, message: err?.message || String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="dlx-settings-pane">
       <header>
-        <h3 className="dlx-settings-pane-title">DataLex Visual Studio</h3>
-        <p className="dlx-settings-pane-sub">Open-source data modeling workspace.</p>
+        <h3 className="dlx-settings-pane-title">Database connection</h3>
+        <p className="dlx-settings-pane-sub">Connect a warehouse to introspect schemas and pull tables. Test passes → the connection is saved.</p>
       </header>
-      <div className="dlx-about-card">
-        <Row label="Frontend" value="React 18 · Vite · Tailwind 4" />
-        <Row label="Canvas"   value="React Flow 12 · ELK.js" />
-        <Row label="Editor"   value="CodeMirror 6" />
-        <Row label="License"  value="MIT" />
-      </div>
-    </div>
-  );
-}
 
-function Row({ label, value }) {
-  return (
-    <div className="dlx-about-row">
-      <span>{label}</span>
-      <span>{value}</span>
+      <section className="set-card">
+        <div className="set-card-title"><Plug size={13} /> New connection</div>
+
+        <label className="set-row">
+          <span className="set-label">Warehouse</span>
+          <select className="set-input" value={type} onChange={(e) => setType(e.target.value)}>
+            {DB_CONNECTORS.map((c) => (
+              <option key={c.type} value={c.type}>{c.label}</option>
+            ))}
+          </select>
+        </label>
+
+        {driverMissing && (
+          <div className="set-status warn">
+            <CircleAlert size={14} /> Driver not installed — {driver.status || `install the ${selected.label} driver to test`}.
+          </div>
+        )}
+
+        <div className="set-form">
+          {fields.map((f) => (
+            <label key={f.key} className="set-row">
+              <span className="set-label">{f.label}{f.required && <span className="set-req">*</span>}</span>
+              <input
+                className="set-input"
+                type={f.secret ? "password" : "text"}
+                value={values[f.key] || ""}
+                onChange={(e) => setField(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                autoComplete="off"
+              />
+            </label>
+          ))}
+        </div>
+
+        <div className="set-actions">
+          <button className="set-btn primary" type="button" onClick={testAndSave} disabled={busy}>
+            {busy ? <Loader2 size={13} className="spin" /> : <Check size={13} />} Test &amp; save connection
+          </button>
+        </div>
+        {test && (
+          <div className={`set-status ${test.ok ? "ok" : "bad"}`}>
+            {test.ok ? <CircleCheck size={14} /> : <CircleAlert size={14} />} {test.message}
+          </div>
+        )}
+      </section>
+
+      <section className="set-card">
+        <div className="set-card-title">
+          <Database size={13} /> Saved connections
+          <button type="button" className="set-mini" onClick={refreshSaved} title="Refresh"><RefreshCw size={11} /></button>
+        </div>
+        {saved.length === 0 ? (
+          <p className="dlx-settings-pane-sub">No saved connections yet. Test one above to save it.</p>
+        ) : (
+          <div className="set-conn-list">
+            {saved.map((c) => (
+              <div key={c.id || c.fingerprint} className="set-conn-row">
+                <span className="set-conn-dot" />
+                <span className="set-conn-name">{c.label || c.database || c.host || c.id}</span>
+                <span className="set-conn-type">{c.connector || c.dialect || c.type}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </div>
   );
 }

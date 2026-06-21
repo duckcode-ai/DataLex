@@ -260,6 +260,16 @@ export async function testAiSettings(body = {}) {
   });
 }
 
+/* Test a warehouse connection. On success the api-server persists the
+   connection profile and returns its connectionId (test == save), so the
+   settings form treats a passing test as the save action. */
+export async function testConnector(body = {}) {
+  return request("/connectors/test", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
 export async function fetchAiSettings(projectId) {
   return request(`/ai/settings?projectId=${encodeURIComponent(projectId)}`);
 }
