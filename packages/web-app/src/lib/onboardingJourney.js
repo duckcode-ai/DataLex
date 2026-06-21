@@ -23,9 +23,14 @@
    copy to point users at the new red/yellow/green status dot. Bumping
    the version re-triggers the journey for users who already finished
    v1 so they see the new steps. */
-export const JOURNEY_VERSION = 2;
+export const JOURNEY_VERSION = 3;
 const STORAGE_KEY = "datalex.onboarding.journey";
 
+/* AI-first onboarding flow. The order mirrors how DataLex is meant to be
+   used in the AI era: attach a repo, point it at an AI provider, let AI
+   detect the governance surface (domains, contracts, proposals), then
+   draw the model conceptual-first (the primary business view) before the
+   logical and physical layers are generated from it. */
 export const JOURNEY_STEPS = [
   {
     id: "welcome",
@@ -41,50 +46,34 @@ export const JOURNEY_STEPS = [
   },
   {
     id: "connect",
-    title: "Connect your project",
+    title: "Connect your dbt project",
     body:
-      "Point DataLex at a Git URL or a local dbt folder. Your YAML stays where it is — DataLex reads it in place, indexes the manifest, and surfaces gaps right next to the files.",
-    cta: "Import a project",
+      "Start here. Point DataLex at a Git URL or a local dbt folder. Your YAML stays where it is — DataLex reads it in place and indexes the manifest.",
+    cta: "Connect repo",
     completeOn: "dbt:import:success",
   },
   {
-    id: "docs",
-    title: "Read your auto-generated docs",
-    body:
-      "Switch to the Docs tab to see your project as a readable docs page — entities, relationships, and dbt resources (semantic models, metrics, saved queries, sources) rendered as cards instead of raw YAML. Hover any description to edit it inline.",
-    cta: "Open Docs",
-    completeOn: "docs:opened",
-  },
-  {
-    id: "gaps",
-    title: "See what's missing",
-    body:
-      "The Validation tab shows a red / yellow / green dot the moment you open a file — red for blockers, yellow for warnings, green for clean. Click it to see readiness scores, missing descriptions, untyped columns, missing tests, and contracts — the exact list the readiness gate enforces in CI.",
-    cta: "Open Validation",
-    completeOn: "validation:opened",
-  },
-  {
-    id: "design",
-    title: "Design your first business domain",
-    body:
-      "Open the Build tab to add a logical entity (with keys + attributes) or a physical entity (dbt-backed). Start with one core concept like Customer or Order — DataLex tracks it from concept to dbt asset.",
-    cta: "Create entity",
-    completeOn: "entity:created",
-  },
-  {
     id: "ai",
-    title: "Add your AI provider",
+    title: "Set up your AI provider",
     body:
-      "DataLex's AI agents propose YAML fixes, draft conceptual models, and explain readiness gaps. Add an OpenAI / Anthropic / local-LLM key once and every agent picks it up.",
-    cta: "Open AI settings",
+      "DataLex is AI-first: agents detect domains and contracts, draft models, and explain readiness gaps. Add an OpenAI / Anthropic / local-LLM key once and every agent picks it up.",
+    cta: "Open AI setup",
     completeOn: "ai:settings:saved",
   },
   {
-    id: "draw",
-    title: "Ask AI to draw a diagram",
+    id: "detect",
+    title: "Detect domains, contracts & proposals with AI",
     body:
-      "Now that you're connected and configured, let the Conceptualizer propose entities and relationships from your staging models in one click. You'll review the proposal — with the new draggable diagram/YAML splitter and full AI explanation — before anything writes to YAML.",
-    cta: "Propose conceptual diagram",
+      "Open Readiness to scan your repo, then let AI group models into business domains, surface missing contracts, and stage reviewable proposal packs — your governance surface, drafted for you.",
+    cta: "Open Readiness",
+    completeOn: null,
+  },
+  {
+    id: "model",
+    title: "Draw conceptual → logical → physical",
+    body:
+      "Now let AI draw your model. Start with the conceptual layer — the primary, platform-free business view — then generate the logical and physical diagrams from it. Review every proposal in the diagram/YAML splitter before it writes.",
+    cta: "Draw conceptual model",
     completeOn: "ai:conceptualize:applied",
   },
 ];

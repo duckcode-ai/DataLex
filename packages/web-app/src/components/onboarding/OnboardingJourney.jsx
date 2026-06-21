@@ -38,9 +38,7 @@ function isAiConfigured() {
 export default function OnboardingJourney({
   onClose,
   onImportProject,
-  onOpenDocs,
-  onOpenValidation,
-  onCreateEntity,
+  onOpenDetect,
   onOpenAiSettings,
   onAskAiToDraw,
   hasActiveProject = false,
@@ -107,31 +105,24 @@ export default function OnboardingJourney({
         case "connect":
           onImportProject?.();
           return;
-        case "docs":
-          onOpenDocs?.();
-          // Switching to the Docs tab succeeds synchronously; mark optimistically.
-          markStepComplete("docs");
-          refresh();
-          return;
-        case "gaps":
-          onOpenValidation?.();
-          // The validation tab opens immediately; mark complete optimistically.
-          markStepComplete("gaps");
-          refresh();
-          return;
-        case "design":
-          onCreateEntity?.();
-          return;
         case "ai":
           onOpenAiSettings?.();
           return;
-        case "draw":
+        case "detect":
+          // Navigate to the Readiness workbench where AI detection of
+          // domains / contracts / proposals happens. The view opens
+          // immediately, so mark the step complete optimistically.
+          onOpenDetect?.();
+          markStepComplete("detect");
+          refresh();
+          return;
+        case "model":
           if (!onAskAiToDraw) return;
           setDrawing(true);
           setDrawError("");
           try {
             await onAskAiToDraw();
-            markStepComplete("draw");
+            markStepComplete("model");
             refresh();
           } catch (err) {
             setDrawError(err?.message || String(err) || "Could not start the conceptualizer.");
@@ -143,7 +134,7 @@ export default function OnboardingJourney({
           return;
       }
     },
-    [onAskAiToDraw, onCreateEntity, onImportProject, onOpenAiSettings, onOpenDocs, onOpenValidation, refresh]
+    [onAskAiToDraw, onImportProject, onOpenAiSettings, onOpenDetect, refresh]
   );
 
   const handleSkipStep = useCallback(
@@ -364,31 +355,23 @@ export default function OnboardingJourney({
 
           let primaryDisabled = false;
           let primaryHint = "";
-          if (step.id === "draw") {
+          if (step.id === "model") {
             if (drawing) {
               primaryDisabled = true;
               primaryHint = "Asking the conceptualizer to read your staging models…";
             } else if (!hasActiveProject) {
               primaryDisabled = true;
-              primaryHint = "Open a project first (step 2).";
+              primaryHint = "Connect a dbt project first (step 2).";
             } else if (!aiConfigured) {
               primaryDisabled = true;
-              primaryHint = "Add an AI provider first (step 5).";
+              primaryHint = "Set up your AI provider first (step 3).";
             } else if (drawError) {
               primaryHint = drawError;
             }
           }
-          if (step.id === "docs" && !hasActiveProject) {
+          if (step.id === "detect" && !hasActiveProject) {
             primaryDisabled = true;
-            primaryHint = "Import a project first (step 2).";
-          }
-          if (step.id === "gaps" && !hasActiveProject) {
-            primaryDisabled = true;
-            primaryHint = "Import a project first (step 2).";
-          }
-          if (step.id === "design" && !hasActiveProject) {
-            primaryDisabled = true;
-            primaryHint = "Import or open a project first.";
+            primaryHint = "Connect a dbt project first (step 2).";
           }
 
           return (

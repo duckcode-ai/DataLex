@@ -2227,15 +2227,7 @@ export default function Shell() {
             hasActiveProject={!!activeProjectId}
             modalOpen={Boolean(activeModal)}
             onImportProject={() => openModal("importDbtRepo")}
-            onOpenDocs={() => {
-              setShellViewMode("docs");
-              emitJourneyEvent("docs:opened");
-            }}
-            onOpenValidation={() => {
-              setBottomPanelTab("validation");
-              emitJourneyEvent("validation:opened");
-            }}
-            onCreateEntity={() => openModal("newLogicalEntity")}
+            onOpenDetect={() => setShellViewMode("readiness")}
             onOpenAiSettings={() => openModal("settings", { initialTab: "ai" })}
             onAskAiToDraw={async () => {
               if (!activeProjectId) {
