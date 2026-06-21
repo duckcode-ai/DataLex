@@ -649,31 +649,9 @@ function BottomPanelContent({ tab, table, rel, relationships, schema, activeFile
 
 function WelcomeModal({ onClose }) {
   return (
-    <div
-      style={{
-        position: "fixed", inset: 0, zIndex: 80,
-        background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-      }}
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: "min(720px, 92vw)", maxHeight: "85vh", overflow: "auto",
-          background: "var(--bg-2)", border: "1px solid var(--border-strong)",
-          borderRadius: 12, boxShadow: "var(--shadow-pop)", position: "relative",
-        }}
-      >
-        <button
-          onClick={onClose}
-          style={{
-            position: "absolute", top: 10, right: 10, zIndex: 1,
-            background: "transparent", border: "none", color: "var(--text-tertiary)",
-            cursor: "pointer", padding: 6, borderRadius: 6,
-          }}
-          title="Close"
-        >
+    <div className="datalex-modal-scrim" onClick={onClose}>
+      <div className="datalex-modal-panel" onClick={(e) => e.stopPropagation()}>
+        <button className="datalex-modal-close" onClick={onClose} title="Close">
           <X size={16} />
         </button>
         <React.Suspense fallback={<div style={{ padding: 40, textAlign: "center", color: "var(--text-tertiary)" }}>Loading…</div>}>
@@ -687,26 +665,17 @@ function WelcomeModal({ onClose }) {
 function ToastContainer() {
   const { toasts, removeToast } = useUiStore();
   if (toasts.length === 0) return null;
+  const toneClass = (type) =>
+    type === "error" ? "is-error"
+    : type === "success" ? "is-success"
+    : type === "warning" ? "is-warning"
+    : "";
   return (
     <div className="datalex-toasts">
       {toasts.map((toast) => (
-        <div key={toast.id}
-             style={{
-               display: "flex", alignItems: "center", gap: 8,
-               padding: "8px 12px", borderRadius: 8, fontSize: 12,
-               background: toast.type === "error" ? "rgba(239,68,68,0.12)"
-                         : toast.type === "success" ? "rgba(16,185,129,0.12)"
-                         : "var(--bg-2)",
-               border: `1px solid ${toast.type === "error" ? "rgba(239,68,68,0.4)"
-                       : toast.type === "success" ? "rgba(16,185,129,0.4)"
-                       : "var(--border-default)"}`,
-               color: "var(--text-primary)",
-               boxShadow: "var(--shadow-pop)",
-               minWidth: 200,
-             }}>
-          <span style={{ flex: 1 }}>{toast.message}</span>
-          <button onClick={() => removeToast(toast.id)}
-                  style={{ background: "transparent", border: "none", color: "var(--text-tertiary)", cursor: "pointer", padding: 2 }}>
+        <div key={toast.id} className={`datalex-toast ${toneClass(toast.type)}`}>
+          <span className="datalex-toast-message">{toast.message}</span>
+          <button className="datalex-toast-dismiss" onClick={() => removeToast(toast.id)}>
             <X size={12} />
           </button>
         </div>

@@ -545,6 +545,45 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 .datalex-toasts { position: fixed; bottom: 40px; right: 16px; z-index: 200; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
 .datalex-toasts > * { pointer-events: auto; }
 
+/* Toast item — token-driven so every theme tints consistently. Replaces
+   the inline rgba() that used to bypass the theme (see ToastContainer in
+   Shell.jsx). Variant tones reuse the shared --status-*-bg/border tokens. */
+.datalex-toast {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 200px; padding: 8px 12px; border-radius: 8px;
+  font-size: 12px; color: var(--text-primary);
+  background: var(--bg-2); border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-pop);
+}
+.datalex-toast.is-error   { background: var(--status-error-bg);   border-color: var(--status-error-border); }
+.datalex-toast.is-success { background: var(--status-success-bg); border-color: var(--status-success-border); }
+.datalex-toast.is-warning { background: var(--status-warning-bg); border-color: var(--status-warning-border); }
+.datalex-toast-message { flex: 1; }
+.datalex-toast-dismiss {
+  background: transparent; border: none; color: var(--text-tertiary);
+  cursor: pointer; padding: 2px; display: inline-flex;
+}
+.datalex-toast-dismiss:hover { color: var(--text-primary); }
+
+/* Modal scrim + panel — token-driven backdrop reused by Shell modals
+   (WelcomeModal et al.) instead of inline rgba/blur. */
+.datalex-modal-scrim {
+  position: fixed; inset: 0; z-index: 80;
+  background: var(--scrim); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.datalex-modal-panel {
+  position: relative; width: min(720px, 92vw); max-height: 85vh; overflow: auto;
+  background: var(--bg-2); border: 1px solid var(--border-strong);
+  border-radius: 12px; box-shadow: var(--shadow-pop);
+}
+.datalex-modal-close {
+  position: absolute; top: 10px; right: 10px; z-index: 1;
+  background: transparent; border: none; color: var(--text-tertiary);
+  cursor: pointer; padding: 6px; border-radius: 6px;
+}
+.datalex-modal-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+
 /* Reopen-drawer chip when collapsed. Sits just above the status bar so
    it never lands behind it; works because `.app` is position: relative.
    Users still have the StatusBar toggle + ⌘J as fallbacks. */

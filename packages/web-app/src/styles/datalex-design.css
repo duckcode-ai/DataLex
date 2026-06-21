@@ -84,6 +84,18 @@
   --cat-audit: #06b6d4;
   --cat-audit-soft: rgba(6, 182, 212, 0.12);
 
+  /* Modeling-layer accents (conceptual → logical → physical). Foundation
+     for the layer spine; see docs/design/enterprise-ui.md. Conceptual =
+     idea (green), logical = platform-neutral (accent blue), physical =
+     concrete/dialect (amber). Hues read on every theme, so they live in
+     :root rather than per-theme overrides. */
+  --layer-conceptual: #22c55e;
+  --layer-conceptual-soft: rgba(34, 197, 94, 0.12);
+  --layer-logical: var(--accent);
+  --layer-logical-soft: var(--accent-dim);
+  --layer-physical: #f59e0b;
+  --layer-physical-soft: rgba(245, 158, 11, 0.12);
+
   --rel-line: #4a5060;
   --rel-line-strong: #6b7385;
   --rel-line-active: #7aa3ff;
