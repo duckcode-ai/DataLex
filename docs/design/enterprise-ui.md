@@ -1,12 +1,15 @@
 # DataLex Enterprise UI — Design Spec
 
-> Status: **Draft / direction** · Branch: `design/enterprise-ui` · Owner: design
+> Status: **Implemented on `design/enterprise-ui`** (phases 1–6) · Owner: design
 >
-> This document proposes a reorganization of the DataLex web shell into an
+> This document describes the reorganization of the DataLex web shell into an
 > enterprise-grade information architecture. It is a **reorganization of what
 > already exists**, not a rebuild: the token system, the conceptual/logical/
 > physical modeling discipline, the crow's-foot canvas, the semantic-diff
 > overlay, and the AI proposal flow are all kept and re-surfaced.
+>
+> All six migration phases below have landed, plus the paper light theme as
+> the new default. Verified live in both paper and midnight themes.
 
 ---
 
@@ -186,23 +189,29 @@ branch always visible in the bottom hub.
 
 ---
 
-## 9. Phased migration (low-risk order)
+## 9. Phased migration (as shipped)
 
-1. **Token & style hygiene** — lift inline styles to classes; add layer/rail
-   tokens. No IA change yet; pure refactor, safe to ship.
-2. **Layer spine** — introduce the explicit C/L/P switcher backed by the
-   existing inference, then make it the source of truth. Keeps current screens.
-3. **Activity rail** — add the rail; move `ViewSwitcher` destinations behind it
-   one at a time (Explore → Model → Publish), leaving the old switcher until
-   parity is reached.
-4. **Version hub** — consolidate `DiffToggle` + Diff/History + Commit + branch
-   into the Version panel and bottom hub.
-5. **Contracts workspace** — promote the contracts board out of the bottom
-   drawer.
-6. **Inspector** — make width resizable; add the cross-axis (layer map +
-   contract + grain) summary.
+1. ✅ **Token & style hygiene** — layer-accent tokens added to `:root`; toast
+   and modal inline styles lifted into token-driven `.datalex-toast` /
+   `.datalex-modal-*` classes. (`datalex-design.css`, `datalex-integration.css`)
+2. ✅ **Layer spine** — always-visible C/L/P strip (`LayerSpine.jsx`) with the
+   active layer highlighted via the layer-accent tokens.
+3. ✅ **Activity rail** — `ActivityRail.jsx` (56px column) drives `shellViewMode`,
+   grouped build / govern / ship; object-view toggles (Diagram/Table/Docs)
+   moved to the spine; the top-bar `ViewSwitcher` retired.
+4. ✅ **Version hub** — branch, working-change count, semantic gate, and a
+   commit entry point consolidated into the bottom status strip (`Chrome.jsx`
+   `StatusBar`); the rail's Version destination opens the diff surface.
+5. ✅ **Contracts workspace** — promoted to a first-class rail destination
+   backed by the existing `ContractsView` board, with per-destination empty
+   states (`EnterpriseWorkbench.jsx`).
+6. ✅ **Inspector** — right panel is drag-resizable (`.right-resizer`).
 
-Each phase is independently shippable and reversible.
+Beyond the six phases: **paper** (warm light) is now the default theme, and a
+latent theme-switching bug (the static `<body data-theme>` winning the CSS
+custom-property cascade) was fixed so all four themes switch live.
+
+Each phase landed as an independent, build-verified commit.
 
 ---
 
