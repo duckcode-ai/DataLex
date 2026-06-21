@@ -9,12 +9,10 @@
  */
 import React from "react";
 import Icon from "./icons";
-import { THEMES } from "./notation";
 import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
-import { rebuildAiIndex } from "../lib/api";
 
 function filterTreeNodes(nodes, query) {
   const needle = String(query || "").trim().toLowerCase();
@@ -137,113 +135,6 @@ function ReadinessBadge({ review }) {
       {review.score ?? ""}
     </span>
   );
-}
-
-const SKILL_TEMPLATES = [
-  {
-    id: "conceptual",
-    name: "conceptual-business-modeling",
-    title: "Conceptual",
-    description: "Business concepts, domains, owners, glossary terms, and business relationships.",
-    useWhen: "conceptual model\nbusiness concept\nbusiness scenario\ndomain model\nbounded context",
-    tags: "conceptual,business,glossary",
-    layers: "conceptual",
-    agentModes: "conceptual_architect\nrelationship_modeler",
-    body: "- Create concepts, not tables.\n- Require description, owner, subject_area, domain, tags, and glossary terms when known.\n- Use relationship verbs in business language.\n- Ask follow-up questions when business meaning is unclear.",
-  },
-  {
-    id: "logical",
-    name: "logical-modeling-standards",
-    title: "Logical",
-    description: "Entities, attributes, candidate keys, optionality, and lineage.",
-    useWhen: "logical model\nattribute\ncandidate key\nnormalization\npromote to logical",
-    tags: "logical,attributes,keys",
-    layers: "logical",
-    agentModes: "logical_modeler\nyaml_patch_engineer",
-    body: "- Preserve conceptual lineage with derived_from or mapped_from metadata.\n- Define attributes with business names and descriptions.\n- Identify candidate keys and optionality from business meaning.\n- Avoid warehouse-only implementation choices.",
-  },
-  {
-    id: "physical",
-    name: "physical-dbt-modeling",
-    title: "Physical dbt",
-    description: "dbt YAML, columns, datatypes, tests, constraints, and contracts.",
-    useWhen: "physical model\ndbt\nschema.yml\ncolumn\ndatatype\ntest\nconstraint",
-    tags: "physical,dbt,tests,constraints",
-    layers: "physical",
-    agentModes: "physical_dbt_developer\nyaml_patch_engineer",
-    body: "- Preserve existing dbt YAML, descriptions, tests, tags, meta, and contracts.\n- Prefer focused YAML patches over full-file rewrites.\n- Infer datatypes from existing YAML, SQL, catalog metadata, or clear naming conventions.\n- Do not run dbt or apply DDL.",
-  },
-  {
-    id: "contract",
-    name: "domain-contract-designer",
-    title: "Contracts",
-    description: "Domain-specific DataLex contracts for DQL certification, accepted sources, metrics, grain, and review policy.",
-    useWhen: "DataLex contract\ncertified block\naccepted source\nmetric grain\nDQL certification\nbusiness definition",
-    tags: "contract,certification,domain,metrics,lineage",
-    layers: "conceptual,logical,physical",
-    agentModes: "contract_designer\ngovernance_reviewer\nyaml_patch_engineer",
-    body: "- Start from the selected business concept and domain vocabulary; do not write generic contract boilerplate.\n- Define the business decision value, grain, accepted sources, metrics, dimensions, required tests, owner, and certification policy.\n- Use dbt, semantic, lineage, glossary, and peer concept context to recommend accepted_sources with confidence and rationale.\n- If source, grain, owner, or metric logic is uncertain, keep the contract in draft and add open_questions instead of inventing facts.\n- A DQL block should only certify when it binds to this contract, queries accepted sources, passes validation, and has lineage.",
-  },
-  {
-    id: "governance",
-    name: "governance-and-validation",
-    title: "Governance",
-    description: "Validation, coverage, ownership, policy, and quality rules.",
-    useWhen: "validation\ncoverage\ngovernance\nmissing description\nmissing owner\npolicy",
-    tags: "governance,validation,quality",
-    layers: "conceptual,logical,physical",
-    agentModes: "governance_reviewer\nyaml_patch_engineer",
-    body: "- Explain what is missing, why it matters, and the smallest safe YAML fix.\n- Separate blockers from documentation quality improvements.\n- Prioritize owner, description, glossary, keys, tests, and relationship endpoints by layer.",
-  },
-];
-const DATALEX_SKILL_FOLDER = "Skills";
-
-function skillSlug(value) {
-  return String(value || "modeling-skill")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "modeling-skill";
-}
-
-function skillList(value, fallback = []) {
-  const items = String(value || "")
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-  return items.length ? items : fallback;
-}
-
-function buildSkillContent({ name, description, useWhen, tags, layers, agentModes, body }) {
-  const title = String(name || "modeling-skill").trim();
-  const useWhenList = skillList(useWhen, ["modeling assistance"]);
-  const tagList = skillList(tags, ["modeling"]);
-  const layerList = skillList(layers, ["conceptual", "logical", "physical"]);
-  const agentModeList = skillList(agentModes, ["governance_reviewer"]);
-  return [
-    "---",
-    `name: ${JSON.stringify(title)}`,
-    `description: ${JSON.stringify(String(description || "DataLex AI modeling skill").trim())}`,
-    "use_when:",
-    ...useWhenList.map((item) => `  - ${JSON.stringify(item)}`),
-    "tags:",
-    ...tagList.map((item) => `  - ${JSON.stringify(item)}`),
-    "layers:",
-    ...layerList.map((item) => `  - ${JSON.stringify(item)}`),
-    "agent_modes:",
-    ...agentModeList.map((item) => `  - ${JSON.stringify(item)}`),
-    "priority: 1",
-    "---",
-    "",
-    `# ${title}`,
-    "",
-    "## When to use",
-    ...useWhenList.map((item) => `- ${item}`),
-    "",
-    "## Instructions",
-    String(body || "- Add your team's modeling standards here.").trim(),
-    "",
-  ].join("\n");
 }
 
 function flattenFolderOptions(nodes, moving = null) {
@@ -371,17 +262,6 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   const [query, setQuery] = React.useState("");
   const [explorerQuery, setExplorerQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});
-  const [selectedSkillTemplate, setSelectedSkillTemplate] = React.useState(SKILL_TEMPLATES[0].id);
-  const initialSkillTemplate = SKILL_TEMPLATES[0];
-  const [skillName, setSkillName] = React.useState(initialSkillTemplate.name);
-  const [skillDescription, setSkillDescription] = React.useState(initialSkillTemplate.description);
-  const [skillUseWhen, setSkillUseWhen] = React.useState(initialSkillTemplate.useWhen);
-  const [skillTags, setSkillTags] = React.useState(initialSkillTemplate.tags);
-  const [skillLayers, setSkillLayers] = React.useState(initialSkillTemplate.layers);
-  const [skillAgentModes, setSkillAgentModes] = React.useState(initialSkillTemplate.agentModes);
-  const [skillBody, setSkillBody] = React.useState(initialSkillTemplate.body);
-  const [skillStatus, setSkillStatus] = React.useState("");
-  const [skillBusy, setSkillBusy] = React.useState(false);
   const toggle = (k) => setCollapsed((s) => ({ ...s, [k]: !s[k] }));
 
   /* Explorer: pull the file list + open-file action from the store directly.
@@ -439,14 +319,6 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     }
     return by;
   }, [dbtReadinessReview]);
-  const skillFiles = React.useMemo(() => (
-    (projectFiles || [])
-      .filter((file) => {
-        const path = String(file.path || file.name || "").replace(/\\/g, "/").toLowerCase();
-        return path.startsWith(`${DATALEX_SKILL_FOLDER.toLowerCase()}/`);
-      })
-      .sort((a, b) => String(a.path || a.name || "").localeCompare(String(b.path || b.name || "")))
-  ), [projectFiles]);
 
   React.useEffect(() => {
     const onTab = (event) => {
@@ -457,47 +329,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
     return () => window.removeEventListener("datalex:left-tab", onTab);
   }, []);
 
-  const applySkillTemplate = React.useCallback((templateId) => {
-    const template = SKILL_TEMPLATES.find((item) => item.id === templateId) || SKILL_TEMPLATES[0];
-    setSelectedSkillTemplate(template.id);
-    setSkillName(template.name);
-    setSkillDescription(template.description);
-    setSkillUseWhen(template.useWhen);
-    setSkillTags(template.tags);
-    setSkillLayers(template.layers);
-    setSkillAgentModes(template.agentModes);
-    setSkillBody(template.body);
-  }, []);
 
-  const createSkill = React.useCallback(async () => {
-    if (!explorerReady) {
-      setSkillStatus("Open a local project before creating skills.");
-      return;
-    }
-    const slug = skillSlug(skillName);
-    const content = buildSkillContent({
-      name: skillName,
-      description: skillDescription,
-      useWhen: skillUseWhen,
-      tags: skillTags,
-      layers: skillLayers,
-      agentModes: skillAgentModes,
-      body: skillBody,
-    });
-    setSkillBusy(true);
-    setSkillStatus("");
-    try {
-      const skillPath = `${DATALEX_SKILL_FOLDER}/${slug}.md`;
-      await createNewFile(skillPath, content);
-      await rebuildAiIndex(activeProjectId).catch(() => null);
-      addToast?.({ type: "success", message: `Created AI skill ${skillPath}` });
-      setSkillStatus(`Created and indexed ${skillPath}.`);
-    } catch (err) {
-      setSkillStatus(`Skill create failed: ${err?.message || err}`);
-    } finally {
-      setSkillBusy(false);
-    }
-  }, [activeProjectId, addToast, createNewFile, explorerReady, skillAgentModes, skillBody, skillDescription, skillLayers, skillName, skillTags, skillUseWhen]);
 
   const [folded, setFolded] = React.useState({});
   const toggleFolder = (path) => setFolded((s) => ({ ...s, [path]: !s[path] }));
@@ -682,7 +514,7 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
   return (
     <div className="left">
       <div className="left-tabs">
-        {["OBJECTS", "EXPLORER", "SKILLS", "THEMES"].map((t) => (
+        {["OBJECTS", "EXPLORER"].map((t) => (
           <button key={t} className={`left-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
         ))}
       </div>
@@ -885,126 +717,6 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         </div>
       )}
 
-      {tab === "SKILLS" && (
-        <div className="left-skills-panel">
-          <div className="left-skills-hero">
-            <div className="left-skills-icon"><I.Sparkle /></div>
-            <div>
-              <div className="left-skills-title">Agent Skills</div>
-              <div className="left-skills-sub">Teach DataLex when to use your business, dbt, and governance standards.</div>
-            </div>
-          </div>
-
-          <div className="left-skills-templates">
-            {SKILL_TEMPLATES.map((template) => (
-              <button
-                key={template.id}
-                type="button"
-                className={`left-skill-template ${selectedSkillTemplate === template.id ? "active" : ""}`}
-                onClick={() => applySkillTemplate(template.id)}
-              >
-                <strong>{template.title}</strong>
-                <span>{template.description}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="left-skill-form">
-            <label>
-              <span>Name</span>
-              <input value={skillName} onChange={(e) => setSkillName(e.target.value)} placeholder="business-modeling-standards" />
-            </label>
-            <label>
-              <span>Description</span>
-              <input value={skillDescription} onChange={(e) => setSkillDescription(e.target.value)} placeholder="When this skill should guide the AI" />
-            </label>
-            <label>
-              <span>Use when</span>
-              <textarea rows={3} value={skillUseWhen} onChange={(e) => setSkillUseWhen(e.target.value)} placeholder="One trigger per line" />
-            </label>
-            <div className="left-skill-grid">
-              <label>
-                <span>Tags</span>
-                <input value={skillTags} onChange={(e) => setSkillTags(e.target.value)} placeholder="dbt,governance" />
-              </label>
-              <label>
-                <span>Layers</span>
-                <input value={skillLayers} onChange={(e) => setSkillLayers(e.target.value)} placeholder="conceptual,logical,physical" />
-              </label>
-            </div>
-            <label>
-              <span>Agent modes</span>
-              <textarea rows={2} value={skillAgentModes} onChange={(e) => setSkillAgentModes(e.target.value)} placeholder="physical_dbt_developer" />
-            </label>
-            <label>
-              <span>Instructions</span>
-              <textarea rows={6} value={skillBody} onChange={(e) => setSkillBody(e.target.value)} placeholder="Write the rules this skill should enforce..." />
-            </label>
-            <button className="left-skill-create" type="button" onClick={createSkill} disabled={skillBusy || !explorerReady}>
-              <I.Plus /> {skillBusy ? "Creating..." : "Create Skill"}
-            </button>
-            {skillStatus && <div className="left-skill-status">{skillStatus}</div>}
-          </div>
-
-          <div className="left-skills-existing">
-            <div className="left-skills-heading">Existing Skills <span>{skillFiles.length}</span></div>
-            {skillFiles.length === 0 ? (
-              <div className="left-skills-empty">No skill files yet. Create one from a template above.</div>
-            ) : skillFiles.map((file) => (
-              <button
-                key={file.fullPath || file.path || file.name}
-                type="button"
-                className="left-skill-file"
-                onClick={() => openFile(file)}
-              >
-                <I.Dep />
-                <span>{file.path || file.name}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === "THEMES" && (
-        <div style={{ padding: "14px 16px", overflowY: "auto" }}>
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", marginBottom: 10, letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Appearance</div>
-          {THEMES.map((t) => {
-            const active = t.id === theme;
-            return (
-              <button key={t.id} onClick={() => setTheme(t.id)}
-                style={{
-                  width: "100%", textAlign: "left",
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "10px 10px", marginBottom: 6,
-                  border: `1px solid ${active ? "var(--accent)" : "var(--border-default)"}`,
-                  borderRadius: 8,
-                  background: active ? "var(--accent-dim)" : "var(--bg-2)",
-                  cursor: "pointer", transition: "all 120ms var(--ease)",
-                }}>
-                <div style={{ display: "flex", gap: 0, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border-default)" }}>
-                  {t.colors.map((c, i) => <div key={i} style={{ width: 12, height: 28, background: c }} />)}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 6 }}>
-                    {t.name}
-                    <span style={{
-                      fontSize: 9, fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
-                      padding: "1px 5px", borderRadius: 3, background: "var(--bg-3)", color: "var(--text-tertiary)",
-                    }}>{t.mode}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--text-tertiary)", marginTop: 2 }}>{t.sub}</div>
-                </div>
-                {active && <I.Check />}
-              </button>
-            );
-          })}
-          <div style={{ fontSize: 10, color: "var(--text-tertiary)", margin: "18px 0 8px", letterSpacing: "0.08em", textTransform: "uppercase", fontWeight: 600 }}>Keyboard</div>
-          <div style={{ fontSize: 11, color: "var(--text-secondary)", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 2px" }}>
-            <span>Cycle themes</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, padding: "2px 6px", background: "var(--bg-3)", borderRadius: 4, border: "1px solid var(--border-default)" }}>⌘⇧T</span>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

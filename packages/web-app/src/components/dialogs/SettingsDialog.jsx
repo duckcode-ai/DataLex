@@ -9,13 +9,14 @@
 import React from "react";
 import {
   Bot, KeyRound, Check, Plug, Database, Loader2, CircleCheck,
-  CircleAlert, RefreshCw,
+  CircleAlert, RefreshCw, Sparkles,
 } from "lucide-react";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
 import { emitJourneyEvent } from "../../lib/onboardingJourney";
 import { testAiSettings, testConnector, fetchConnections } from "../../lib/api";
 import Modal from "./Modal";
+import SkillsManager from "./SkillsManager";
 
 /* Broadcast so any open page (Home, the enterprise workbench) re-reads AI
    readiness the moment a provider is connected — no manual refresh. */
@@ -26,11 +27,14 @@ function announceAiChanged() {
 const TABS = [
   { id: "ai",          label: "AI provider",        icon: Bot },
   { id: "connections", label: "Database connection", icon: Database },
+  { id: "skills",      label: "Agent skills",       icon: Sparkles },
 ];
 
 export default function SettingsDialog() {
   const { closeModal, modalPayload } = useUiStore();
-  const [active, setActive] = React.useState(modalPayload?.initialTab === "connections" ? "connections" : "ai");
+  const [active, setActive] = React.useState(
+    ["ai", "connections", "skills"].includes(modalPayload?.initialTab) ? modalPayload.initialTab : "ai"
+  );
 
   return (
     <Modal
@@ -64,6 +68,7 @@ export default function SettingsDialog() {
         <div className="dlx-settings-content">
           {active === "ai"          && <AiProviderPane />}
           {active === "connections" && <ConnectionPane />}
+          {active === "skills"      && <SkillsManager />}
         </div>
       </div>
     </Modal>
