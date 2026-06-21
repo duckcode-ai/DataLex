@@ -422,11 +422,12 @@ input { font: inherit; color: inherit; }
 .app {
   --left-w: 280px;
   display: grid;
-  grid-template-rows: 44px 36px 1fr 26px;
+  grid-template-rows: 44px 36px 32px 1fr 26px;
   grid-template-columns: var(--left-w, 280px) 1fr var(--right-w, 320px);
   grid-template-areas:
     "topbar topbar topbar"
     "tabs   tabs   tabs"
+    "spine  spine  spine"
     "left   canvas right"
     "status status status";
   height: 100vh;
@@ -442,7 +443,7 @@ input { font: inherit; color: inherit; }
 
 .left-resizer {
   position: absolute;
-  top: 80px;
+  top: 112px;
   bottom: 26px;
   left: calc(var(--left-w, 280px) - 3px);
   width: 7px;
@@ -464,6 +465,71 @@ input { font: inherit; color: inherit; }
 .left-resizer:active::before {
   background: var(--accent);
 }
+
+/* ============================================================
+   Layer spine — conceptual → logical → physical (see LayerSpine.jsx)
+   ============================================================ */
+.layer-spine {
+  grid-area: spine;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border-default);
+  min-width: 0;
+}
+.layer-spine-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.layer-spine-track {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.layer-spine-sep { color: var(--text-muted); flex-shrink: 0; }
+.layer-spine-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: default;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.layer-spine-seg svg { opacity: 0.8; }
+.layer-spine-seg.active {
+  color: var(--seg-accent, var(--accent));
+  background: var(--seg-soft, var(--accent-dim));
+  border-color: color-mix(in srgb, var(--seg-accent, var(--accent)) 38%, transparent);
+  font-weight: 600;
+}
+.layer-spine-seg.active svg { opacity: 1; }
+.layer-spine-context {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.layer-spine-file {
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.layer-spine-count { white-space: nowrap; }
 
 /* ============================================================
    Top bar

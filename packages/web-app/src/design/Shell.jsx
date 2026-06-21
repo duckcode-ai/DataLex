@@ -15,6 +15,7 @@ import {
 import yaml from "js-yaml";
 import { TopBar, ProjectTabs, StatusBar } from "./Chrome";
 import LeftPanel from "./LeftPanel";
+import LayerSpine from "./LayerSpine";
 import Canvas from "./Canvas";
 import RightPanel from "./RightPanel";
 import CommandPalette from "./CommandPalette";
@@ -1874,6 +1875,12 @@ export default function Shell() {
         onNew={handleNewProject}
         branchName={branch}
         onBranchClick={() => activeProjectId && openModal("gitBranch")}
+      />
+
+      <LayerSpine
+        modelKind={activeModelKind}
+        objectCount={Array.isArray(tables) ? tables.length : 0}
+        fileName={activeFile?.name || ""}
       />
 
       <LeftPanel
