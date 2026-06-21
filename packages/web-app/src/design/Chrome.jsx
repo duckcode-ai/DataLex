@@ -30,6 +30,8 @@ import {
   Inbox,
   ShieldCheck,
   Rocket,
+  GitBranch,
+  GitCommit as LucideGitCommit,
 } from "lucide-react";
 import { THEMES } from "./notation";
 import useUiStore from "../stores/uiStore";
@@ -271,10 +273,37 @@ export function StatusBar({
   engine = "PostgreSQL 16.1", saved = "Saved 2m ago",
   zoom = 100, connectionState = "Connected",
   bottomPanelOpen = false, onTogglePanel,
+  branch = "main", changedCount = 0, gate = { tone: "ok", label: "passing" },
+  isDemo = false, onOpenVersion, onCommit,
 }) {
   const I = Icon;
   return (
     <div className="status">
+      {/* Version hub — branch, working changes, semantic gate, and a
+          commit entry point, consolidated from the old scattered git
+          surfaces (phase 4). Hidden in demo mode (no repo). */}
+      {!isDemo && (
+        <div className="status-version">
+          <button type="button" className="status-version-branch" onClick={onOpenVersion}
+                  title="Open version — diff, history, branch, commit">
+            <GitBranch size={12} strokeWidth={1.8} />
+            <span className="k">{branch}</span>
+          </button>
+          <button type="button" className="status-version-changes" onClick={onOpenVersion}
+                  title="Working changes since last commit">
+            {changedCount} changed
+          </button>
+          <span className={`status-gate tone-${gate.tone}`} title="Semantic validation gate">
+            <ShieldCheck size={11} strokeWidth={1.9} />
+            Gate: {gate.label}
+          </span>
+          <button type="button" className="status-version-commit" onClick={onCommit}
+                  title="Review &amp; commit (git)">
+            <LucideGitCommit size={11} strokeWidth={1.9} />
+            Commit
+          </button>
+        </div>
+      )}
       <div className="status-item"><span className="dot" /> {connectionState}</div>
       <div className="status-item"><span className="k">{engine}</span></div>
       <div className="status-item">public · <span className="k">{tableCount} tables</span> · <span className="k">{relCount} relationships</span></div>

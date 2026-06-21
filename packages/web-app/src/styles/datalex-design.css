@@ -1985,6 +1985,53 @@ input { font: inherit; color: inherit; }
   gap: 14px;
 }
 .status-item { display: flex; align-items: center; gap: 6px; }
+
+/* Version hub cluster (left of the status strip) — see StatusBar. */
+.status-version {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 12px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border-subtle);
+}
+.status-version-branch,
+.status-version-changes,
+.status-version-commit {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: color 120ms var(--ease), background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.status-version-branch { color: var(--accent); }
+.status-version-branch .k { color: var(--accent); font-family: var(--font-ui); }
+.status-version-branch:hover,
+.status-version-changes:hover { background: var(--bg-hover); }
+.status-version-commit {
+  color: var(--text-secondary);
+  border-color: var(--border-default);
+}
+.status-version-commit:hover { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
+.status-gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.status-gate.tone-ok      { color: var(--status-success); background: var(--status-success-bg); }
+.status-gate.tone-warning { color: var(--status-warning); background: var(--status-warning-bg); }
+.status-gate.tone-error   { color: var(--status-error);   background: var(--status-error-bg); }
+
 .status-item .dot { width: 6px; height: 6px; border-radius: 50%; background: #10b981; }
 .status-item.warn .dot { background: #f59e0b; }
 .status-item .k {

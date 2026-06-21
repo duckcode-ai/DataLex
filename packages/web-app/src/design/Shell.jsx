@@ -875,13 +875,21 @@ export default function Shell() {
     return () => window.removeEventListener("keydown", handler);
   }, [showShortcuts, cycleTheme, cycleProject, toggleBottomPanel, setCommandPaletteOpen, addToast]);
 
-  /* ── Current git branch (displayed on project tabs bar) ───────── */
+  /* ── Current git branch + working-change count ──────────────────
+     Surfaced on the project-tabs bar (branch) and the bottom version
+     hub (branch + changed count). Refetched when the active project or a
+     modal (branch / commit) closes. */
   const [branch, setBranch] = useState("main");
+  const [gitChangedCount, setGitChangedCount] = useState(0);
   useEffect(() => {
-    if (!activeProjectId) { setBranch("main"); return; }
+    if (!activeProjectId) { setBranch("main"); setGitChangedCount(0); return; }
     let cancelled = false;
     fetchGitStatus(activeProjectId)
-      .then((s) => { if (!cancelled && s?.branch) setBranch(s.branch); })
+      .then((s) => {
+        if (cancelled) return;
+        if (s?.branch) setBranch(s.branch);
+        setGitChangedCount(Array.isArray(s?.files) ? s.files.length : 0);
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [activeProjectId, activeModal /* refresh after branch dialog closes */]);
@@ -1781,6 +1789,21 @@ export default function Shell() {
     () => computeValidationStatus(activeFileContent, activeFile),
     [activeFileContent, activeFile]
   );
+  /* Version-hub gate readout — folds the validation status into a single
+     pass/warn/fail signal shown in the bottom status strip so "is this
+     safe to commit?" is always visible (phase 4). */
+  const versionGate = React.useMemo(() => {
+    const st = validationStatus?.status;
+    if (st === "red") {
+      const n = validationStatus.blockers || 0;
+      return { tone: "error", label: `${n} blocker${n === 1 ? "" : "s"}` };
+    }
+    if (st === "yellow") {
+      const n = validationStatus.warnings || 0;
+      return { tone: "warning", label: `${n} warning${n === 1 ? "" : "s"}` };
+    }
+    return { tone: "ok", label: "passing" };
+  }, [validationStatus]);
   const activeBottomTabs = React.useMemo(
     () => {
       const baseTabs =
@@ -2078,6 +2101,12 @@ export default function Shell() {
         connectionState={isDemo ? "Demo mode" : "Connected"}
         bottomPanelOpen={bottomPanelOpen}
         onTogglePanel={toggleBottomPanel}
+        branch={branch}
+        changedCount={gitChangedCount}
+        gate={versionGate}
+        isDemo={isDemo}
+        onOpenVersion={openVersionSurface}
+        onCommit={() => openModal("commit")}
       />
 
       {/* Luna-style palette with real handlers for built-in actions. Extra
