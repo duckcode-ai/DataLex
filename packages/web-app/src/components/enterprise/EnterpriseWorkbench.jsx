@@ -168,13 +168,29 @@ function GenerateControls({ scan, options, onChange, onGenerate, generating, aiR
   );
 }
 
-function EmptyState({ onConnect }) {
+/* Per-destination empty-state copy. Each activity-rail destination gets a
+   purpose-specific prompt so it reads as a first-class workspace even
+   before a repo is connected — every path still needs a dbt project, so
+   the action stays "Connect repo". */
+const EMPTY_STATES = {
+  "ai-setup":  { Icon: Sparkles,      title: "Set up your AI provider",        body: "Connect a dbt project, then point DataLex at OpenAI, Claude, or Ollama to draft domains, contracts, and diagrams." },
+  readiness:   { Icon: ClipboardCheck, title: "See your enterprise readiness",  body: "Connect a dbt project to score readiness by domain — contracts, metrics, owners, grains, and DQL status." },
+  domains:     { Icon: Network,        title: "Discover your business domains", body: "Connect a dbt project and DataLex groups your models into business domains with certification priorities." },
+  proposals:   { Icon: Inbox,          title: "Review AI proposal packs",       body: "Connect a dbt project to generate small, reviewable AI proposal packs — accept, edit, or reject each change." },
+  contracts:   { Icon: ShieldCheck,    title: "Govern your data contracts",     body: "Connect a dbt project to see every contract's status, owner, source, and confidence on one certified surface." },
+  publish:     { Icon: Rocket,         title: "Publish your DataLex manifest",  body: "Connect a dbt project, then build the DataLex manifest and check integration readiness before you ship." },
+};
+const DEFAULT_EMPTY = { Icon: Network, title: "Connect a dbt project", body: "DataLex starts from your existing repo, scans dbt metadata, then builds small AI proposal packs for review." };
+
+function EmptyState({ onConnect, mode }) {
+  const copy = EMPTY_STATES[mode] || DEFAULT_EMPTY;
+  const Ico = copy.Icon;
   return (
     <main className="enterprise-workbench">
       <section className="enterprise-empty">
-        <Network size={30} strokeWidth={1.7} />
-        <h2>Connect a dbt project</h2>
-        <p>DataLex starts from your existing repo, scans dbt metadata, then builds small AI proposal packs for review.</p>
+        <Ico size={30} strokeWidth={1.7} />
+        <h2>{copy.title}</h2>
+        <p>{copy.body}</p>
         <button className="enterprise-primary" type="button" onClick={onConnect}>
           <GitBranch size={15} /> Connect repo
         </button>
@@ -1030,7 +1046,7 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
   }, [activeProjectId, addToast, refreshProjectFiles, refresh, scan?.integrations?.dql?.enabled]);
 
   if (!activeProjectId) {
-    return <EmptyState onConnect={() => openModal?.("importDbtRepo")} />;
+    return <EmptyState mode={activeMode} onConnect={() => openModal?.("importDbtRepo")} />;
   }
 
   return (
