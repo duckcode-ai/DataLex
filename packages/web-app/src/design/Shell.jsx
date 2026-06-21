@@ -17,6 +17,7 @@ import { TopBar, ProjectTabs, StatusBar } from "./Chrome";
 import LeftPanel from "./LeftPanel";
 import LayerSpine from "./LayerSpine";
 import ActivityRail from "./ActivityRail";
+import HomeView from "./HomeView";
 import Canvas from "./Canvas";
 import RightPanel from "./RightPanel";
 import CommandPalette from "./CommandPalette";
@@ -27,8 +28,7 @@ import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDbtSchemaYaml, adaptDiagr
 import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay, setInlineDiagramEntityDisplay } from "./yamlPatch";
 import { addRelationship, deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
 import { shouldShowFirstRun, markTourSeen } from "../lib/onboardingTour";
-import { shouldShowJourney, emitJourneyEvent } from "../lib/onboardingJourney";
-import { fetchGitStatus, aiConceptualize } from "../lib/api";
+import { fetchGitStatus } from "../lib/api";
 import {
   AddProjectModal,
   EditProjectModal,
@@ -138,7 +138,6 @@ function defaultRelationshipName(fromEntity, toEntity) {
 }
 const SnapshotsDialog     = React.lazy(() => import("../components/dialogs/SnapshotsDialog"));
 const ViewerWelcome       = React.lazy(() => import("../components/viewer/ViewerWelcome"));
-const OnboardingJourney   = React.lazy(() => import("../components/onboarding/OnboardingJourney"));
 
 // The three main-canvas alternatives to the diagram. Lazy-loaded so the
 // initial bundle stays tight when the user only ever uses the diagram.
@@ -766,23 +765,13 @@ export default function Shell() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [textAiTarget, setTextAiTarget] = useState(null);
 
-  /* ── First-run onboarding journey ──────────────────────────────────
-     The journey panel walks the user through six concrete actions
-     (welcome → connect → see gaps → design → AI key → ask AI). The
-     legacy 13-step driver.js spotlight tour now lives behind the
-     "Deep feature tour" button in Settings; we mark it seen up-front
-     so it doesn't auto-fire on top of the journey. */
-  const [showOnboarding, setShowOnboarding] = useState(false);
+  /* ── First-run onboarding ──────────────────────────────────────────
+     The old slide-in journey panel was replaced by the dedicated Home
+     view (the default landing — see HomeView.jsx). We still suppress the
+     legacy 13-step driver.js spotlight tour up-front so it doesn't
+     auto-fire; it remains reachable from Settings' "Deep feature tour". */
   React.useEffect(() => {
-    const wantJourney = shouldShowJourney();
-    // Suppress the legacy driver.js modal — the journey supersedes it.
     if (shouldShowFirstRun()) markTourSeen();
-    if (wantJourney) {
-      // Wait for the top-bar / explorer to mount before showing the
-      // journey panel — the user needs something behind it to look at.
-      const t = setTimeout(() => setShowOnboarding(true), 400);
-      return () => clearTimeout(t);
-    }
   }, []);
   useEffect(() => {
     const handler = (e) => {
@@ -934,7 +923,19 @@ export default function Shell() {
 
   const diagramSurfaceFileKey = activeFile?.fullPath || activeFile?.path || activeFile?.name || "";
   const lastAutoOpenedDiagramFileRef = React.useRef("");
+  const autoOpenBaselineRef = React.useRef(false);
   React.useEffect(() => {
+    // First real active file while sitting on Home: adopt it as the
+    // baseline rather than auto-opening its diagram, so a restored model
+    // file doesn't bounce a fresh session off the Home landing. Opening a
+    // *different* file afterwards still switches to the diagram.
+    if (!autoOpenBaselineRef.current && diagramSurfaceFileKey) {
+      autoOpenBaselineRef.current = true;
+      if (shellViewMode === "home") {
+        lastAutoOpenedDiagramFileRef.current = diagramSurfaceFileKey;
+        return;
+      }
+    }
     if (
       shouldOpenDiagramSurface &&
       diagramSurfaceFileKey &&
@@ -1859,11 +1860,15 @@ export default function Shell() {
   }, [activeBottomTabs, bottomPanelTab, setBottomPanelTab]);
 
   const isEnterpriseView = ENTERPRISE_VIEW_MODES.has(shellViewMode);
+  const isHome = shellViewMode === "home";
+  // Home and the enterprise workflow views take the full canvas — no
+  // inspector or bottom drawer.
+  const isFullView = isEnterpriseView || isHome;
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
     <div
-      className={`app ${(bottomPanelOpen && !isEnterpriseView) ? "with-bottom" : ""} ${(rightPanelOpen && !isEnterpriseView) ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
+      className={`app ${(bottomPanelOpen && !isFullView) ? "with-bottom" : ""} ${(rightPanelOpen && !isFullView) ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
       style={{ "--left-w": `${leftPanelWidth}px` }}
     >
       <TopBar
@@ -1983,9 +1988,23 @@ export default function Shell() {
         aria-label="Resize left sidebar"
       />
 
-      {/* Main canvas cell swaps based on the top-bar ViewSwitcher.
+      {/* Main canvas cell swaps based on the active rail/spine destination.
           Only one surface mounts at a time; the others lazy-load on first
           click so the diagram path is not penalised. */}
+      {isHome && (
+        <HomeView
+          projectName={projects.find((p) => p.id === activeProjectId)?.name || activeProjectId || "Workspace"}
+          hasProject={!!activeProjectId}
+          isDemo={isDemo}
+          projectId={activeProjectId}
+          branch={branch}
+          changedCount={gitChangedCount}
+          gate={versionGate}
+          onGoto={setShellViewMode}
+          onConnect={() => openModal("importDbtRepo")}
+          onOpenAi={() => openModal("settings", { initialTab: "ai" })}
+        />
+      )}
       {isEnterpriseView && (
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading enterprise workflow...</div>}>
           <EnterpriseWorkbench mode={shellViewMode} />
@@ -2054,7 +2073,7 @@ export default function Shell() {
         />
       )}
 
-      {!isEnterpriseView && rightPanelOpen && (
+      {!isFullView && rightPanelOpen && (
         <div
           className="right-resizer"
           onMouseDown={handleStartRightResize}
@@ -2065,7 +2084,7 @@ export default function Shell() {
         />
       )}
 
-      {!isEnterpriseView && rightPanelOpen && (
+      {!isFullView && rightPanelOpen && (
         <RightPanel
           table={activeTable}
           rel={activeRel}
@@ -2082,7 +2101,7 @@ export default function Shell() {
         />
       )}
 
-      {!isEnterpriseView && bottomPanelOpen && (
+      {!isFullView && bottomPanelOpen && (
         <BottomDrawer tabs={activeBottomTabs}>
           <BottomPanelContent
             tab={bottomPanelTab}
@@ -2096,7 +2115,7 @@ export default function Shell() {
         </BottomDrawer>
       )}
 
-      {!isEnterpriseView && !bottomPanelOpen && (
+      {!isFullView && !bottomPanelOpen && (
         <button className="bottom-reopen" onClick={toggleBottomPanel} title="Open panel (⌘J)">
           <ChevronUp size={12} /> Panel
         </button>
@@ -2221,24 +2240,6 @@ export default function Shell() {
         {activeModal === "snapshots"          && <SnapshotsDialog />}
         {activeModal === "gitBranch"          && <GitBranchDialog />}
         {activeModal === "welcome"            && <WelcomeModal onClose={closeModal} />}
-        {showOnboarding && !isEnterpriseView && (
-          <OnboardingJourney
-            onClose={() => setShowOnboarding(false)}
-            hasActiveProject={!!activeProjectId}
-            modalOpen={Boolean(activeModal)}
-            onImportProject={() => openModal("importDbtRepo")}
-            onOpenDetect={() => setShellViewMode("readiness")}
-            onOpenAiSettings={() => openModal("settings", { initialTab: "ai" })}
-            onAskAiToDraw={async () => {
-              if (!activeProjectId) {
-                throw new Error("Open a project first.");
-              }
-              const result = await aiConceptualize(activeProjectId);
-              emitJourneyEvent("ai:conceptualize:applied", { result });
-              return result;
-            }}
-          />
-        )}
       </React.Suspense>
 
       {showShortcuts && <KeyboardShortcutsPanel onClose={() => setShowShortcuts(false)} />}

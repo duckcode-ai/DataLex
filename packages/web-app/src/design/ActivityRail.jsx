@@ -13,7 +13,7 @@
 import React from "react";
 import {
   Boxes, Sparkles, ClipboardCheck, Network, ShieldCheck, Inbox,
-  GitBranch, Rocket, FolderGit2,
+  GitBranch, Rocket, FolderGit2, Home,
 } from "lucide-react";
 
 /* Modes that mean "I'm working on the model" — the Model rail item stays
@@ -28,6 +28,12 @@ const MODEL_MODES = new Set(["diagram", "table", "docs", "views", "enums", "capa
            → ship (version, publish).
    Order matters: this is both the navigation and the recommended path. */
 const GROUPS = [
+  {
+    key: "home",
+    items: [
+      { id: "home", label: "Home", Icon: Home, tip: "Workspace home — your AI-first setup steps and live project status." },
+    ],
+  },
   {
     key: "setup",
     items: [

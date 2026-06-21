@@ -55,6 +55,7 @@ const initialBottom = loadBottom();
    Kept in its own key so the bottom-panel blob stays focused. */
 const SHELL_STORAGE = "datalex.shell";
 const VALID_SHELL_VIEW_MODES = [
+  "home",
   "ai-setup",
   "readiness",
   "domains",
@@ -68,7 +69,9 @@ const VALID_SHELL_VIEW_MODES = [
   "enums",
   "capabilities",
 ];
-const DEFAULT_SHELL = { viewMode: "ai-setup", rightTab: "COLUMNS", rightWidth: 320 };
+// Home is the default landing — the dedicated page that lays out the
+// AI-first flow with live status (replaces the old slide-in journey).
+const DEFAULT_SHELL = { viewMode: "home", rightTab: "COLUMNS", rightWidth: 320 };
 const RIGHT_PANEL_MIN = 280;
 const RIGHT_PANEL_MAX_RESERVE = 400; // leave this much room for the rest of the shell
 

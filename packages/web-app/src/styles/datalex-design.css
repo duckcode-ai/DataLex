@@ -543,6 +543,83 @@ input { font: inherit; color: inherit; }
 }
 
 /* ============================================================
+   Home view — dedicated landing (see HomeView.jsx)
+   ============================================================ */
+.home-view {
+  grid-area: canvas;
+  overflow-y: auto;
+  background: var(--bg-0);
+  padding: 28px 32px 48px;
+}
+.home-hero { max-width: 820px; margin: 0 auto 22px; }
+.home-hero-eyebrow {
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.home-hero-title { margin: 4px 0 0; font-size: 26px; font-weight: 700; color: var(--text-primary); }
+.home-hero-sub { margin: 8px 0 0; font-size: 13px; line-height: 1.55; color: var(--text-secondary); max-width: 640px; }
+.home-progress { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+.home-progress-bar {
+  flex: 1; max-width: 360px; height: 6px; border-radius: 3px;
+  background: var(--bg-3); overflow: hidden;
+}
+.home-progress-bar span { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 240ms var(--ease); }
+.home-progress-label { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; }
+
+.home-tiles {
+  max-width: 820px; margin: 0 auto 26px;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+}
+.home-tile {
+  border: 1px solid var(--border-default); border-radius: 10px;
+  background: var(--bg-1); padding: 11px 13px;
+}
+.home-tile-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-tertiary);
+}
+.home-tile-value { margin-top: 6px; font-size: 17px; font-weight: 700; color: var(--text-primary); }
+.home-tile.tone-ok   .home-tile-value { color: var(--status-success); }
+.home-tile.tone-warn .home-tile-value { color: var(--status-warning); }
+.home-tile.tone-bad  .home-tile-value { color: var(--status-error); }
+
+.home-steps { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; }
+.home-step { display: grid; grid-template-columns: 32px 1fr; gap: 14px; }
+.home-step-rail { display: flex; flex-direction: column; align-items: center; }
+.home-step-badge {
+  width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); background: var(--bg-2);
+  color: var(--text-tertiary); font-size: 12px; font-weight: 700;
+}
+.home-step.done .home-step-badge { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.home-step.active .home-step-badge { border-color: var(--accent); color: var(--accent); }
+.home-step-line { flex: 1; width: 2px; background: var(--border-default); margin: 4px 0; min-height: 18px; }
+.home-step.done .home-step-line { background: var(--accent); }
+.home-step-body { padding-bottom: 22px; min-width: 0; }
+.home-step-head { display: flex; align-items: center; gap: 8px; color: var(--text-primary); }
+.home-step-title { font-size: 14px; font-weight: 600; }
+.home-step.locked .home-step-head { color: var(--text-tertiary); }
+.home-step-status {
+  margin-left: auto; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.home-step-status.done   { color: var(--status-success); background: var(--status-success-bg); }
+.home-step-status.active { color: var(--accent); background: var(--accent-dim); }
+.home-step-status.locked { color: var(--text-tertiary); background: var(--bg-3); }
+.home-step-desc { margin: 6px 0 10px; font-size: 12px; line-height: 1.5; color: var(--text-secondary); }
+.home-step-cta {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 7px; font-size: 12px; font-weight: 600;
+  background: var(--bg-2); border: 1px solid var(--border-default); color: var(--text-primary);
+  cursor: pointer; transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.home-step-cta:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.home-step.active .home-step-cta { border-color: var(--accent); color: var(--accent); }
+.home-step.active .home-step-cta:hover { color: var(--accent-fg); }
+.home-step-cta:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ============================================================
    Layer spine — conceptual → logical → physical (see LayerSpine.jsx)
    ============================================================ */
 .layer-spine {
