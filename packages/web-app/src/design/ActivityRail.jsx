@@ -13,47 +13,62 @@
 import React from "react";
 import {
   Boxes, Sparkles, ClipboardCheck, Network, ShieldCheck, Inbox,
-  GitBranch, Rocket,
+  GitBranch, Rocket, FolderGit2,
 } from "lucide-react";
 
 /* Modes that mean "I'm working on the model" — the Model rail item stays
    lit for any of them, since the spine's view toggles switch among them. */
 const MODEL_MODES = new Set(["diagram", "table", "docs", "views", "enums", "capabilities"]);
 
+/* The rail reads top-to-bottom as the AI-first daily workflow:
+     set up (connect a repo, configure AI)
+       → generate (let AI detect domains, contracts, proposals)
+         → model & review (check readiness, then draw conceptual →
+           logical → physical diagrams)
+           → ship (version, publish).
+   Order matters: this is both the navigation and the recommended path. */
 const GROUPS = [
   {
-    key: "build",
+    key: "setup",
     items: [
-      { id: "diagram", rail: "model", label: "Model", Icon: Boxes,         tip: "Model workspace — diagram, table, and docs views of the active layer." },
-      { id: "ai-setup",            label: "AI",    Icon: Sparkles,         tip: "Configure the AI provider and generate domains, contracts, and diagrams." },
+      { id: "__connect", label: "Connect", Icon: FolderGit2, tip: "Attach a dbt project — a Git URL or a local folder. Start here." },
+      { id: "ai-setup",  label: "AI",      Icon: Sparkles,   tip: "Configure the AI provider DataLex uses to detect domains and contracts and to draw diagrams." },
     ],
   },
   {
-    key: "govern",
+    key: "generate",
     items: [
-      { id: "readiness",  label: "Readiness", Icon: ClipboardCheck, tip: "Enterprise readiness by domain — contracts, metrics, owners, grains, DQL." },
-      { id: "domains",    label: "Domains",   Icon: Network,        tip: "Domain-level model groups and certification priorities." },
-      { id: "contracts",  label: "Contracts", Icon: ShieldCheck,    tip: "Business and metric contracts — statuses, evidence, blockers." },
-      { id: "proposals",  label: "Proposals", Icon: Inbox,          tip: "AI-generated proposal packs ready for review." },
+      { id: "domains",    label: "Domains",   Icon: Network,     tip: "AI-detected business domains and certification priorities." },
+      { id: "contracts",  label: "Contracts", Icon: ShieldCheck, tip: "AI-detected data contracts — statuses, evidence, blockers." },
+      { id: "proposals",  label: "Proposals", Icon: Inbox,       tip: "AI-generated proposal packs ready for review." },
+    ],
+  },
+  {
+    key: "model",
+    items: [
+      { id: "readiness",  label: "Readiness", Icon: ClipboardCheck, tip: "Enterprise readiness by domain — what's missing before certification." },
+      { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
     ],
   },
   {
     key: "ship",
     items: [
-      { id: "__version",  label: "Version",   Icon: GitBranch,      tip: "Branch, working changes, semantic diff, history, and commit." },
-      { id: "publish",    label: "Publish",   Icon: Rocket,         tip: "Build the DataLex manifest and integration readiness." },
+      { id: "__version",  label: "Version",   Icon: GitBranch, tip: "Branch, working changes, semantic diff, history, and commit." },
+      { id: "publish",    label: "Publish",   Icon: Rocket,    tip: "Build the DataLex manifest and integration readiness." },
     ],
   },
 ];
 
-export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, versionActive = false }) {
+export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, onConnect, versionActive = false }) {
   const isActive = (item) => {
     if (item.id === "__version") return versionActive;
+    if (item.id === "__connect") return false;
     if (item.rail === "model") return MODEL_MODES.has(activeMode);
     return activeMode === item.id;
   };
   const handle = (item) => {
     if (item.id === "__version") return onOpenVersion?.();
+    if (item.id === "__connect") return onConnect?.();
     onSelectMode?.(item.id);
   };
   return (
