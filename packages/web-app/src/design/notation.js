@@ -25,11 +25,14 @@ export const NOTATION = {
   ],
 };
 
+/* Paper (warm light) is the product default — it leads the list so it is
+   the first-listed option, the cycle start, and the fallback wherever a
+   stored/looked-up theme id is missing. The two dark themes follow. */
 export const THEMES = [
-  { id: "midnight", name: "Midnight", mode: "dark",  colors: ["#0a0c11", "#5b8cff", "#7c5cff", "#10b981"], sub: "Deep navy enterprise dark" },
-  { id: "obsidian", name: "Obsidian", mode: "dark",  colors: ["#08090b", "#e6e7ea", "#a29bff", "#4ade80"], sub: "Neutral monochrome dark" },
   { id: "paper",    name: "Paper",    mode: "light", colors: ["#faf8f3", "#3558d6", "#5b4ac4", "#0d8b5e"], sub: "Warm off-white, print-like" },
   { id: "arctic",   name: "Arctic",   mode: "light", colors: ["#f1f4f9", "#0f62fe", "#6929c4", "#0e7c58"], sub: "Cool crisp enterprise light" },
+  { id: "midnight", name: "Midnight", mode: "dark",  colors: ["#0a0c11", "#5b8cff", "#7c5cff", "#10b981"], sub: "Deep navy enterprise dark" },
+  { id: "obsidian", name: "Obsidian", mode: "dark",  colors: ["#08090b", "#e6e7ea", "#a29bff", "#4ade80"], sub: "Neutral monochrome dark" },
 ];
 
 export const FK_COLOR_MAP = {

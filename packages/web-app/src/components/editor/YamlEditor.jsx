@@ -288,8 +288,8 @@ const validationLinter = linter(yamlLinter, { delay: 800 });
    MutationObserver so we stay in sync no matter how it changed. */
 function useLunaTheme() {
   const read = () => (typeof document !== "undefined"
-    ? (document.documentElement.getAttribute("data-theme") || "midnight")
-    : "midnight");
+    ? (document.documentElement.getAttribute("data-theme") || "paper")
+    : "paper");
 
   const [theme, setTheme] = useState(read);
 

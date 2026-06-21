@@ -687,7 +687,7 @@ function ToastContainer() {
 
 export default function Shell() {
   /* ── Theme + density ───────────────────────────────────────────── */
-  const [theme, setTheme] = React.useState(() => localStorage.getItem(THEME_STORAGE) || "midnight");
+  const [theme, setTheme] = React.useState(() => localStorage.getItem(THEME_STORAGE) || "paper");
   const [density, setDensity] = React.useState(() => localStorage.getItem(DENSITY_STORAGE) || "comfortable");
 
   React.useEffect(() => {

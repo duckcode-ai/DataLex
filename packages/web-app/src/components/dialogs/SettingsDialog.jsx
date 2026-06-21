@@ -40,7 +40,7 @@ export default function SettingsDialog() {
   const { closeModal, modalPayload } = useUiStore();
   const [active, setActive] = React.useState(modalPayload?.initialTab || "ai");
   const [currentTheme, setCurrentTheme] = React.useState(
-    () => localStorage.getItem(THEME_STORAGE) || "midnight"
+    () => localStorage.getItem(THEME_STORAGE) || "paper"
   );
 
   const pickTheme = (id) => {
