@@ -88,7 +88,38 @@ function getWorldBounds(tables, modelKind = "") {
   };
 }
 
-function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, diffStatus, zoom, modelKind }) {
+/* While dragging a card, scroll the canvas viewport when the pointer nears
+   an edge so cards can be moved beyond the currently-visible area (ported
+   from Datalex-Cloud). */
+const DRAG_EDGE_SCROLL_ZONE = 56;
+const DRAG_EDGE_SCROLL_MAX = 26;
+function edgeScrollDelta(distanceToEdge) {
+  if (distanceToEdge >= DRAG_EDGE_SCROLL_ZONE) return 0;
+  const strength = (DRAG_EDGE_SCROLL_ZONE - Math.max(0, distanceToEdge)) / DRAG_EDGE_SCROLL_ZONE;
+  return Math.max(4, Math.round(DRAG_EDGE_SCROLL_MAX * strength));
+}
+function autoScrollViewportDuringDrag(event, viewport) {
+  if (!viewport) return false;
+  const rect = viewport.getBoundingClientRect();
+  let dx = 0;
+  let dy = 0;
+  if (event.clientX < rect.left + DRAG_EDGE_SCROLL_ZONE) {
+    dx = -edgeScrollDelta(event.clientX - rect.left);
+  } else if (event.clientX > rect.right - DRAG_EDGE_SCROLL_ZONE) {
+    dx = edgeScrollDelta(rect.right - event.clientX);
+  }
+  if (event.clientY < rect.top + DRAG_EDGE_SCROLL_ZONE) {
+    dy = -edgeScrollDelta(event.clientY - rect.top);
+  } else if (event.clientY > rect.bottom - DRAG_EDGE_SCROLL_ZONE) {
+    dy = edgeScrollDelta(rect.bottom - event.clientY);
+  }
+  if (!dx && !dy) return false;
+  viewport.scrollLeft += dx;
+  viewport.scrollTop += dy;
+  return true;
+}
+
+function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnect, onDragStateChange, diffStatus, zoom, modelKind }) {
   const I = Icon;
   const cardRef = React.useRef(null);
   const drag = React.useRef(null);
@@ -114,6 +145,7 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
     const rect = cardRef.current.getBoundingClientRect();
     drag.current = { dx: (e.clientX - rect.left) / zoom, dy: (e.clientY - rect.top) / zoom, moved: false };
     onSelect({ type: "table", id: table.id });
+    onDragStateChange?.(true);
     const onMove2 = (ev) => {
       const parent = cardRef.current.parentElement.getBoundingClientRect();
       drag.current.moved = true;
@@ -122,12 +154,17 @@ function TableCard({ table, selected, onSelect, onMove, onMoveEnd, onStartConnec
         (ev.clientX - parent.left) / zoom - drag.current.dx,
         (ev.clientY - parent.top) / zoom - drag.current.dy,
       );
+      // Pan the viewport when the pointer reaches an edge so cards can be
+      // dragged beyond the visible region.
+      const viewport = cardRef.current?.closest?.(".canvas");
+      autoScrollViewportDuringDrag(ev, viewport);
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove2);
       window.removeEventListener("mouseup", onUp);
       const moved = !!drag.current?.moved;
       drag.current = null;
+      onDragStateChange?.(false);
       // Only fire drag-end persistence when we actually moved — pure clicks
       // shouldn't rewrite YAML.
       if (moved && onMoveEnd) onMoveEnd(table.id);
@@ -521,7 +558,7 @@ function Relationships({ tables, relationships, selected, onSelect, hovered, set
   );
 }
 
-function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom }) {
+function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom, interactive = true }) {
   const drag = React.useRef(null);
 
   const matchingTableIds = React.useCallback((area) => {
@@ -541,6 +578,7 @@ function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom }) {
   }, [tables]);
 
   const onMouseDown = React.useCallback((area, event) => {
+    if (!interactive) return;
     if (!setTables) return;
     event.preventDefault();
     event.stopPropagation();
@@ -586,17 +624,17 @@ function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom }) {
     };
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, [matchingTableIds, onMoveGroupEnd, setTables, tables, zoom]);
+  }, [interactive, matchingTableIds, onMoveGroupEnd, setTables, tables, zoom]);
 
   return (
     <>
       {areas.map((a) => (
         <div
           key={a.id}
-          className={`subject-area cat-${a.cat}`}
+          className={`subject-area cat-${a.cat} ${interactive ? "" : "visual-only"}`}
           style={{ left: a.x, top: a.y, width: a.w, height: a.h }}
-          onMouseDown={(event) => onMouseDown(a, event)}
-          title="Drag to move this conceptual group"
+          onMouseDown={interactive ? (event) => onMouseDown(a, event) : undefined}
+          title={interactive ? "Drag to move this group" : "Domain grouping"}
         >
           <span className={`subject-area-label cat-${a.cat}`}>{a.label}{typeof a.count === "number" ? ` · ${a.count}` : ""}</span>
         </div>
@@ -724,6 +762,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   const panFrameRef = React.useRef(0);
   const [zoom, setZoom] = React.useState(1);
   const [isPanning, setIsPanning] = React.useState(false);
+  const [nodeDragActive, setNodeDragActive] = React.useState(false);
   const [viewportState, setViewportState] = React.useState({ left: 0, top: 0, width: 1, height: 1 });
   const world = React.useMemo(() => getWorldBounds(tables, modelKind), [tables, modelKind]);
   const activeFileKey = activeFile?.fullPath || activeFile?.path || activeFile?.name || "";
@@ -1074,7 +1113,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
   }, [selected, onDeleteEntity, onDeleteRelationship]);
 
   return (
-    <div className="canvas-wrap">
+    <div className={`canvas-wrap ${nodeDragActive ? "dragging-node" : ""}`}>
       <div className="canvas-grid" />
       <div className="canvas-chrome">
         <div className="canvas-title">
@@ -1321,6 +1360,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               setTables={setTables}
               onMoveGroupEnd={onMoveGroupEnd}
               zoom={zoom}
+              interactive={conceptualMode}
             />
             <Relationships tables={tables} relationships={relationships}
                            selected={selected} onSelect={onSelect}
@@ -1340,6 +1380,7 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                            onMove={onMoveTable}
                            onMoveEnd={onMoveEnd}
                            onStartConnect={handleStartConnect}
+                           onDragStateChange={setNodeDragActive}
                            diffStatus={diffEntities[t.name] || diffEntities[t.id] || null}
                            zoom={zoom}
                            modelKind={modelKind} />

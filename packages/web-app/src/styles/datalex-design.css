@@ -1525,6 +1525,24 @@ select.set-input { height: 32px; cursor: pointer; }
   outline: 18px solid transparent;
 }
 .subject-area:active { cursor: grabbing; }
+/* In logical/physical diagrams subject areas are domain grouping overlays,
+   not draggable groups. They must NOT capture pointer events (the default
+   18px transparent outline above is a big invisible hit area) or table
+   cards underneath can't be dragged. During a card drag they fade further
+   out of the way. Ported from Datalex-Cloud. */
+.subject-area.visual-only {
+  pointer-events: none;
+  cursor: default;
+  outline: 0;
+  opacity: 0.72;
+  transition: opacity 120ms var(--ease), border-color 120ms var(--ease);
+}
+.subject-area.visual-only .subject-area-label { pointer-events: none; }
+.canvas-wrap.dragging-node .subject-area.visual-only {
+  opacity: 0.16;
+  border-color: color-mix(in srgb, var(--border-default) 45%, transparent);
+}
+.canvas-wrap.dragging-node .subject-area.visual-only .subject-area-label { opacity: 0; }
 .subject-area-label {
   position: absolute;
   top: -13px; left: 18px;
