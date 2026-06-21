@@ -684,7 +684,13 @@ function ProposalsView({ scan, onGenerate, onCertify, generating, certifying, ge
 }
 
 function ContractsView({ scan, filters, setFilters }) {
-  const contracts = scan?.contracts || [];
+  // Prefer the unified contract surface (authored DataLex contracts +
+  // enforced dbt contracts + missing-contract opportunities) so the board
+  // is meaningful on a freshly connected dbt project. Fall back to the
+  // authored-only list for older API responses.
+  const contracts = (scan?.contract_surface && scan.contract_surface.length)
+    ? scan.contract_surface
+    : (scan?.contracts || []);
   const domains = uniqueDomains(scan);
   const visibleContracts = contracts.filter((contract) => {
     if (filters.domain && filters.domain !== "all" && contract.domain !== filters.domain) return false;

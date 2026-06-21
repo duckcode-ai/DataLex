@@ -636,6 +636,11 @@ export function buildEnterpriseScan({ project, modelRoot, readinessReview = null
   const dql = scanDql(projectRoot, certifiedContracts, dqlIntegration);
   const domains = new Map();
   const opportunities = [];
+  // Enforced dbt contracts, enumerated as rows so the Contracts surface can
+  // show what's already certified at the dbt layer — not just DataLex-
+  // authored contract artifacts (which are empty on a freshly connected
+  // project). See the contract_surface assembled in the response below.
+  const dbtContracts = [];
 
   const ensureDomain = (name) => {
     const key = slugify(name);
@@ -668,6 +673,19 @@ export function buildEnterpriseScan({ project, modelRoot, readinessReview = null
     domain.relationship_gaps += relationshipGap;
     domain.priority += (isFact ? 10 : 0) + (highValue ? 6 : 0) + (contracted ? 4 : 0) + relationshipGap;
     pushTop(domain.top_models, modelName);
+
+    if (contracted) {
+      dbtContracts.push({
+        id: `${domain.name}.${modelName}`,
+        name: modelName,
+        domain: domain.name,
+        path,
+        status: "certified",
+        source: { kind: "dbt", ref: path },
+        grain: grain || "",
+        confidence: 1,
+      });
+    }
 
     if (!contracted && (isFact || highValue || metrics.length)) {
       opportunities.push({
@@ -843,6 +861,26 @@ export function buildEnterpriseScan({ project, modelRoot, readinessReview = null
     proposal_packs: packs,
     contract_opportunities: opportunities.sort((a, b) => b.confidence - a.confidence).slice(0, SCAN_LIMITS.contractOpportunities),
     contracts: artifacts.contracts.map(({ raw, ...row }) => row).slice(0, SCAN_LIMITS.artifactRows),
+    // Unified contract surface for the Contracts view: DataLex-authored
+    // contracts (status as-authored) + enforced dbt contracts (certified)
+    // + missing-contract opportunities (draft). This makes the board
+    // meaningful on a freshly connected dbt project, before any DataLex
+    // contract is authored.
+    contract_surface: [
+      ...artifacts.contracts.map(({ raw, ...row }) => ({ ...row, source: row.source || { kind: "datalex", ref: row.path } })),
+      ...dbtContracts,
+      ...opportunities.map((opp) => ({
+        id: opp.id,
+        name: opp.model,
+        domain: opp.domain,
+        path: opp.path,
+        status: "draft",
+        source: { kind: "opportunity", ref: opp.path },
+        grain: opp.grain || "",
+        confidence: opp.confidence,
+      })),
+    ].slice(0, SCAN_LIMITS.contractOpportunities),
+    dbt_contracts: dbtContracts,
     proposals: artifacts.proposals.map(({ raw, ...row }) => row).slice(0, SCAN_LIMITS.artifactRows),
     limits: {
       proposal_packs: {
