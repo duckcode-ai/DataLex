@@ -1004,7 +1004,12 @@ export default function Canvas({ tables, setTables, relationships, areas, select
       window.cancelAnimationFrame(raf);
       timers.forEach((timer) => window.clearTimeout(timer));
     };
-  }, [activeFileKey, modelKind, relationships.length, tables.length, world]);
+    // Intentionally NOT keyed on `world`: it recomputes its identity on
+    // every card move, so including it re-runs the fit-to-screen routine
+    // mid-drag and yanks the viewport. Re-fit only when the file, layer,
+    // or object/relationship counts change. (Ported from Datalex-Cloud.)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFileKey, modelKind, relationships.length, tables.length]);
 
   const handleAutoLayoutClick = React.useCallback(async () => {
     if (!onAutoLayout) return;
