@@ -28,6 +28,33 @@ DataLex adds the business/domain layer above dbt.
 </p>
 </div>
 
+## Architecture flow
+
+DataLex turns dbt evidence into certified business contracts. AI accelerates the
+draft, but Git-reviewed contracts remain the trust boundary.
+
+```mermaid
+flowchart LR
+  dbt["dbt project<br/>models, YAML, metrics, tests"] --> scan["Readiness scan<br/>business evidence map"]
+  scan --> ai["AI proposal packs<br/>domains, terms, contracts"]
+  ai --> review["Human review<br/>owners, grain, assumptions"]
+  review --> cert["Certified contracts<br/>accepted business meaning"]
+  cert --> manifest["datalex-manifest.json<br/>stable trust handoff"]
+  manifest --> dql["DQL blocks<br/>contract-bound answers"]
+  manifest --> agents["AI agents and catalogs<br/>read governed context"]
+
+  classDef source fill:#fef3c7,stroke:#d97706,color:#1f2937
+  classDef datalex fill:#eef2ff,stroke:#4f46e5,color:#1f2937
+  classDef output fill:#ecfdf5,stroke:#059669,color:#1f2937
+  class dbt source
+  class scan,ai,review,cert,manifest datalex
+  class dql,agents output
+```
+
+**Why users care:** DataLex gives AI enough context to draft useful governance
+assets, but only reviewed and certified definitions enter the manifest that
+downstream tools can trust.
+
 ## Install from PyPI
 
 Use this path when you want DataLex on your machine or inside an existing dbt
