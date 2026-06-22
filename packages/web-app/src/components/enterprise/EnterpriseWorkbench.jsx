@@ -16,6 +16,7 @@ import {
   Search,
   Server,
   ShieldCheck,
+  Loader2,
   SlidersHorizontal,
   Sparkles,
   XCircle,
@@ -162,7 +163,9 @@ function GenerateControls({ scan, options, onChange, onGenerate, generating, aiR
         disabled={aiReady && generating === selectedDomain}
         onClick={() => aiReady ? onGenerate(selectedDomain, options) : onOpenSetup?.()}
       >
-        <Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}
+        {generating === selectedDomain
+          ? <><Loader2 size={14} className="spin" /> Generating…</>
+          : <><Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}</>}
       </button>
     </div>
   );
@@ -504,7 +507,9 @@ function ReadinessView({ scan, onGenerate, generating, onOpenMode, onOpenAiSetup
                   disabled={aiReady && generating === pack.domain}
                   onClick={() => aiReady ? onGenerate(pack.domain) : onOpenAiSetup?.()}
                 >
-                  <Sparkles size={14} /> {aiReady ? "Generate draft" : "Set up AI"}
+                  {generating === pack.domain
+                    ? <><Loader2 size={14} className="spin" /> Generating…</>
+                    : <><Sparkles size={14} /> {aiReady ? "Generate draft" : "Set up AI"}</>}
                 </button>
               </article>
             ))}
@@ -537,7 +542,9 @@ function DomainsView({ scan, onGenerate, generating, query, onQueryChange, aiRea
               disabled={aiReady && generating === domain.name}
               onClick={() => aiReady ? onGenerate(domain.name) : onOpenSetup?.()}
             >
-              <Sparkles size={14} /> {aiReady ? "Generate focused proposal" : "Set up AI first"}
+              {generating === domain.name
+                ? <><Loader2 size={14} className="spin" /> Generating…</>
+                : <><Sparkles size={14} /> {aiReady ? "Generate focused proposal" : "Set up AI first"}</>}
             </button>
           </div>
         ))}
@@ -592,7 +599,9 @@ function ProposalsView({ scan, onGenerate, onCertify, generating, certifying, ge
                 disabled={aiReady && generating === pack.domain}
                 onClick={() => aiReady ? onGenerate(pack.domain, generationOptions) : onOpenSetup?.()}
               >
-                <Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}
+                {generating === pack.domain
+                  ? <><Loader2 size={14} className="spin" /> Generating…</>
+                  : <><Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}</>}
               </button>
             </article>
           ))}
@@ -654,7 +663,9 @@ function ProposalsView({ scan, onGenerate, onCertify, generating, certifying, ge
                     disabled={certifying === proposal.path}
                     onClick={() => onCertify(proposal.path, "reviewed")}
                   >
-                    <ClipboardCheck size={14} /> Mark reviewed
+                    {certifying === proposal.path
+                      ? <><Loader2 size={14} className="spin" /> Working…</>
+                      : <><ClipboardCheck size={14} /> Mark reviewed</>}
                   </button>
                   <button
                     type="button"
@@ -662,7 +673,9 @@ function ProposalsView({ scan, onGenerate, onCertify, generating, certifying, ge
                     disabled={proposal.status === "certified" || certifying === proposal.path}
                     onClick={() => onCertify(proposal.path, "certified")}
                   >
-                    <ShieldCheck size={14} /> Certify
+                    {certifying === proposal.path
+                      ? <><Loader2 size={14} className="spin" /> Certifying…</>
+                      : <><ShieldCheck size={14} /> Certify</>}
                   </button>
                   <button
                     type="button"
@@ -1068,6 +1081,13 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
   return (
     <main className="enterprise-workbench">
       <Header scan={scan} mode={activeMode} loading={loading} onRefresh={() => refresh({ force: true })} />
+      {(generating || certifying) && (
+        <div className="enterprise-running" role="status" aria-live="polite">
+          <Loader2 size={14} className="spin" />
+          <span>{generating ? `Generating proposal pack for ${label(generating)}…` : "Certifying…"} This can take a moment.</span>
+          <div className="enterprise-running-bar"><span /></div>
+        </div>
+      )}
       {error && <div className="enterprise-error"><AlertTriangle size={16} /> {error}</div>}
       {loading && !scan && <div className="enterprise-loading"><RefreshCw size={16} className="spin" /> Scanning dbt and DataLex metadata...</div>}
       {scan && activeMode === "ai-setup" && (
