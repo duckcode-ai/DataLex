@@ -13,7 +13,7 @@
 import React from "react";
 import {
   Boxes, Sparkles, ClipboardCheck, Network, ShieldCheck, Inbox,
-  GitBranch, Rocket, FolderGit2, Home,
+  GitBranch, Rocket, FolderGit2, Home, Settings,
 } from "lucide-react";
 
 /* Modes that mean "I'm working on the model" — the Model rail item stays
@@ -63,12 +63,18 @@ const GROUPS = [
       { id: "publish",    label: "Publish",   Icon: Rocket,    tip: "Build the DataLex manifest and integration readiness." },
     ],
   },
+  {
+    key: "system",
+    items: [
+      { id: "__settings", label: "Settings",  Icon: Settings,  tip: "AI provider, database connection, and agent skills." },
+    ],
+  },
 ];
 
-export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, onConnect, onOpenAi, versionActive = false }) {
+export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, onConnect, onOpenAi, onOpenSettings, versionActive = false }) {
   const isActive = (item) => {
     if (item.id === "__version") return versionActive;
-    if (item.id === "__connect" || item.id === "__ai") return false;
+    if (item.id === "__connect" || item.id === "__ai" || item.id === "__settings") return false;
     if (item.rail === "model") return MODEL_MODES.has(activeMode);
     return activeMode === item.id;
   };
@@ -76,6 +82,7 @@ export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, 
     if (item.id === "__version") return onOpenVersion?.();
     if (item.id === "__connect") return onConnect?.();
     if (item.id === "__ai") return onOpenAi?.();
+    if (item.id === "__settings") return onOpenSettings?.();
     onSelectMode?.(item.id);
   };
   return (

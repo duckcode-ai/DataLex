@@ -14,14 +14,11 @@ import {
   Download as LucideDownload,   // for actual "import dbt" arrow-in semantics
   Save as LucideSave,
   SaveAll as LucideSaveAll,
-  Boxes,
-  Database,
   Undo2,
   Redo2,
   Play,
   Sparkles,
   GitCommit,
-  Settings as LucideSettings,
   ShieldCheck,
   GitBranch,
   GitCommit as LucideGitCommit,
@@ -29,7 +26,6 @@ import {
 import { THEMES } from "./notation";
 import BellMenu from "./BellMenu";
 import DomainSwitcher from "./DomainSwitcher";
-import DiffToggle from "./DiffToggle";
 
 /* The segmented view-mode switcher that used to live here was retired in
    the enterprise UI migration: workflow destinations moved to the left
@@ -95,14 +91,9 @@ export function TopBar({
             </button>
           )}
         </div>
-        <div className="tool-group">
-          <button className="tool-btn" onClick={onNewTable} title="Create conceptual, logical, or physical model">
-            <Boxes size={15} strokeWidth={1.8} />Model
-          </button>
-          <button className="tool-btn" onClick={onConnections} title="Manage connections">
-            <Database size={15} strokeWidth={1.8} />Connect
-          </button>
-        </div>
+        {/* Model creation lives next to the layer pills now (see LayerSpine);
+            Connect lives in the left activity rail — both removed here to
+            cut header duplication. */}
         <div className="tool-group">
           <button className="tool-btn" title="Undo" onClick={onUndo}>
             <Undo2 size={15} strokeWidth={1.8} />
@@ -121,7 +112,6 @@ export function TopBar({
             hasUnassigned={hasUnassigned}
             unassignedCount={unassignedCount}
           />
-          <DiffToggle />
         </div>
         <div className="tool-group">
           {canRunSql && (
@@ -134,9 +124,6 @@ export function TopBar({
           </button>
           <button className="tool-btn" title="Commit (git)" onClick={onCommit}>
             <GitCommit size={15} strokeWidth={1.8} />
-          </button>
-          <button data-tour="settings" className="tool-btn" title="Settings" onClick={onSettings}>
-            <LucideSettings size={15} strokeWidth={1.8} />
           </button>
         </div>
       </div>

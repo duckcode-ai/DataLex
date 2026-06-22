@@ -511,6 +511,8 @@ input { font: inherit; color: inherit; }
   flex-direction: column;
   gap: 2px;
 }
+/* Pin the last group (Settings) to the bottom of the rail. */
+.activity-rail-group:last-child { margin-top: auto; }
 .activity-rail-divider {
   height: 1px;
   margin: 8px 12px;
@@ -722,6 +724,17 @@ select.set-input { height: 32px; cursor: pointer; }
   border-left: 1px solid var(--border-subtle);
   min-width: 0;
 }
+/* Primary "New model" action — sits right by the layer pills so starting
+   a diagram is obvious. */
+.layer-spine-new {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 10px; flex-shrink: 0;
+  border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;
+  background: var(--accent); color: var(--accent-fg); border: 1px solid var(--accent);
+  white-space: nowrap;
+  transition: background 120ms var(--ease);
+}
+.layer-spine-new:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .layer-spine-eyebrow {
   font-size: 10px;
   letter-spacing: 0.12em;

@@ -9,7 +9,7 @@
    to a sibling file in another layer) and the per-layer view toggles are
    tracked as follow-up increments in the spec. */
 import React from "react";
-import { Lightbulb, Workflow, Database, ChevronRight, Layers, Table2, FileText } from "lucide-react";
+import { Lightbulb, Workflow, Database, ChevronRight, Layers, Table2, FileText, Plus } from "lucide-react";
 
 const LAYERS = [
   { id: "conceptual", label: "Conceptual", Icon: Lightbulb, token: "--layer-conceptual", soft: "--layer-conceptual-soft", hint: "Business ideas, concepts, and contracts — platform-free." },
@@ -31,11 +31,17 @@ function normalizeLayer(modelKind) {
   return "physical";
 }
 
-export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", viewMode = "diagram", onSelectView }) {
+export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", viewMode = "diagram", onSelectView, onNewModel }) {
   const active = normalizeLayer(modelKind);
   const activeMeta = LAYERS.find((l) => l.id === active) || LAYERS[2];
   return (
     <div className="layer-spine" role="group" aria-label="Modeling layer">
+      {onNewModel && (
+        <button type="button" className="layer-spine-new" onClick={onNewModel}
+          title="Create a new conceptual, logical, or physical model">
+          <Plus size={13} strokeWidth={2.2} /> New model
+        </button>
+      )}
       <span className="layer-spine-eyebrow">Layer</span>
       <div className="layer-spine-track">
         {LAYERS.map((layer, i) => {

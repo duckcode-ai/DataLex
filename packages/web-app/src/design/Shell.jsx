@@ -1947,6 +1947,7 @@ export default function Shell() {
           fileName={activeFile?.name || ""}
           viewMode={shellViewMode}
           onSelectView={setShellViewMode}
+          onNewModel={handleNewTable}
         />
       </div>
 
@@ -1956,6 +1957,7 @@ export default function Shell() {
         onOpenVersion={openVersionSurface}
         onConnect={() => openModal("importDbtRepo")}
         onOpenAi={() => openModal("settings", { initialTab: "ai" })}
+        onOpenSettings={() => openModal("settings")}
         versionActive={bottomPanelOpen && (bottomPanelTab === "diff" || bottomPanelTab === "history")}
       />
 
