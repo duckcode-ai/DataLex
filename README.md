@@ -194,6 +194,17 @@ Start here:
 
 For the full flow in one place, read [Getting started](docs/getting-started.md).
 
+## End-to-end example
+
+This repo stays product-focused and does not ship a full sample project. To see
+DataLex and DQL together, use the separate
+[duckcode-ai/jaffle-shop-duckdb](https://github.com/duckcode-ai/jaffle-shop-duckdb)
+repo.
+
+That example contains a dbt + DuckDB project, a reviewed `DataLex/` contract
+pack, a DQL workspace, Paper-theme screenshots, and the full
+[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md).
+
 ## For contributors
 
 ```bash

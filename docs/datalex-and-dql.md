@@ -98,13 +98,26 @@ see [Contracts for DQL blocks](contracts-for-dql-blocks.md).
 
 ---
 
-## End-to-end tutorial (5 minutes)
+## End-to-end tutorial
 
-The best way to feel the wedge is to run the joint walkthrough across the two example repos — both prebuilt with dbt + DuckDB so nothing else needs setup.
+The best way to feel the wedge is to run the joint walkthrough in the separate
+example repo:
+[`duckcode-ai/jaffle-shop-duckdb`](https://github.com/duckcode-ai/jaffle-shop-duckdb).
+It contains the dbt project, `DataLex/`, and `dql/` side by side so the product
+repos can stay focused on core language/runtime docs.
 
-1. **Stage 1 — DataLex contracts.** Open an existing dbt repo with `datalex serve --project-dir .`, configure AI, generate a focused proposal pack, and certify the approved contracts. Start with [Connect an existing dbt repo](tutorials/02-connect-existing-dbt.md).
-2. **Stage 2 — DQL certified blocks.** Clone [`jaffle-shop-dql`](https://github.com/duckcode-ai/jaffle-shop-dql), run the Docker quickstart, browse the certified blocks (each cites a DataLex contract via `llmContext`), open the Apps Command Center, and ask the AI chat a question. The MCP serves only certified answers.
-3. **Stage 3 — AI agent integration.** Point Cursor or Claude Code at the DQL MCP server (`dql mcp serve`) and ask in plain English. Same question, same answer, every time.
+1. **Stage 1 — DataLex contracts.** Run `./setup.sh`, scan dbt evidence,
+   generate the AI proposal pack, review assumptions, certify accepted
+   contracts, and publish `DataLex/datalex-manifest.json`.
+2. **Stage 2 — DQL certified blocks.** In `dql/`, validate that certified
+   blocks resolve their `datalex_contract` references, then build the Growth
+   Command Center from certified blocks only.
+3. **Stage 3 — AI agent integration.** Reindex DQL and ask covered and
+   uncovered questions. Covered questions cite certified blocks; uncovered
+   questions remain review-required.
+
+Start with the example repo's
+[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md).
 
 ---
 

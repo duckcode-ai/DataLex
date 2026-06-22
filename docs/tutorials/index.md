@@ -1,9 +1,10 @@
 # Tutorials
 
-These tutorials are intentionally short and sequential. They match the current
-DataLex OSS workflow and avoid the older file-first modeling path.
+These tutorials are intentionally short and sequential. They teach the product
+workflow on any dbt repo and avoid embedding example-specific fixtures in the
+DataLex repo.
 
-Screenshots use DataLex's light **Paper** theme.
+Screenshots use DataLex's light **Paper** theme where a visual step is useful.
 
 1. [Install and run DataLex](01-install-and-run.md)
 2. [Connect an existing dbt repo](02-connect-existing-dbt.md)
@@ -12,5 +13,15 @@ Screenshots use DataLex's light **Paper** theme.
 5. [Publish the DataLex manifest](05-publish-manifest.md)
 6. [Run DataLex with Docker](06-docker.md)
 
-Use your own dbt repo for the main path. For a disposable test, use a local
-jaffle-shop style dbt repo and run `dbt parse` before connecting it.
+Use your own dbt repo for the main path. For a disposable test, use any local
+dbt repo and run `dbt parse` before connecting it.
+
+## End-to-end Example
+
+For the canonical DataLex + DQL OSS story, use the separate
+[`duckcode-ai/jaffle-shop-duckdb`](https://github.com/duckcode-ai/jaffle-shop-duckdb)
+repo. It contains the dbt project, DataLex contracts, DQL blocks, screenshots,
+and video storyboard in one place:
+
+- [Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md)
+- [YouTube storyboard](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/YOUTUBE.md)
