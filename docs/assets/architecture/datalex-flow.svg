@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="980" viewBox="0 0 1800 980" role="img" aria-labelledby="title desc">
+  <title id="title">DataLex architecture flow</title>
+  <desc id="desc">DataLex scans dbt evidence, uses AI to draft proposals, humans review and certify contracts, then publishes a manifest consumed by DQL, catalogs, and AI agents.</desc>
+  <defs>
+    <style>
+      .bg { fill: #fbfaf7; }
+      .title { fill: #111827; font: 700 44px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .subtitle { fill: #475569; font: 400 24px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .section { fill: #334155; font: 700 18px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 1px; }
+      .box { stroke-width: 3; rx: 22; }
+      .source { fill: #fff7ed; stroke: #d97706; }
+      .datalex { fill: #eef2ff; stroke: #4f46e5; }
+      .review { fill: #fdf2f8; stroke: #db2777; }
+      .output { fill: #ecfdf5; stroke: #059669; }
+      .boxTitle { fill: #111827; font: 700 26px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .boxText { fill: #334155; font: 400 20px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .caption { fill: #334155; font: 500 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .captionStrong { fill: #111827; font: 700 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .arrow { stroke: #64748b; stroke-width: 4; fill: none; marker-end: url(#arrowhead); }
+      .lane { fill: none; stroke: #e2e8f0; stroke-width: 2; stroke-dasharray: 10 10; rx: 28; }
+    </style>
+    <marker id="arrowhead" markerWidth="14" markerHeight="14" refX="10" refY="5" orient="auto">
+      <path d="M0,0 L10,5 L0,10 Z" fill="#64748b"/>
+    </marker>
+  </defs>
+  <rect class="bg" width="1800" height="980"/>
+
+  <text x="80" y="86" class="title">DataLex: AI-first business contracts from dbt evidence</text>
+  <text x="80" y="128" class="subtitle">AI can draft domains and contracts quickly. Only human-reviewed, certified definitions enter the manifest.</text>
+
+  <rect x="54" y="176" width="500" height="560" class="lane"/>
+  <rect x="592" y="176" width="820" height="560" class="lane"/>
+  <rect x="1450" y="176" width="296" height="560" class="lane"/>
+  <text x="80" y="214" class="section">DBT EVIDENCE</text>
+  <text x="618" y="214" class="section">DATALEX GOVERNANCE LOOP</text>
+  <text x="1476" y="214" class="section">TRUST HANDOFF</text>
+
+  <rect x="92" y="270" width="372" height="176" class="box source"/>
+  <text x="124" y="322" class="boxTitle">dbt project</text>
+  <text x="124" y="364" class="boxText">models, YAML, metrics</text>
+  <text x="124" y="398" class="boxText">tests, exposures, owners</text>
+
+  <rect x="92" y="502" width="372" height="176" class="box source"/>
+  <text x="124" y="554" class="boxTitle">Readiness scan</text>
+  <text x="124" y="596" class="boxText">business evidence map</text>
+  <text x="124" y="630" class="boxText">coverage, gaps, risks</text>
+
+  <rect x="640" y="270" width="300" height="176" class="box datalex"/>
+  <text x="672" y="322" class="boxTitle">AI proposal packs</text>
+  <text x="672" y="364" class="boxText">domains, terms</text>
+  <text x="672" y="398" class="boxText">candidate contracts</text>
+
+  <rect x="982" y="270" width="300" height="176" class="box review"/>
+  <text x="1014" y="322" class="boxTitle">Human review</text>
+  <text x="1014" y="364" class="boxText">grain, owner</text>
+  <text x="1014" y="398" class="boxText">assumptions, risks</text>
+
+  <rect x="640" y="502" width="300" height="176" class="box datalex"/>
+  <text x="672" y="554" class="boxTitle">Certified contracts</text>
+  <text x="672" y="596" class="boxText">accepted business</text>
+  <text x="672" y="630" class="boxText">meaning in Git</text>
+
+  <rect x="982" y="502" width="300" height="176" class="box datalex"/>
+  <text x="1014" y="554" class="boxTitle">Manifest build</text>
+  <text x="1014" y="596" class="boxText">certified definitions</text>
+  <text x="1014" y="630" class="boxText">only</text>
+
+  <rect x="1492" y="270" width="212" height="176" class="box output"/>
+  <text x="1524" y="322" class="boxTitle">DQL blocks</text>
+  <text x="1524" y="364" class="boxText">contract-bound</text>
+  <text x="1524" y="398" class="boxText">answers</text>
+
+  <rect x="1492" y="502" width="212" height="176" class="box output"/>
+  <text x="1524" y="554" class="boxTitle">Agents</text>
+  <text x="1524" y="596" class="boxText">catalogs and AI</text>
+  <text x="1524" y="630" class="boxText">read context</text>
+
+  <path class="arrow" d="M278 446 L278 502"/>
+  <path class="arrow" d="M464 358 L640 358"/>
+  <path class="arrow" d="M940 358 L982 358"/>
+  <path class="arrow" d="M1132 446 L1132 502"/>
+  <path class="arrow" d="M982 590 L940 590"/>
+  <path class="arrow" d="M1282 590 L1492 358"/>
+  <path class="arrow" d="M1282 590 L1492 590"/>
+
+  <rect x="80" y="790" width="1640" height="108" rx="22" fill="#ffffff" stroke="#e2e8f0" stroke-width="2"/>
+  <text x="116" y="842" class="captionStrong">Key idea:</text>
+  <text x="224" y="842" class="caption">DataLex is the governance layer above dbt. It lets AI draft, but it publishes only reviewed, certified meaning.</text>
+  <text x="116" y="878" class="caption">That manifest becomes the stable trust handoff for DQL, catalogs, and future agent workflows.</text>
+</svg>

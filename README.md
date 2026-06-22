@@ -33,23 +33,14 @@ DataLex adds the business/domain layer above dbt.
 DataLex turns dbt evidence into certified business contracts. AI accelerates the
 draft, but Git-reviewed contracts remain the trust boundary.
 
-```mermaid
-flowchart LR
-  dbt["dbt project<br/>models, YAML, metrics, tests"] --> scan["Readiness scan<br/>business evidence map"]
-  scan --> ai["AI proposal packs<br/>domains, terms, contracts"]
-  ai --> review["Human review<br/>owners, grain, assumptions"]
-  review --> cert["Certified contracts<br/>accepted business meaning"]
-  cert --> manifest["datalex-manifest.json<br/>stable trust handoff"]
-  manifest --> dql["DQL blocks<br/>contract-bound answers"]
-  manifest --> agents["AI agents and catalogs<br/>read governed context"]
+> Click the diagram to open the full-size SVG in a browser tab, where you can
+> zoom or use full-screen mode.
 
-  classDef source fill:#fef3c7,stroke:#d97706,color:#1f2937
-  classDef datalex fill:#eef2ff,stroke:#4f46e5,color:#1f2937
-  classDef output fill:#ecfdf5,stroke:#059669,color:#1f2937
-  class dbt source
-  class scan,ai,review,cert,manifest datalex
-  class dql,agents output
-```
+<p align="center">
+  <a href="docs/assets/architecture/datalex-flow.svg">
+    <img src="docs/assets/architecture/datalex-flow.svg" alt="DataLex architecture flow from dbt evidence to AI proposals, human review, certified contracts, manifest, DQL blocks, and agents" width="100%" />
+  </a>
+</p>
 
 **Why users care:** DataLex gives AI enough context to draft useful governance
 assets, but only reviewed and certified definitions enter the manifest that
