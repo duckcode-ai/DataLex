@@ -422,12 +422,11 @@ input { font: inherit; color: inherit; }
 .app {
   --left-w: 280px;
   display: grid;
-  grid-template-rows: 44px 36px 32px 1fr 26px;
+  grid-template-rows: 44px 38px 1fr 26px;
   grid-template-columns: 56px var(--left-w, 280px) 1fr var(--right-w, 320px);
   grid-template-areas:
     "topbar topbar topbar topbar"
     "tabs   tabs   tabs   tabs"
-    "spine  spine  spine  spine"
     "rail   left   canvas right"
     "status status status status";
   height: 100vh;
@@ -443,7 +442,7 @@ input { font: inherit; color: inherit; }
 
 .left-resizer {
   position: absolute;
-  top: 112px;
+  top: 82px;
   bottom: 26px;
   left: calc(56px + var(--left-w, 280px) - 3px);
   width: 7px;
@@ -715,13 +714,12 @@ select.set-input { height: 32px; cursor: pointer; }
    Layer spine — conceptual → logical → physical (see LayerSpine.jsx)
    ============================================================ */
 .layer-spine {
-  grid-area: spine;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 14px;
-  background: var(--bg-1);
-  border-bottom: 1px solid var(--border-default);
+  padding: 0 14px 0 6px;
+  border-left: 1px solid var(--border-subtle);
   min-width: 0;
 }
 .layer-spine-eyebrow {
@@ -1135,14 +1133,24 @@ select.set-input { height: 32px; cursor: pointer; }
 /* ============================================================
    Project tabs row
    ============================================================ */
-.tabs {
+/* Merged chrome row: project tabs (left) + layer spine (right) share one
+   bar to save vertical space. The bar surface lives on .topchrome; the
+   children are transparent. */
+.topchrome {
   grid-area: tabs;
   display: flex;
-  align-items: flex-end;
-  padding: 0 10px;
+  align-items: center;
+  min-width: 0;
   background: var(--bg-1);
   border-bottom: 1px solid var(--border-subtle);
+}
+.tabs {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
   gap: 2px;
+  flex: 0 0 auto;
+  max-width: 52%;
   overflow-x: auto;
 }
 .tab {

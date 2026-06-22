@@ -1930,15 +1930,25 @@ export default function Shell() {
         unassignedCount={unassignedCount}
       />
 
-      <ProjectTabs
-        projects={projectTabs}
-        activeId={activeProjectId}
-        onSelect={(id) => selectProject(id)}
-        onClose={handleCloseProject}
-        onNew={handleNewProject}
-        branchName={branch}
-        onBranchClick={() => activeProjectId && openModal("gitBranch")}
-      />
+      {/* Single chrome row: project tabs + the conceptual/logical/physical
+          layer spine, merged to reclaim vertical space. Branch lives in the
+          bottom version hub, so it's not duplicated here. */}
+      <div className="topchrome">
+        <ProjectTabs
+          projects={projectTabs}
+          activeId={activeProjectId}
+          onSelect={(id) => selectProject(id)}
+          onClose={handleCloseProject}
+          onNew={handleNewProject}
+        />
+        <LayerSpine
+          modelKind={activeModelKind}
+          objectCount={Array.isArray(tables) ? tables.length : 0}
+          fileName={activeFile?.name || ""}
+          viewMode={shellViewMode}
+          onSelectView={setShellViewMode}
+        />
+      </div>
 
       <ActivityRail
         activeMode={shellViewMode}
@@ -1947,14 +1957,6 @@ export default function Shell() {
         onConnect={() => openModal("importDbtRepo")}
         onOpenAi={() => openModal("settings", { initialTab: "ai" })}
         versionActive={bottomPanelOpen && (bottomPanelTab === "diff" || bottomPanelTab === "history")}
-      />
-
-      <LayerSpine
-        modelKind={activeModelKind}
-        objectCount={Array.isArray(tables) ? tables.length : 0}
-        fileName={activeFile?.name || ""}
-        viewMode={shellViewMode}
-        onSelectView={setShellViewMode}
       />
 
       <LeftPanel

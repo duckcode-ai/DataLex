@@ -12,21 +12,19 @@
    conditionally rendered by Shell.jsx and sits between `left/canvas/right`
    and the status bar. */
 .app.with-bottom {
-  grid-template-rows: 44px 36px 32px 1fr var(--bottom-h, 280px) 26px;
+  grid-template-rows: 44px 38px 1fr var(--bottom-h, 280px) 26px;
   grid-template-areas:
     "topbar topbar topbar topbar"
     "tabs   tabs   tabs   tabs"
-    "spine  spine  spine  spine"
     "rail   left   canvas right"
     "rail   left   bottom right"
     "status status status status";
 }
 /* Maximized drawer — the canvas compresses to a narrow strip so the user
    gets the entire lower half of the viewport for panel work. Restoring
-   snaps back to the persisted drag-set height above. The 32px spine row
-   stays pinned below the tabs. */
+   snaps back to the persisted drag-set height above. */
 .app.with-bottom:has(.bottom-drawer.maximized) {
-  grid-template-rows: 44px 36px 32px 120px 1fr 26px;
+  grid-template-rows: 44px 38px 120px 1fr 26px;
 }
 
 /* Four left rail tabs are still compact enough for the resizable sidebar, but
