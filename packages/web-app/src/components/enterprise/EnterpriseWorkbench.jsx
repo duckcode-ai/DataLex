@@ -895,13 +895,18 @@ export default function EnterpriseWorkbench({ mode = "ai-setup" }) {
     }
   }, [activeProjectId]);
 
+  // Refresh the scan on mount AND whenever the active workflow view changes
+  // (clicking a sidebar destination). The server caches the scan by file
+  // state, so when nothing changed this returns fast; after a certify or
+  // generate it picks up the new numbers — so every page shows fresh data
+  // instead of a stale snapshot from when the workbench first mounted.
   React.useEffect(() => {
     refresh();
-  }, [refresh]);
+  }, [refresh, activeMode]);
 
   React.useEffect(() => {
     refreshAiSetup();
-  }, [refreshAiSetup]);
+  }, [refreshAiSetup, activeMode]);
 
   // AI is configured in the Settings dialog now. When it changes, re-read
   // readiness and re-scan so these pages flip from "Set up AI" to
