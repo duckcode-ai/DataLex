@@ -1378,24 +1378,29 @@ select.set-input { height: 32px; cursor: pointer; }
   pointer-events: none;
   z-index: 10;
 }
+/* Compact single-row title bar — leaves the canvas room to breathe. */
 .canvas-title {
   pointer-events: auto;
-  display: flex; flex-direction: column; gap: 2px;
-  padding: 10px 14px;
-  background: color-mix(in srgb, var(--bg-1) 85%, transparent);
+  display: flex; flex-direction: row; align-items: center; gap: 9px;
+  padding: 5px 11px;
+  max-width: 48%;
+  background: color-mix(in srgb, var(--bg-1) 82%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-default);
-  border-radius: 10px;
+  border-radius: 8px;
 }
 .canvas-title h1 {
-  font-size: 15px; font-weight: 600;
+  font-size: 13px; font-weight: 600;
   letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 260px;
 }
 .canvas-title p {
-  font-size: 11px; color: var(--text-tertiary);
-  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; color: var(--text-tertiary);
+  display: flex; align-items: center; gap: 6px; flex-shrink: 0;
 }
+.canvas-title p .engine { display: none; }
 .canvas-title .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--text-muted); }
 .canvas-title .engine {
   font-family: var(--font-mono);
@@ -1405,20 +1410,24 @@ select.set-input { height: 32px; cursor: pointer; }
 
 .canvas-actions {
   pointer-events: auto;
-  display: flex; gap: 6px;
+  display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end;
 }
 .canvas-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 10px;
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 28px; padding: 0 9px;
   background: color-mix(in srgb, var(--bg-1) 85%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid var(--border-default);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: 7px;
+  font-size: 11px;
   color: var(--text-secondary);
   transition: all 120ms var(--ease);
+  white-space: nowrap;
 }
+/* Icon-only utility buttons (Edit / Fit / Auto-layout / Export): square,
+   no label, tooltip via title. Keeps the toolbar from overflowing. */
+.canvas-btn.icon-only { width: 28px; padding: 0; justify-content: center; gap: 0; }
 .canvas-btn:hover { color: var(--text-primary); border-color: var(--border-strong); }
 .canvas-btn.primary {
   background: var(--accent);
@@ -1432,7 +1441,7 @@ select.set-input { height: 32px; cursor: pointer; }
 .minimap {
   position: absolute;
   right: 12px; bottom: 46px;
-  width: 180px; height: 120px;
+  width: 132px; height: 84px;
   background: color-mix(in srgb, var(--bg-1) 90%, transparent);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);

@@ -1149,12 +1149,12 @@ export default function Canvas({ tables, setTables, relationships, areas, select
                 <I.Relation />Add Relationship
               </button>
               <button
-                className="canvas-btn"
+                className="canvas-btn icon-only"
                 onClick={openConceptDetails}
-                title="Open the Details panel for business metadata"
+                title="Edit details — business metadata for the selected concept"
                 disabled={!selectedTable}
               >
-                <I.Edit />Edit Details
+                <I.Edit />
               </button>
               <button
                 className="canvas-btn"
@@ -1206,9 +1206,9 @@ export default function Canvas({ tables, setTables, relationships, areas, select
               </button>
             </>
           )}
-          <button className="canvas-btn" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit />Fit</button>
-          <button className="canvas-btn" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid />Auto-layout</button>
-          {onExport && <button className="canvas-btn" onClick={() => onExport()} title="Export DDL / SQL"><I.Download />Export</button>}
+          <button className="canvas-btn icon-only" onClick={() => handleFit()} title="Fit all entities into view"><I.Fit /></button>
+          <button className="canvas-btn icon-only" onClick={() => handleAutoLayoutClick()} title="Auto-layout (ELK)"><I.Grid /></button>
+          {onExport && <button className="canvas-btn icon-only" onClick={() => onExport()} title="Export DDL / SQL"><I.Download /></button>}
         </div>
       </div>
 
