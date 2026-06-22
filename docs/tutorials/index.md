@@ -23,5 +23,4 @@ For the canonical DataLex + DQL OSS story, use the separate
 repo. It contains the dbt project, DataLex contracts, DQL blocks, screenshots,
 and video storyboard in one place:
 
-- [Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md)
-- [YouTube storyboard](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/YOUTUBE.md)
+- [Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/docs/tutorials/jaffle/README.md)

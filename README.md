@@ -230,7 +230,7 @@ repo.
 
 That example contains a dbt + DuckDB project, a reviewed `DataLex/` contract
 pack, a DQL workspace, Paper-theme screenshots, and the full
-[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md).
+[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/docs/tutorials/jaffle/README.md).
 
 ## For contributors
 

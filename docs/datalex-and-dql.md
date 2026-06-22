@@ -117,7 +117,7 @@ repos can stay focused on core language/runtime docs.
    questions remain review-required.
 
 Start with the example repo's
-[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/TUTORIAL.md).
+[Jaffle Shop tutorial](https://github.com/duckcode-ai/jaffle-shop-duckdb/blob/main/docs/tutorials/jaffle/README.md).
 
 ---
 
