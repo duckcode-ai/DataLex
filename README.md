@@ -28,6 +28,18 @@ DataLex adds the business/domain layer above dbt.
 </p>
 </div>
 
+## DuckCode Analytics Platform
+
+DataLex is the contract layer of the **[DuckCode Analytics Platform](https://duckcode.ai)** — a three-layer governed analytics stack built on dbt, running on Snowflake, Databricks, and DuckDB.
+
+| Layer | Tool | Role |
+|-------|------|------|
+| Domain contracts | **DataLex** ← you are here | AI proposes domain contracts from dbt evidence; humans certify; publishes `datalex-manifest.json` |
+| Transformation | dbt | SQL models, tests, semantic metrics, physical contracts — source of truth |
+| Analytics & AI | [DQL](https://github.com/duckcode-ai/dql) | Certified blocks reference DataLex contracts; lineage, dashboards, governed AI answers on Snowflake, Databricks, and DuckDB |
+
+**Full platform demo:** [jaffle-shop-duckdb](https://github.com/duckcode-ai/jaffle-shop-duckdb) — DataLex + dbt + DQL end-to-end walkthrough.
+
 ## Architecture flow
 
 DataLex turns dbt evidence into certified business contracts. AI accelerates the
