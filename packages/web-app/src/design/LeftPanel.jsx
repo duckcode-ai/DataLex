@@ -258,7 +258,7 @@ function MoveExplorerItemDialog({ moveState, folders, onClose, onMove }) {
 
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
-  const [tab, setTab] = React.useState("OBJECTS");
+  const [tab, setTab] = React.useState("EXPLORER");
   const [query, setQuery] = React.useState("");
   const [explorerQuery, setExplorerQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});

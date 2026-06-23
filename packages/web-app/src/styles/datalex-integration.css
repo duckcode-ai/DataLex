@@ -3545,6 +3545,44 @@ body.ai-plan-resizing .ai-plan-editor-body { overflow: hidden; }
   color: var(--danger, #dc2626);
 }
 
+/* AI generate / certify in-progress banner with an indeterminate bar so
+   the running status is obvious until the work completes (a success toast
+   fires on completion and the banner clears). */
+.enterprise-running {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 0 14px;
+  padding: 10px 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--accent-dim);
+  color: var(--text-primary);
+  font-size: 12px;
+  position: relative;
+}
+.enterprise-running > .spin { color: var(--accent); flex-shrink: 0; }
+.enterprise-running-bar {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 3px;
+  border-radius: 0 0 8px 8px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  overflow: hidden;
+}
+.enterprise-running-bar > span {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 35%;
+  background: var(--accent);
+  border-radius: 3px;
+  animation: enterprise-indeterminate 1.15s ease-in-out infinite;
+}
+@keyframes enterprise-indeterminate {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}
+
 .enterprise-metrics-grid,
 .enterprise-mini-grid {
   display: grid;
