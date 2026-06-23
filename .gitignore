@@ -56,3 +56,7 @@ workspaces/
 # local secrets
 .secrets/
 .dm-credentials.json
+
+# Internal strategy docs (not for public repo)
+docs/90-DAY-PROMOTION-PLAN.md
+docs/OSS-PROMOTION-PLAN.md
