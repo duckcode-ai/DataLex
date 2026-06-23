@@ -91,6 +91,12 @@ function StatusPill({ status }) {
   return <span className={`enterprise-pill ${statusTone(status)}`}>{String(status || "draft")}</span>;
 }
 
+/* A pack/proposal that has already been generated (or certified) should not
+   re-offer "Generate" as if nothing happened. */
+function isPackGenerated(pack) {
+  return String(pack?.status || "not_generated").toLowerCase() !== "not_generated";
+}
+
 function compileOutputExcerpt(compile) {
   const text = String(compile?.stdout || compile?.stderr || "").trim();
   if (!text) return "";
@@ -502,14 +508,20 @@ function ReadinessView({ scan, onGenerate, generating, onOpenMode, onOpenAiSetup
                 </div>
                 <StatusPill status={pack.status} />
                 <button
-                  className={aiReady ? "enterprise-primary" : "enterprise-secondary"}
+                  className={(aiReady && !isPackGenerated(pack)) || generating === pack.domain ? "enterprise-primary" : "enterprise-secondary"}
                   type="button"
                   disabled={aiReady && generating === pack.domain}
-                  onClick={() => aiReady ? onGenerate(pack.domain) : onOpenAiSetup?.()}
+                  onClick={() => {
+                    if (!aiReady) return onOpenAiSetup?.();
+                    if (isPackGenerated(pack)) return onOpenMode("proposals");
+                    return onGenerate(pack.domain);
+                  }}
                 >
                   {generating === pack.domain
                     ? <><Loader2 size={14} className="spin" /> Generating…</>
-                    : <><Sparkles size={14} /> {aiReady ? "Generate draft" : "Set up AI"}</>}
+                    : isPackGenerated(pack)
+                      ? <><ClipboardCheck size={14} /> View draft</>
+                      : <><Sparkles size={14} /> {aiReady ? "Generate draft" : "Set up AI"}</>}
                 </button>
               </article>
             ))}
@@ -594,14 +606,17 @@ function ProposalsView({ scan, onGenerate, onCertify, generating, certifying, ge
               </div>
               <StatusPill status={pack.status} />
               <button
-                className={aiReady ? "enterprise-primary" : "enterprise-secondary"}
+                className={(aiReady && !isPackGenerated(pack)) || generating === pack.domain ? "enterprise-primary" : "enterprise-secondary"}
                 type="button"
                 disabled={aiReady && generating === pack.domain}
                 onClick={() => aiReady ? onGenerate(pack.domain, generationOptions) : onOpenSetup?.()}
+                title={isPackGenerated(pack) ? "This pack was already generated — regenerate to replace its draft" : undefined}
               >
                 {generating === pack.domain
                   ? <><Loader2 size={14} className="spin" /> Generating…</>
-                  : <><Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}</>}
+                  : isPackGenerated(pack)
+                    ? <><RefreshCw size={14} /> Regenerate</>
+                    : <><Sparkles size={14} /> {aiReady ? "Generate" : "Set up AI"}</>}
               </button>
             </article>
           ))}
