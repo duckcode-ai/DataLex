@@ -1,22 +1,89 @@
-// embedded.js — Datalex-Cloud embed shim.
+// embedded.js — Datalex-Cloud embed shim. Brought to parity with the DQL
+// notebook embed (apps/dql-notebook/src/embedded.ts) so the cloud shell can
+// drive DataLex the same way over postMessage.
 //
-// Activated when the URL contains ?embedded=1. Two responsibilities:
+// Activated when the URL contains ?embedded=1. Responsibilities:
 //
-//   1. Theme: listen for `datalex.theme` postMessage from the parent
-//      frame (Datalex-Cloud) and apply the colour tokens to Luna CSS
-//      variables so the DataLex UI matches the host's brand palette.
+//   1. Storage isolation — namespace localStorage by project id.
+//   2. Theme bridge — apply `datalex.theme` tokens to Luna CSS variables.
+//   3. Context injection — accept `datalex.cloud.context` { config } and expose
+//      it on window.__DATALEX_CLOUD_EMBED__ (tenant / project / role /
+//      capabilities / repo_context / warehouse_context).
+//   4. Capability-driven chrome hiding — when capabilities.hide_activity_bar /
+//      hide_sidebar are set, the cloud rail is the only nav, so we hide
+//      DataLex's own topbar / activity rail / layer spine via injected CSS.
+//   5. Auth pass-through — add `Authorization: Bearer <token>` to /api/* and
+//      /projects/* calls. Token arrives via `datalex.auth.token` or #token=.
+//   6. Route reporting — post `datalex.route.changed` on hash change so the
+//      cloud can keep its outer URL in sync for deep links.
 //
-//   2. Storage isolation: namespace localStorage keys with the project
-//      id from the query param. Without this, two tenants/projects
-//      embedding into the same Datalex-Cloud origin would clobber each
-//      other's offline-doc state, theme prefs, panel layout, etc.
-//
-// This file is imported once from main.jsx; it self-installs only when
-// the embed flag is present, so standalone DataLex usage is unaffected.
+// Self-installs only when the embed flag is present; standalone DataLex is
+// unaffected.
 
 const params = new URLSearchParams(window.location.search);
 const isEmbedded = params.get("embedded") === "1";
 const projectId = params.get("project") || "shared";
+
+/** Read the injected cloud embed config (set via postMessage or boot global). */
+export function getCloudEmbedConfig() {
+  return (typeof window !== "undefined" && window.__DATALEX_CLOUD_EMBED__) || null;
+}
+
+// Token via hash so it never enters server logs / browser history.
+function readAndStripToken() {
+  const hash = window.location.hash;
+  if (!hash) return null;
+  const m = hash.match(/(?:^|[#&])token=([^&]+)/);
+  if (!m) return null;
+  const token = decodeURIComponent(m[1]);
+  const next = hash.replace(/(?:^|[#&])token=[^&]+/, "").replace(/^[#&]/, "").trim();
+  history.replaceState(null, "", `${window.location.pathname}${window.location.search}${next ? `#${next}` : ""}`);
+  return token;
+}
+
+// Inject (once) the CSS that hides DataLex's own chrome when the cloud shell
+// already provides the rail/topbar. Keyed off a <html> data attribute so it
+// only applies in capability-restricted embeds.
+function installChromeHidingStyles() {
+  if (document.getElementById("datalex-embed-chrome-css")) return;
+  const style = document.createElement("style");
+  style.id = "datalex-embed-chrome-css";
+  style.textContent = `
+    html[data-datalex-embed="minimal"] .topbar,
+    html[data-datalex-embed="minimal"] .project-tabs,
+    html[data-datalex-embed="minimal"] .activity-rail { display: none !important; }
+    html[data-datalex-embed="no-sidebar"] .activity-rail,
+    html[data-datalex-embed="no-sidebar"] .layer-spine { display: none !important; }
+  `;
+  document.head.appendChild(style);
+}
+
+function applyCapabilities(config) {
+  const caps = (config && config.capabilities) || {};
+  const root = document.documentElement;
+  installChromeHidingStyles();
+  if (caps.hide_activity_bar && caps.hide_sidebar) {
+    root.dataset.datalexEmbed = "minimal";
+  } else if (caps.hide_sidebar) {
+    root.dataset.datalexEmbed = "no-sidebar";
+  }
+  root.dataset.datalexCloudKind = config && config.kind ? String(config.kind) : "datalex";
+  root.dataset.datalexCloudSurface = config && config.surface ? String(config.surface) : "";
+}
+
+function applyTheme(tokens) {
+  const root = document.documentElement;
+  const map = {
+    brand: "--lux-color-accent",
+    ink900: "--lux-color-text",
+    bg: "--lux-color-bg",
+    surface: "--lux-color-surface",
+    border: "--lux-color-border",
+  };
+  for (const [k, cssVar] of Object.entries(map)) {
+    if (tokens && tokens[k]) root.style.setProperty(cssVar, tokens[k]);
+  }
+}
 
 if (isEmbedded) {
   // 1. localStorage namespace.
@@ -52,31 +119,58 @@ if (isEmbedded) {
       return n;
     },
   };
-  Object.defineProperty(window, "localStorage", {
-    value: storageProxy,
-    configurable: true,
-  });
+  Object.defineProperty(window, "localStorage", { value: storageProxy, configurable: true });
 
-  // 2. Theme bridge — apply tokens posted by the parent.
+  // 5. Auth pass-through.
+  let bearerToken = readAndStripToken();
+  const realFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+    const isApi =
+      url.startsWith("/api/") || url.startsWith(`${window.location.origin}/api/`) ||
+      url.startsWith("/projects/") || url.startsWith(`${window.location.origin}/projects/`);
+    if (!isApi) return realFetch(input, init);
+    const headers = new Headers((init && init.headers) || {});
+    // Identify this app to the cloud gateway so it routes to the DataLex backend.
+    headers.set("x-oss-app", "datalex");
+    if (bearerToken && !headers.has("authorization")) headers.set("authorization", `Bearer ${bearerToken}`);
+    return realFetch(input, { ...init, headers });
+  };
+
+  // 2/3. Message bridge — theme, context, auth token.
   window.addEventListener("message", (ev) => {
-    if (!ev.data || ev.data.type !== "datalex.theme") return;
-    const tokens = ev.data.tokens || {};
-    const root = document.documentElement;
-    if (tokens.brand) root.style.setProperty("--lux-color-accent", tokens.brand);
-    if (tokens.ink900) root.style.setProperty("--lux-color-text", tokens.ink900);
-    if (tokens.bg) root.style.setProperty("--lux-color-bg", tokens.bg);
-    if (tokens.surface)
-      root.style.setProperty("--lux-color-surface", tokens.surface);
-    if (tokens.border)
-      root.style.setProperty("--lux-color-border", tokens.border);
+    const data = ev.data || {};
+    if (data.type === "datalex.theme") {
+      applyTheme(data.tokens || {});
+      return;
+    }
+    if ((data.type === "datalex.cloud.context" || data.type === "dql.cloud.context") && data.config) {
+      window.__DATALEX_CLOUD_EMBED__ = data.config;
+      applyCapabilities(data.config);
+      window.dispatchEvent(new CustomEvent("datalex:cloud-context", { detail: data.config }));
+      return;
+    }
+    if (data.type === "datalex.auth.token" && typeof data.token === "string") {
+      bearerToken = data.token;
+    }
   });
 
-  // Tell the parent we're ready to receive theme tokens.
+  // Boot-time global (if the host injected it before scripts ran).
+  if (window.__DATALEX_CLOUD_EMBED__) applyCapabilities(window.__DATALEX_CLOUD_EMBED__);
+
+  // 6. Route reporting — keep the parent's outer hash in sync for deep links.
+  let lastHash = window.location.hash;
+  window.addEventListener("hashchange", () => {
+    if (window.location.hash === lastHash) return;
+    lastHash = window.location.hash;
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: "datalex.route.changed", path: lastHash, projectId }, "*");
+    }
+  });
+
+  // Tell the parent we're ready — it responds with context + theme + token.
   if (window.parent !== window) {
-    window.parent.postMessage(
-      { type: "datalex.embedded.ready", projectId },
-      "*",
-    );
+    window.parent.postMessage({ type: "datalex.embedded.ready", projectId }, "*");
   }
 }
 

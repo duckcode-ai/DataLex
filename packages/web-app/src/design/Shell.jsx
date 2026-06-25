@@ -755,6 +755,28 @@ export default function Shell() {
     document.documentElement.style.setProperty("--right-w", `${rightPanelWidth}px`);
   }, [rightPanelWidth]);
 
+  /* Cloud embed deep-linking (P4/P5): when embedded in the cloud shell, the
+     host drives which view is shown via the URL hash (e.g. #/contracts). Map
+     the hash to a shellViewMode so the cloud rail item opens the right surface.
+     No-op for standalone DataLex (hash is empty / not a known mode). */
+  React.useEffect(() => {
+    const EMBED_MODES = new Set([
+      "home", "diagram", "table", "views", "enums", "docs", "capabilities",
+      "domains", "contracts", "proposals", "readiness", "publish",
+    ]);
+    const syncFromHash = () => {
+      const mode = window.location.hash.replace(/^#\/?/, "").split("?")[0];
+      if (mode && EMBED_MODES.has(mode)) setShellViewMode(mode);
+    };
+    syncFromHash();
+    window.addEventListener("hashchange", syncFromHash);
+    window.addEventListener("datalex:cloud-context", syncFromHash);
+    return () => {
+      window.removeEventListener("hashchange", syncFromHash);
+      window.removeEventListener("datalex:cloud-context", syncFromHash);
+    };
+  }, [setShellViewMode]);
+
   const selectedEntityId = useDiagramStore((s) => s.selectedEntityId);
   const setGraph = useDiagramStore((s) => s.setGraph);
   const selectDiagramEntity = useDiagramStore((s) => s.selectEntity);
