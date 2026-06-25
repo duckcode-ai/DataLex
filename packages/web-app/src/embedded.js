@@ -129,9 +129,11 @@ if (isEmbedded) {
     const isApi =
       url.startsWith("/api/") || url.startsWith(`${window.location.origin}/api/`) ||
       url.startsWith("/projects/") || url.startsWith(`${window.location.origin}/projects/`);
-    if (!isApi || !bearerToken) return realFetch(input, init);
+    if (!isApi) return realFetch(input, init);
     const headers = new Headers((init && init.headers) || {});
-    if (!headers.has("authorization")) headers.set("authorization", `Bearer ${bearerToken}`);
+    // Identify this app to the cloud gateway so it routes to the DataLex backend.
+    headers.set("x-oss-app", "datalex");
+    if (bearerToken && !headers.has("authorization")) headers.set("authorization", `Bearer ${bearerToken}`);
     return realFetch(input, { ...init, headers });
   };
 
