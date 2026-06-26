@@ -292,6 +292,72 @@
 }
 
 /* ================================================================
+   WHITE — crisp light (shared contract; see @duckcodeai/design-tokens).
+   Added so the cloud's "white" global theme maps 1:1 onto DataLex.
+   Core vars (bg/text/accent/border) use the canonical white values;
+   DataLex-specific extras are tuned to match.
+   ================================================================ */
+[data-theme="white"] {
+  color-scheme: light;
+  --bg-0: #f5f6f8;
+  --bg-1: #ffffff;
+  --bg-2: #ffffff;
+  --bg-3: #eef0f3;
+  --bg-4: #e1e4e9;
+  --bg-canvas: #ffffff;
+  --bg-grid: rgba(15, 23, 42, 0.04);
+
+  --border-subtle: rgba(15,23,42,0.08);
+  --border-default: rgba(15,23,42,0.14);
+  --border-strong: rgba(15,23,42,0.22);
+  --border-focus: #2563eb;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-tertiary: #64748b;
+  --text-muted: #94a3b8;
+
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-dim: rgba(37,99,235,0.10);
+  --accent-fg: #ffffff;
+  --accent-on: #ffffff;
+
+  --bg-hover: rgba(15, 23, 42, 0.045);
+
+  --status-error: #dc2626;   --status-error-bg: rgba(220,38,38,0.08);   --status-error-border: rgba(220,38,38,0.30);
+  --status-warning: #ca8a04; --status-warning-bg: rgba(202,138,4,0.10); --status-warning-border: rgba(202,138,4,0.32);
+  --status-success: #16a34a; --status-success-bg: rgba(22,163,74,0.08); --status-success-border: rgba(22,163,74,0.30);
+  --status-info: var(--accent); --status-info-bg: var(--accent-dim); --status-info-border: rgba(37,99,235,0.30);
+
+  --pk: #ca8a04;
+  --fk: #7c3aed;
+  --idx: #0891b2;
+  --nn: #64748b;
+  --nullable: #7c3aed;
+
+  --cat-users: #7c3aed;   --cat-users-soft: rgba(124,58,237,0.09);
+  --cat-billing: #16a34a; --cat-billing-soft: rgba(22,163,74,0.09);
+  --cat-product: #ea580c; --cat-product-soft: rgba(234,88,12,0.09);
+  --cat-system: #64748b;  --cat-system-soft: rgba(100,116,139,0.10);
+  --cat-access: #db2777;  --cat-access-soft: rgba(219,39,119,0.09);
+  --cat-audit: #0891b2;   --cat-audit-soft: rgba(8,145,178,0.09);
+
+  --rel-line: #cbd5e1;
+  --rel-line-strong: #94a3b8;
+  --rel-line-active: #2563eb;
+  --rel-line-dim: rgba(203, 213, 225, 0.45);
+
+  --sql-keyword: #1d4ed8; --sql-type: #0891b2; --sql-string: #15803d;
+  --sql-number: #c2410c; --sql-function: #7c3aed; --sql-punctuation: #475569;
+  --sql-ident: var(--text-primary); --sql-comment: var(--text-tertiary);
+
+  --shadow-card: 0 1px 2px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.06);
+  --shadow-pop: 0 20px 50px rgba(15,23,42,0.14);
+  --scrim: rgba(15,23,42,0.30);
+}
+
+/* ================================================================
    ARCTIC — cool light (IBM Carbon / crisp blue-white enterprise)
    ================================================================ */
 [data-theme="arctic"] {
