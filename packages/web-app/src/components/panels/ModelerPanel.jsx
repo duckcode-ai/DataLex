@@ -307,7 +307,7 @@ function StandardsGateSummary({ review, loading, onRun, onOpenValidation }) {
   const warningCount = Number(summary?.warnings || 0) + Number(summary?.yellow || 0);
 
   return (
-    <PanelSection title="Standards Gate" icon={<ShieldCheck size={11} />}>
+    <PanelSection title="Readiness check" icon={<ShieldCheck size={11} />}>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(160px, 0.9fr) minmax(0, 1.4fr) auto", gap: 10, alignItems: "stretch" }}>
         <div style={{ border: `1px solid ${tone.color}`, borderRadius: 10, padding: 10, background: "var(--bg-1)", display: "grid", gap: 6 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: tone.color }}>
@@ -322,7 +322,7 @@ function StandardsGateSummary({ review, loading, onRun, onOpenValidation }) {
           </div>
         </div>
         <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 10, background: "var(--bg-1)", display: "grid", gap: 6 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>What to fix before DQL certification</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>What to fix before certification</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <span className="panel-chip" style={{ borderColor: blockerCount ? "#ef4444" : "var(--border-default)", color: blockerCount ? "#ef4444" : "var(--text-secondary)" }}>{blockerCount} blockers</span>
             <span className="panel-chip" style={{ borderColor: warningCount ? "#f59e0b" : "var(--border-default)", color: warningCount ? "#f59e0b" : "var(--text-secondary)" }}>{warningCount} warnings</span>
@@ -334,11 +334,11 @@ function StandardsGateSummary({ review, loading, onRun, onOpenValidation }) {
         </div>
         <div style={{ display: "grid", gap: 6, alignContent: "center" }}>
           <button type="button" className="panel-btn primary" onClick={onOpenValidation}>
-            <ClipboardCheck size={11} /> Review
+            <ClipboardCheck size={11} /> Open in Validate
           </button>
-          <button type="button" className="panel-btn" onClick={onRun} disabled={loading}>
-            <Wand2 size={11} /> {loading ? "Running..." : "Run gate"}
-          </button>
+          <span style={{ fontSize: 10, color: "var(--text-tertiary)", textAlign: "center", lineHeight: 1.4 }}>
+            Run the readiness check from the Validate tab
+          </span>
         </div>
       </div>
     </PanelSection>
@@ -370,14 +370,14 @@ function ContractLibrary({ contracts, selectedEntity, canEdit, onCreateContract,
           <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
             <GitPullRequest size={13} style={{ color: "var(--accent)" }} />
             <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text-primary)" }}>
-              Contract is the rule DQL must satisfy
+              The approved business rule for this concept
             </div>
           </div>
           <div style={{ fontSize: 11, lineHeight: 1.45, color: "var(--text-secondary)" }}>
-            A certified block must bind to one contract, query an accepted source, pass validation, and carry lineage. Conceptual modeling creates the meaning; the contract turns it into an enforceable rule.
+            A contract binds an accepted source, grain, owner, and evidence, then passes validation. Conceptual modeling creates the meaning; the contract turns it into an enforceable, publishable rule. (Optional downstream query layers like DQL bind to it later.)
           </div>
           <div style={{ fontSize: 10.5, lineHeight: 1.45, color: "var(--text-tertiary)" }}>
-            AI drafting uses this domain concept, peer concepts, relationships, candidate dbt/semantic files, and existing contracts. It returns draft YAML for human review before DQL certification.
+            AI drafting uses this domain concept, peer concepts, relationships, candidate dbt/semantic files, and existing contracts. It returns draft YAML for human review before certification.
           </div>
           {selectedEntity && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -922,7 +922,7 @@ export default function ModelerPanel() {
     }
     try {
       await createNewFile(path, yaml.dump(contractDoc, { lineWidth: 120, noRefs: true, sortKeys: false }));
-      addToast?.({ type: "success", message: `Created contract ${contractId}. Fill accepted sources before DQL certification.` });
+      addToast?.({ type: "success", message: `Created contract ${contractId}. Fill accepted sources before certification.` });
     } catch (err) {
       addToast?.({ type: "error", message: err?.message || "Could not create contract." });
     }
@@ -1053,7 +1053,7 @@ export default function ModelerPanel() {
             {[
               ["1", "Define", "Capture business concepts, owners, domains, and definitions."],
               ["2", "Contract", "Create a DataLex contract that states grain, accepted sources, metrics, and review policy."],
-              ["3", "Certify", "DQL blocks must bind to this contract before Apps can publish trusted metrics."],
+              ["3", "Certify", "Certified contracts publish to the manifest — the trusted surface downstream tools and optional query layers (DQL) bind to."],
             ].map(([n, title, text]) => (
               <div key={n} style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: 10, background: "var(--bg-1)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: "var(--text-primary)" }}>

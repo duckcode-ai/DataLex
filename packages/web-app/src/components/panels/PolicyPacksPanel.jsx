@@ -134,9 +134,9 @@ export default function PolicyPacksPanel() {
   return (
     <PanelFrame
       icon={<Shield size={14} />}
-      eyebrow="Standards"
-      title="Policy Packs"
-      subtitle={loading ? "Loading…" : `${packs.length} pack${packs.length === 1 ? "" : "s"} in .datalex/policies/`}
+      eyebrow="Governance"
+      title="Policy"
+      subtitle={loading ? "Loading…" : `Org-wide governance rules this project must satisfy — ${packs.length} pack${packs.length === 1 ? "" : "s"} in .datalex/policies/`}
       actions={
         <div style={{ display: "flex", gap: 6 }}>
           <button

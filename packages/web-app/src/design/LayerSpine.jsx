@@ -17,6 +17,8 @@ const LAYERS = [
   { id: "physical",   label: "Physical",   Icon: Database,  token: "--layer-physical",   soft: "--layer-physical-soft",   hint: "Dialect-typed tables, constraints, and dbt model targets." },
 ];
 
+const LAYER_INDEX = { conceptual: 0, logical: 1, physical: 2 };
+
 /* Object-view toggles — how to render the active layer. Moved here from
    the old top-bar ViewSwitcher; they drive shellViewMode. */
 const VIEWS = [
@@ -31,9 +33,13 @@ function normalizeLayer(modelKind) {
   return "physical";
 }
 
-export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", viewMode = "diagram", onSelectView, onNewModel }) {
+export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", viewMode = "diagram", onSelectView, onNewModel, siblings = null, onSelectLayer }) {
   const active = normalizeLayer(modelKind);
   const activeMeta = LAYERS.find((l) => l.id === active) || LAYERS[2];
+  // The spine is interactive only when we know the layer siblings of the
+  // active file (a layered diagram). Otherwise it stays a display surface.
+  const interactive = !!(siblings && onSelectLayer);
+  const activeIdx = LAYER_INDEX[active] ?? 2;
   return (
     <div className="layer-spine" role="group" aria-label="Modeling layer">
       {onNewModel && (
@@ -47,18 +53,38 @@ export default function LayerSpine({ modelKind, objectCount = 0, fileName = "", 
         {LAYERS.map((layer, i) => {
           const isActive = layer.id === active;
           const Ico = layer.Icon;
+          const sib = siblings?.[layer.id];
+          const exists = sib?.exists;
+          // Forward-generatable = the next layer down from the active one,
+          // when it doesn't exist yet (transform engine can create it).
+          const canGenerate = interactive && !exists && LAYER_INDEX[layer.id] === activeIdx + 1;
+          const clickable = interactive && !isActive && (exists || canGenerate);
+          const title = isActive
+            ? layer.hint
+            : exists
+              ? `Switch to the ${layer.label.toLowerCase()} model · ${layer.hint}`
+              : canGenerate
+                ? `Generate the ${layer.label.toLowerCase()} model from this ${active} model`
+                : `No ${layer.label.toLowerCase()} model yet — generate the logical layer first`;
+          const segProps = {
+            className: `layer-spine-seg ${isActive ? "active" : ""} ${interactive && !exists && !canGenerate ? "missing" : ""} ${canGenerate ? "generate" : ""}`,
+            title,
+            style: isActive ? { "--seg-accent": `var(${layer.token})`, "--seg-soft": `var(${layer.soft})` } : undefined,
+          };
           return (
             <React.Fragment key={layer.id}>
               {i > 0 && <ChevronRight className="layer-spine-sep" size={13} />}
-              <span
-                className={`layer-spine-seg ${isActive ? "active" : ""}`}
-                title={layer.hint}
-                style={isActive ? { "--seg-accent": `var(${layer.token})`, "--seg-soft": `var(${layer.soft})` } : undefined}
-                aria-current={isActive ? "step" : undefined}
-              >
-                <Ico size={13} strokeWidth={1.8} />
-                {layer.label}
-              </span>
+              {clickable ? (
+                <button type="button" {...segProps} onClick={() => onSelectLayer(layer.id)}>
+                  {canGenerate ? <Plus size={12} strokeWidth={2.4} /> : <Ico size={13} strokeWidth={1.8} />}
+                  {layer.label}
+                </button>
+              ) : (
+                <span {...segProps} aria-current={isActive ? "step" : undefined}>
+                  <Ico size={13} strokeWidth={1.8} />
+                  {layer.label}
+                </span>
+              )}
             </React.Fragment>
           );
         })}

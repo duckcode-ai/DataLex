@@ -231,9 +231,9 @@ export function StatusBar({
                   title="Working changes since last commit">
             {changedCount} changed
           </button>
-          <span className={`status-gate tone-${gate.tone}`} title="Semantic validation gate">
+          <span className={`status-gate tone-${gate.tone}`} title="Semantic diff — breaking-change check vs the baseline">
             <ShieldCheck size={11} strokeWidth={1.9} />
-            Gate: {gate.label}
+            Checks: {gate.label}
           </span>
           <button type="button" className="status-version-commit" onClick={onCommit}
                   title="Review &amp; commit (git)">

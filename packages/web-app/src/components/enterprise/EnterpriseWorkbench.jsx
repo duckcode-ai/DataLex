@@ -440,15 +440,21 @@ function Header({ scan, mode, loading, onRefresh }) {
     "ai-setup": "AI Setup",
     readiness: "Enterprise Readiness",
     domains: "Business Domains",
-    proposals: "AI Proposal Queue",
-    contracts: "Contracts",
+    proposals: "Generate",
+    contracts: "Certified Contracts",
     publish: "Publish",
+  };
+  // One-line explainer so each surface says what it is for, in outcome terms.
+  const descMap = {
+    proposals: "AI drafts contracts from your dbt evidence. Review each draft, then certify the ones you trust — only certified contracts get published. This is where you create a contract.",
+    contracts: "The library of contracts that passed review and certification. Read-only — create new contracts under Generate.",
   };
   return (
     <header className="enterprise-header">
       <div>
         <p className="enterprise-kicker">{scan?.project?.name || "DataLex"} workflow</p>
         <h1>{titleMap[mode] || "Enterprise Readiness"}</h1>
+        {descMap[mode] && <p className="enterprise-subtitle">{descMap[mode]}</p>}
       </div>
       <button className="enterprise-secondary" type="button" onClick={onRefresh} disabled={loading}>
         <RefreshCw size={14} className={loading ? "spin" : ""} /> Refresh scan
@@ -729,7 +735,7 @@ function ContractsView({ scan, filters, setFilters }) {
   return (
     <section className="enterprise-section full">
       <div className="enterprise-section-head">
-        <h2>Certified Contract Surface</h2>
+        <h2>Certified contracts</h2>
         <span>{formatNumber(visibleContracts.length)} of {formatNumber(scan?.limits?.contracts?.total || contracts.length)} contracts</span>
       </div>
       <div className="enterprise-toolbar">
@@ -770,7 +776,17 @@ function ContractsView({ scan, filters, setFilters }) {
           </div>
         ))}
       </div>
-      {!visibleContracts.length && <p className="enterprise-muted">No contracts match the current filters.</p>}
+      {!visibleContracts.length && (
+        contracts.length === 0
+          ? (
+            <div className="enterprise-empty">
+              <ShieldCheck size={20} />
+              <p><strong>No certified contracts yet.</strong></p>
+              <p className="enterprise-muted">Contracts are created with AI under <strong>Generate</strong> — generate a draft, review it, then certify. Certified contracts show up here and are the only ones published to the manifest.</p>
+            </div>
+          )
+          : <p className="enterprise-muted">No contracts match the current filters.</p>
+      )}
     </section>
   );
 }

@@ -350,14 +350,14 @@ export default function DiffPanel() {
   return (
     <PanelFrame
       icon={<FileDiff size={14} />}
-      eyebrow="Quality Check"
-      title="Diff & Gate"
-      subtitle={activeFile?.name ? `Comparing ${activeFile.name} against baseline` : "Compare against a baseline to surface breaking changes"}
+      eyebrow="Ship"
+      title="Version"
+      subtitle={activeFile?.name ? `Review what changed in ${activeFile.name}, check for breaking changes, then commit & push.` : "Review what changed, check for breaking changes, then commit & push."}
       status={gateStatus}
       actions={headerActions}
     >
-      {/* ── Semantic Gate ──────────────────────────────────────────── */}
-      <PanelSection title="Semantic Gate" icon={<Shield size={11} />}>
+      {/* ── Breaking-change check ──────────────────────────────────── */}
+      <PanelSection title="Breaking-change check" icon={<Shield size={11} />}>
         {!baselineContent ? (
           <PanelCard tone="info" dense>
             <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>
