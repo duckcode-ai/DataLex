@@ -74,6 +74,93 @@ def _find_files(root: Path, pattern: str) -> List[Path]:
     return sorted(root.glob(pattern))
 
 
+def _find_on_path(name: str) -> List[Path]:
+    """Every executable named ``name`` found across $PATH, in PATH order,
+    de-duplicated by resolved target (so symlinks to the same file count once)."""
+    found: List[Path] = []
+    seen: set = set()
+    exts = [""]
+    if os.name == "nt":
+        exts = os.environ.get("PATHEXT", ".EXE;.BAT;.CMD").split(os.pathsep)
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if not directory:
+            continue
+        for ext in exts:
+            candidate = Path(directory) / (name + ext)
+            try:
+                if candidate.is_file() and os.access(str(candidate), os.X_OK):
+                    key = str(candidate.resolve())
+                    if key not in seen:
+                        seen.add(key)
+                        found.append(candidate)
+            except OSError:
+                continue
+    return found
+
+
+def _installed_version() -> str:
+    try:
+        import importlib.metadata as md
+
+        return md.version("datalex-cli")
+    except Exception:
+        return "unknown"
+
+
+def _check_install_environment() -> List[DiagnosticResult]:
+    """Diagnose how `datalex` is installed and detect PATH shadowing — the
+    classic "old conda copy hides my fresh install" trap."""
+    results: List[DiagnosticResult] = []
+
+    results.append(
+        DiagnosticResult(
+            "python_interpreter", "ok",
+            f"{sys.executable} (prefix: {sys.prefix})",
+        )
+    )
+    results.append(
+        DiagnosticResult("installed_version", "ok", _installed_version())
+    )
+
+    binaries = _find_on_path("datalex")
+    if not binaries:
+        results.append(
+            DiagnosticResult(
+                "datalex_on_path", "warn",
+                "No `datalex` executable found on PATH. The install dir may "
+                "not be on PATH — consider `pipx install datalex-cli`.",
+            )
+        )
+    elif len(binaries) == 1:
+        results.append(DiagnosticResult("datalex_on_path", "ok", str(binaries[0])))
+    else:
+        running = binaries[0]
+        shadowed = ", ".join(str(b) for b in binaries[1:])
+        results.append(
+            DiagnosticResult(
+                "datalex_on_path", "warn",
+                f"Multiple `datalex` installs found — the first on PATH wins: "
+                f"RUNNING={running}; SHADOWED={shadowed}. "
+                f"Reinstall into the active environment or use "
+                f"`pipx install --force datalex-cli` for one canonical copy.",
+            )
+        )
+
+    # Conda base environments are a common source of stale, shadowing copies.
+    prefix_lower = sys.prefix.lower()
+    if any(tok in prefix_lower for tok in ("anaconda", "miniconda", "miniforge")):
+        results.append(
+            DiagnosticResult(
+                "conda_environment", "warn",
+                f"Running inside a conda environment ({sys.prefix}). Installing "
+                f"CLIs here often leads to PATH shadowing across envs. For a "
+                f"stable global install, prefer `pipx install datalex-cli`.",
+            )
+        )
+
+    return results
+
+
 def run_diagnostics(project_dir: str) -> List[DiagnosticResult]:
     """Run all project diagnostics and return results."""
     root = Path(project_dir).resolve()
@@ -135,6 +222,9 @@ def run_diagnostics(project_dir: str) -> List[DiagnosticResult]:
     # 8. requirements.txt
     req_path = root / "requirements.txt"
     results.append(_check_file_exists(req_path, "requirements_txt"))
+
+    # 9. Install / PATH environment (detects shadowing of the running CLI)
+    results.extend(_check_install_environment())
 
     return results
 

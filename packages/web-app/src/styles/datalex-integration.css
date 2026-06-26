@@ -3471,6 +3471,14 @@ body.ai-plan-resizing .ai-plan-editor-body { overflow: hidden; }
   text-transform: uppercase;
 }
 
+.enterprise-subtitle {
+  margin: 6px 0 0;
+  max-width: 70ch;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .enterprise-detection,
 .enterprise-gap-row,
 .enterprise-evidence,

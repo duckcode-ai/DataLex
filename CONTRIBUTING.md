@@ -159,3 +159,14 @@ See [RELEASING.md](RELEASING.md) for the full process. Short version:
 bump `project.version` in `pyproject.toml`, move items from
 `[Unreleased]` into a new dated section in `CHANGELOG.md`, merge, then
 push a signed `vX.Y.Z` tag. CI publishes to PyPI automatically.
+
+## Shared design contract (Governed Analytics Cloud embed)
+
+DataLex is embedded by the Governed Analytics Cloud, which reskins it to the
+global theme. A small set of names is a **shared contract** the cloud depends on
+— don't rename them without coordinating: the `data-theme` values
+(`paper`/`white`/`obsidian`), the `--bg-*`/`--text-*`/`--accent*`/`--border-*`
+vars, the `dm_theme` storage key, and the `.app`/`.activity-rail`/`.topbar`/
+`.topchrome`/`.left-resizer` layout classes. The cloud's build runs a contract
+check that fails on a break. See [`AGENTS.md`](AGENTS.md) for the full list and
+the canonical source (`@duckcodeai/design-tokens`).

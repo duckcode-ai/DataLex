@@ -28,7 +28,7 @@ import { adaptDataLexYaml, adaptDataLexModelYaml, adaptDbtSchemaYaml, adaptDiagr
 import { appendEntity, addDiagramRelationship, deleteDiagramEntity, deleteEntityDeep, removeFieldRelationship, setEntityDisplay, setDiagramEntityDisplay, setInlineDiagramEntityDisplay } from "./yamlPatch";
 import { addRelationship, deleteRelationship as deleteRelationshipYaml } from "../lib/yamlRoundTrip";
 import { shouldShowFirstRun, markTourSeen } from "../lib/onboardingTour";
-import { fetchGitStatus } from "../lib/api";
+import { fetchGitStatus, transformActiveModel } from "../lib/api";
 import {
   AddProjectModal,
   EditProjectModal,
@@ -180,30 +180,40 @@ const ENTERPRISE_VIEW_MODES = new Set(["ai-setup", "readiness", "domains", "prop
    `description` is shown as a tooltip when the user hovers the tab so each
    tab self-documents without anyone having to ask "what is this for?". */
 const LOGICAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dimensional nudges, and a documentation completeness score for the active file." },
-  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
-  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit logical entities, relationships, and keys for the active layer." },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
+  { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings, blockers, dimensional nudges, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
+  { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create and edit logical entities, relationships, and keys for the active layer." },
+  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const PHYSICAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings, blockers, dbt readiness review, and a documentation completeness score for the active file." },
-  { id: "diff",          label: "Diff",          icon: GitCompare,  description: "Semantic gate against a baseline plus the full git workspace (status, staging, unified diff, commit, push)." },
-  { id: "modeler",       label: "Build",         icon: Wand2,       description: "Create and edit physical entities, relationships, and dbt model targets for the active diagram." },
-  { id: "policy_packs",  label: "Policy Packs",  icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
-];
-
-const CONCEPTUAL_BOTTOM_TABS = [
-  { id: "validation",    label: "Validation",    icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
-  { id: "modeler",       label: "Contracts",     icon: Wand2,       description: "Create concepts, business relationships, DataLex contracts, and certification rules." },
-  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
-  { id: "relationships", label: "Relationships", icon: GitBranch,   description: "Cross-entity relationships, role names, cardinality, and identifying status." },
+  { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings, blockers, dbt readiness review, and a documentation completeness score for the active file." },
+  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
+  { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create and edit physical entities, relationships, and dbt model targets for the active diagram." },
+  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
+// Conceptual shares the same stable core (Validate · Version · Author ·
+// Policy · History) as the other layers — only the conceptual-specific
+// Dictionary is added. Business relationships are authored in the Author
+// panel, so there is no separate Relationships tab here.
+const CONCEPTUAL_BOTTOM_TABS = [
+  { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
+  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
+  { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create concepts, business relationships, DataLex contracts, and certification rules." },
+  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
+  { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
+  { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
+];
+
+// Version (diff) and History are PROJECT-level surfaces, so they must be
+// available even in read-only viewer mode — otherwise the rail "Version"
+// item snaps back to a file tab and appears to do nothing.
 const VIEWER_BOTTOM_TABS = [
   { id: "properties",    label: "Properties",    icon: Columns3,    description: "Properties of the selected entity, column, or relationship." },
+  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
@@ -732,6 +742,7 @@ export default function Shell() {
     cycleProject, saveCurrentFile, error, clearError,
     lastAutoGeneratedDdl, lastAutoGenerateError,
     projectFiles, fileContentCache, ensureFilesLoaded,
+    openFile, createNewFile,
   } = useWorkspaceStore();
 
   useEffect(() => { loadProjects(); }, []);
@@ -1041,6 +1052,67 @@ export default function Shell() {
   }, [activeFileContent]);
   const activeModelKind = String(schema?.modelKind || "physical").toLowerCase();
   const canRunForwardSql = activeModelKind === "physical";
+
+  /* ── Layer navigation (conceptual ⇄ logical ⇄ physical) ───────────
+     A model's three layers live as sibling files at
+     `<domain>/<layer>/<file>`. Parse the active file's path, then map
+     each layer to its sibling path and whether that sibling exists on
+     disk. This powers click-to-switch in the layer spine and the
+     "Generate logical/physical →" actions (which run the existing
+     transform engine and write the missing sibling). */
+  const LAYER_ORDER = ["conceptual", "logical", "physical"];
+  const layerSiblings = React.useMemo(() => {
+    const path = activeFile?.path || "";
+    const m = path.match(/^(.*)\/(conceptual|logical|physical)\/(.+)$/i);
+    if (!m) return null;
+    const [, domain, , rest] = m;
+    const out = {};
+    for (const layer of LAYER_ORDER) {
+      const siblingPath = `${domain}/${layer}/${rest}`;
+      const file = (projectFiles || []).find((f) => f.path === siblingPath) || null;
+      out[layer] = { path: siblingPath, file, exists: !!file };
+    }
+    return out;
+  }, [activeFile?.path, projectFiles]);
+
+  const handleSwitchLayer = React.useCallback(async (layerId) => {
+    if (!layerSiblings) return;
+    const target = layerSiblings[layerId];
+    if (!target) return;
+    if (target.exists) {
+      if (target.path === activeFile?.path) return;
+      await openFile(target.file);
+      return;
+    }
+    // No sibling yet — generate it from the nearest existing upstream layer.
+    const fromIdx = LAYER_ORDER.indexOf(activeModelKind);
+    const toIdx = LAYER_ORDER.indexOf(layerId);
+    if (toIdx <= fromIdx) {
+      addToast?.({ type: "info", message: `No ${layerId} model exists for this diagram yet, and it can only be generated forward from an upstream layer.` });
+      return;
+    }
+    const transform = fromIdx === 0 && toIdx === 1 ? "conceptual-to-logical"
+      : fromIdx === 1 && toIdx === 2 ? "logical-to-physical"
+      : null;
+    if (!transform) {
+      addToast?.({ type: "info", message: `Generate the logical layer first, then the physical layer.` });
+      return;
+    }
+    try {
+      addToast?.({ type: "info", message: `Generating ${layerId} model from ${activeModelKind}…` });
+      const res = await transformActiveModel({
+        modelContent: activeFileContent,
+        modelPath: activeFile?.path,
+        transform,
+      });
+      const yaml = res?.transformedYaml || res?.model_content || "";
+      if (!yaml) throw new Error("Transform returned no content");
+      await createNewFile(target.path, yaml);
+      addToast?.({ type: "success", message: `Created ${layerId} model — review the generated entities and keys.` });
+    } catch (err) {
+      addToast?.({ type: "error", message: `Could not generate ${layerId} model: ${err?.message || err}` });
+    }
+  }, [layerSiblings, activeFile, activeModelKind, activeFileContent, openFile, createNewFile, addToast]);
   const openCurrentAiPanel = React.useCallback((source = "global") => {
     openAiPanel({
       source,
@@ -1875,7 +1947,12 @@ export default function Shell() {
     [activeModelKind, isEditable, validationStatus]
   );
 
+  // "diff" (Version) and "history" are project-level surfaces that are valid
+  // on every layer — never reset away from them, even if a given tab list
+  // omits them. This is what lets the rail "Version" item open reliably.
+  const PROJECT_LEVEL_TABS = ["diff", "history"];
   React.useEffect(() => {
+    if (PROJECT_LEVEL_TABS.includes(bottomPanelTab)) return;
     if (!activeBottomTabs.some((tab) => tab.id === bottomPanelTab)) {
       setBottomPanelTab(activeBottomTabs[0]?.id || "properties");
     }
@@ -1970,6 +2047,8 @@ export default function Shell() {
           viewMode={shellViewMode}
           onSelectView={setShellViewMode}
           onNewModel={handleNewTable}
+          siblings={layerSiblings}
+          onSelectLayer={handleSwitchLayer}
         />
       </div>
 

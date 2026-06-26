@@ -1307,7 +1307,7 @@ export default function DocsView() {
                 type="button"
                 onClick={runReview}
                 disabled={reviewing || !activeProjectId}
-                title="Re-runs the dbt readiness gate (same one CI enforces). Per-file scores show in the Validation tab's 'dbt Readiness' section."
+                title="Runs the readiness check across all files (same one CI enforces). Per-file scores show in the Validation tab's 'Readiness check' section."
                 style={{
                   padding: "7px 13px",
                   borderRadius: 8,
@@ -1320,7 +1320,7 @@ export default function DocsView() {
                   whiteSpace: "nowrap",
                 }}
               >
-                {reviewing ? "Running CI gate…" : "Run CI readiness gate"}
+                {reviewing ? "Running…" : "Run readiness check (all files)"}
               </button>
               {/* Export OSI bundle — Open Semantic Interchange v0.1.1 (Jan 2026
                   vendor-neutral context format). Browser hits the api-server

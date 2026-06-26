@@ -1028,8 +1028,8 @@ export default function ValidationPanel() {
     <PanelFrame
       icon={<CheckCircle2 size={14} />}
       eyebrow="Quality"
-      title="Validation"
-      subtitle={totalIssues === 0 ? "All checks passed" : `${totalIssues} total findings`}
+      title="Validate"
+      subtitle={totalIssues === 0 ? "Is this artifact well-formed & documented? — all checks passed" : `Is this artifact well-formed & documented? — ${totalIssues} findings`}
       actions={headerStatus}
     >
       {/* "How To Read This" used to render as a 3-card grid taking most
@@ -1049,19 +1049,19 @@ export default function ValidationPanel() {
       </details>
 
       <PanelSection
-        title="dbt Readiness"
+        title="Readiness check"
         count={readinessFindings.length}
         icon={<Gauge size={11} />}
-        description="The same CI gate the GitHub Action enforces — metadata, tests, governance, import health, enterprise modeling readiness. Click Rerun (or the 'Run CI readiness gate' button in Docs) to refresh the score."
+        description="The same check the CI GitHub Action enforces — metadata, tests, governance, import health, and enterprise modeling readiness. This is the one place to run it; rerun to refresh the score for the active file."
         action={
           <button
             type="button"
             className="panel-btn"
             onClick={handleRerunReadiness}
             disabled={dbtReadinessLoading}
-            title="Re-runs the dbt readiness gate for the active file. Same gate as 'Run CI readiness gate' in the Docs view, but scoped to this file."
+            title="Re-runs the readiness check for the active file."
           >
-            <Wand2 size={11} /> {dbtReadinessLoading ? "Reviewing..." : "Rerun gate"}
+            <Wand2 size={11} /> {dbtReadinessLoading ? "Reviewing..." : "Rerun readiness check"}
           </button>
         }
       >

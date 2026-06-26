@@ -12,7 +12,7 @@
    surface (phase 4) rather than a shellViewMode. */
 import React from "react";
 import {
-  Boxes, Sparkles, ClipboardCheck, Network, ShieldCheck, Inbox,
+  Boxes, ClipboardCheck, Network, ShieldCheck, Inbox,
   GitBranch, Rocket, FolderGit2, Home, Settings,
 } from "lucide-react";
 
@@ -20,13 +20,15 @@ import {
    lit for any of them, since the spine's view toggles switch among them. */
 const MODEL_MODES = new Set(["diagram", "table", "docs", "views", "enums", "capabilities"]);
 
-/* The rail reads top-to-bottom as the AI-first daily workflow:
-     set up (connect a repo, configure AI)
-       → generate (let AI detect domains, contracts, proposals)
-         → model & review (check readiness, then draw conceptual →
-           logical → physical diagrams)
-           → ship (version, publish).
-   Order matters: this is both the navigation and the recommended path. */
+/* The rail IS the documented workflow spine, numbered 1→6 so a new user
+   always knows where they are and what's next:
+
+     1 Connect → 2 AI → 3 Readiness → 4 Generate → 5 Certified → 6 Publish
+
+   Generate/Review/Certify all happen on the Generate surface (step 4); the
+   certified output lands in Certified (step 5). The Model canvas and the
+   utility destinations (Version, Settings) are deliberately kept OUT of the
+   numbered spine — they are a workspace and tools, not workflow steps. */
 const GROUPS = [
   {
     key: "home",
@@ -35,37 +37,28 @@ const GROUPS = [
     ],
   },
   {
-    key: "setup",
+    key: "workflow",
+    title: "Workflow",
     items: [
-      { id: "__connect", label: "Connect", Icon: FolderGit2, tip: "Attach a dbt project — a Git URL or a local folder. Start here." },
-      { id: "__ai",      label: "AI",      Icon: Sparkles,   tip: "Connect the AI provider DataLex uses to detect domains and contracts and to draw diagrams." },
+      { id: "__connect", step: 1, label: "Connect",   Icon: FolderGit2,    tip: "Step 1 — Attach a dbt project (a Git URL or a local folder). Start here. (Configure your AI provider in Settings.)" },
+      { id: "readiness", step: 2, label: "Readiness", Icon: ClipboardCheck, tip: "Step 2 — See what's missing before certification, by domain. Works without AI." },
+      { id: "proposals", step: 3, label: "Generate",  Icon: Inbox,         tip: "Step 3 — Generate contracts with AI, review the drafts, then certify the ones you trust. This is where you create a contract." },
+      { id: "contracts", step: 4, label: "Certified", Icon: ShieldCheck,   tip: "Step 4 — The library of certified contracts. Read-only; create new ones under Generate." },
+      { id: "publish",   step: 5, label: "Publish",   Icon: Rocket,        tip: "Step 5 — Build the DataLex manifest from your certified contracts." },
     ],
   },
   {
-    key: "generate",
+    key: "workspace",
+    title: "Workspace",
     items: [
-      { id: "domains",    label: "Domains",   Icon: Network,     tip: "AI-detected business domains and certification priorities." },
-      { id: "contracts",  label: "Contracts", Icon: ShieldCheck, tip: "AI-detected data contracts — statuses, evidence, blockers." },
-      { id: "proposals",  label: "Proposals", Icon: Inbox,       tip: "AI-generated proposal packs ready for review." },
-    ],
-  },
-  {
-    key: "model",
-    items: [
-      { id: "readiness",  label: "Readiness", Icon: ClipboardCheck, tip: "Enterprise readiness by domain — what's missing before certification." },
+      { id: "domains",  label: "Domains", Icon: Network, tip: "AI-detected business domains and certification priorities." },
       { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
-    ],
-  },
-  {
-    key: "ship",
-    items: [
-      { id: "__version",  label: "Version",   Icon: GitBranch, tip: "Branch, working changes, semantic diff, history, and commit." },
-      { id: "publish",    label: "Publish",   Icon: Rocket,    tip: "Build the DataLex manifest and integration readiness." },
     ],
   },
   {
     key: "system",
     items: [
+      { id: "__version",  label: "Version",   Icon: GitBranch, tip: "Branch, working changes, breaking-change check, history, and commit." },
       { id: "__settings", label: "Settings",  Icon: Settings,  tip: "AI provider, database connection, and agent skills." },
     ],
   },
@@ -90,6 +83,7 @@ export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, 
       {GROUPS.map((group, gi) => (
         <div key={group.key} className="activity-rail-group">
           {gi > 0 && <div className="activity-rail-divider" aria-hidden="true" />}
+          {group.title && <div className="activity-rail-grouptitle" aria-hidden="true">{group.title}</div>}
           {group.items.map((item) => {
             const Ico = item.Icon;
             const active = isActive(item);
@@ -99,10 +93,11 @@ export default function ActivityRail({ activeMode, onSelectMode, onOpenVersion, 
                 type="button"
                 role="tab"
                 aria-selected={active}
-                className={`activity-rail-item ${active ? "active" : ""}`}
+                className={`activity-rail-item ${active ? "active" : ""} ${item.step ? "has-step" : ""}`}
                 title={item.tip}
                 onClick={() => handle(item)}
               >
+                {item.step && <span className="activity-rail-step" aria-hidden="true">{item.step}</span>}
                 <Ico size={20} strokeWidth={1.7} />
                 <span className="activity-rail-label">{item.label}</span>
               </button>

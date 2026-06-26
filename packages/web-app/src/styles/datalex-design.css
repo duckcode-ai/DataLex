@@ -584,7 +584,18 @@ input { font: inherit; color: inherit; }
   margin: 8px 12px;
   background: var(--border-subtle);
 }
+.activity-rail-grouptitle {
+  margin: 2px 0 1px;
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--text-tertiary);
+  opacity: 0.7;
+}
 .activity-rail-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -602,6 +613,26 @@ input { font: inherit; color: inherit; }
   color: var(--accent);
   border-left-color: var(--accent);
   background: var(--accent-dim);
+}
+/* Step badge — the small number that turns the rail into a felt 1→6 spine. */
+.activity-rail-step {
+  position: absolute;
+  top: 5px;
+  right: 9px;
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  border-radius: 6px;
+  background: var(--bg-3, var(--bg-hover));
+  color: var(--text-tertiary);
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 12px;
+  text-align: center;
+}
+.activity-rail-item.active .activity-rail-step {
+  background: var(--accent);
+  color: var(--bg-0, #fff);
 }
 .activity-rail-label {
   font-size: 9px;
@@ -834,6 +865,26 @@ select.set-input { height: 32px; cursor: pointer; }
   font-weight: 600;
 }
 .layer-spine-seg.active svg { opacity: 1; }
+/* Interactive segments (button) — switch to an existing sibling layer or
+   generate a missing forward layer. */
+button.layer-spine-seg {
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+button.layer-spine-seg:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-default);
+}
+.layer-spine-seg.generate {
+  color: var(--text-secondary);
+  border-style: dashed;
+  border-color: var(--border-default);
+}
+.layer-spine-seg.missing {
+  opacity: 0.4;
+}
 .layer-spine-views {
   margin-left: auto;
   display: flex;
