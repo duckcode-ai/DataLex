@@ -5,6 +5,7 @@ import hashlib
 import importlib.metadata
 import re
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -2834,6 +2835,48 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1 if error_count > 0 else 0
 
 
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    from datalex_cli import updates
+
+    current = _cli_version()
+    method = updates.detect_install_method()
+
+    if getattr(args, "check", False):
+        print(f"Installed: datalex-cli {current} ({method} install)")
+        latest, outdated = updates.check_now(current)
+        if latest is None:
+            print("Could not reach PyPI to check for updates.")
+            return 1
+        if outdated:
+            print(f"Update available: {latest}")
+            print(f"Run:  {updates.upgrade_hint(method)}")
+            return 0
+        print(f"You're on the latest version ({latest}).")
+        return 0
+
+    if method == "editable":
+        print(
+            "This is an editable/dev install (pip install -e .).\n"
+            "Update it with git instead:  git pull"
+        )
+        return 0
+
+    cmd = updates.upgrade_command(method)
+    if not cmd:
+        print("Don't know how to upgrade this install automatically.")
+        print("Try:  python3 -m pip install --upgrade datalex-cli")
+        return 1
+
+    print(f"Upgrading datalex-cli ({method})…")
+    print(f"  $ {' '.join(cmd)}")
+    try:
+        return subprocess.call(cmd)
+    except FileNotFoundError as exc:
+        print(f"Upgrade command not found: {exc}")
+        print(f"Try manually:  {updates.upgrade_hint(method)}")
+        return 1
+
+
 def cmd_migrate(args: argparse.Namespace) -> int:
     old_model = load_yaml_model(args.old)
     new_model = load_yaml_model(args.new)
@@ -4057,6 +4100,16 @@ def build_parser() -> argparse.ArgumentParser:
     completion_parser.add_argument("shell", choices=["bash", "zsh", "fish"], help="Shell type")
     completion_parser.set_defaults(func=cmd_completion)
 
+    upgrade_parser = sub.add_parser(
+        "upgrade",
+        help="Upgrade datalex-cli to the latest PyPI release",
+    )
+    upgrade_parser.add_argument(
+        "--check", action="store_true",
+        help="Only check whether a newer version is available; don't install",
+    )
+    upgrade_parser.set_defaults(func=cmd_upgrade)
+
     watch_parser = sub.add_parser("watch", help="Watch model files and validate on change")
     watch_parser.add_argument("--glob", default="**/*.model.yaml", help="Glob pattern for model files")
     watch_parser.add_argument("--interval", type=int, default=2, help="Poll interval in seconds")
@@ -4072,6 +4125,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    # Non-blocking "newer version on PyPI" notice (skipped for `upgrade`,
+    # which does its own check, and self-silenced in CI / dev installs).
+    if getattr(args, "command", None) != "upgrade":
+        try:
+            from datalex_cli import updates
+
+            updates.maybe_notify_update(_cli_version())
+        except Exception:
+            pass
     return args.func(args)
 
 

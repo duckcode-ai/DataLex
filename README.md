@@ -58,10 +58,40 @@ draft, but Git-reviewed contracts remain the trust boundary.
 assets, but only reviewed and certified definitions enter the manifest that
 downstream tools can trust.
 
-## Install from PyPI
+## Install
 
-Use this path when you want DataLex on your machine or inside an existing dbt
-repo.
+### Recommended: pipx (isolated, no PATH surprises)
+
+[pipx](https://pipx.pypa.io) installs DataLex into its own isolated
+environment and puts a single `datalex` on your PATH — so it can't be
+shadowed by a stale copy in conda/system Python (a common cause of
+"command not found" or "version is wrong" confusion).
+
+```bash
+python3 -m pip install --user pipx && python3 -m pipx ensurepath
+pipx install 'datalex-cli[serve]'
+datalex --version
+datalex serve
+```
+
+One-line installer (does the above for you):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/duckcode-ai/DataLex/main/scripts/install.sh | bash
+```
+
+Upgrade any time (DataLex also tells you when a new release is out):
+
+```bash
+datalex upgrade            # upgrades in place, however you installed it
+datalex upgrade --check    # just check PyPI, don't install
+```
+
+### Alternative: pip
+
+Use this inside an existing virtualenv or dbt repo. If you hit the wrong
+version or a shadowed binary, run `datalex doctor` — it reports every
+`datalex` on your PATH and which one is actually running.
 
 ```bash
 python3 -m pip install -U 'datalex-cli[serve]'
@@ -86,6 +116,9 @@ python3 -m pip install -U 'datalex-cli[serve,postgres]'
 python3 -m pip install -U 'datalex-cli[serve,snowflake]'
 python3 -m pip install -U 'datalex-cli[serve,all]'
 ```
+
+With pipx, pass the same extras at install time, e.g.
+`pipx install 'datalex-cli[serve,snowflake]'`.
 
 Requirements: Python 3.9+ and Git. The `[serve]` extra includes a portable Node
 runtime for the local UI.

@@ -7,6 +7,30 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-06-25
+
+Minor release - smoother install and self-update experience.
+
+### Added
+- **`datalex upgrade`** — upgrade the CLI in place to the latest PyPI
+  release. Auto-detects how DataLex was installed (pipx / pip / editable)
+  and runs the right command. `datalex upgrade --check` only checks.
+- **Update notifier** — most commands now print a one-line, non-blocking
+  notice on stderr when a newer version is available on PyPI. The check
+  runs in a background thread and is cached ~24h; silence it with
+  `DATALEX_NO_UPDATE_CHECK=1`. Skipped automatically in CI/non-TTY and for
+  editable installs.
+- **`scripts/install.sh`** — one-line installer that sets up pipx and
+  installs `datalex-cli[serve]` into an isolated, shadow-proof environment.
+
+### Changed
+- **`datalex doctor`** now diagnoses the install environment: the running
+  Python interpreter, the installed version, every `datalex` on `PATH`
+  (flagging shadowing when more than one is found), and a warning when
+  installed inside a conda base env.
+- **README install section** recommends pipx as the primary path to avoid
+  conda/system-Python PATH shadowing, and documents `datalex upgrade`.
+
 ## [1.11.0] - 2026-06-20
 
 Minor release - AI-first enterprise OSS workflow and documentation reset.
@@ -2002,7 +2026,8 @@ Labs** (company).
   root; a `pip install`ed package run outside the repo needs
   `--schemas-root` or the repo on disk.
 
-[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/duckcode-ai/DataLex/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/duckcode-ai/DataLex/compare/v1.11.0...v1.12.0
 [1.11.0]: https://github.com/duckcode-ai/DataLex/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/duckcode-ai/DataLex/compare/v1.8.2...v1.10.0
 [1.5.0]: https://github.com/duckcode-ai/DataLex/compare/v1.4.1...v1.5.0
