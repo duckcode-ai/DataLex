@@ -142,6 +142,11 @@ if (isEmbedded) {
     const data = ev.data || {};
     if (data.type === "datalex.theme") {
       applyTheme(data.tokens || {});
+      // Switch DataLex's own theme MODE to match the cloud (paper/white). The
+      // Shell listens for this event + persists it; this is what flips light/dark.
+      if (data.mode) {
+        window.dispatchEvent(new CustomEvent("datalex:theme-change", { detail: { theme: data.mode } }));
+      }
       return;
     }
     if ((data.type === "datalex.cloud.context" || data.type === "dql.cloud.context") && data.config) {
