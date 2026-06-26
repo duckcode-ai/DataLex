@@ -142,9 +142,11 @@ if (isEmbedded) {
     const data = ev.data || {};
     if (data.type === "datalex.theme") {
       applyTheme(data.tokens || {});
-      // Switch DataLex's own theme MODE to match the cloud (paper/white). The
-      // Shell listens for this event + persists it; this is what flips light/dark.
+      // Switch DataLex's own theme MODE to match the cloud (paper/white).
+      // setItem(THEME_STORAGE) so the Shell's initial state reads it if the
+      // message beats mount; the event covers live toggles after mount.
       if (data.mode) {
+        try { localStorage.setItem("datalex.theme", data.mode); } catch { /* ignore */ }
         window.dispatchEvent(new CustomEvent("datalex:theme-change", { detail: { theme: data.mode } }));
       }
       return;
