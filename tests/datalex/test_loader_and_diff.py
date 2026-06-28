@@ -256,6 +256,36 @@ class ProjectLoaderTests(unittest.TestCase):
         self.assertEqual(1, len(project.semantic_models))
         self.assertEqual(3, len(project.diagrams))
 
+    def test_manifest_exports_relationships_and_conformance(self) -> None:
+        fixture = ROOT / "model-examples" / "enterprise-modeling-foundation"
+        project = load_project(fixture, strict=True)
+        manifest = build_manifest(project)
+        summary = manifest_summary(manifest)
+
+        # Both authored relationships (conceptual + logical) reach the manifest with
+        # their cardinality and resolved domain/entity endpoints.
+        self.assertEqual(2, summary["relationships"])
+        rels = {r["name"]: r for r in manifest["relationships"]}
+        fk = rels["order_customer_fk"]
+        self.assertEqual("many_to_one", fk["cardinality"])
+        self.assertEqual("logical", fk["layer"])
+        self.assertEqual({"domain": "sales", "entity": "Order", "column": "customer_id"}, fk["from"])
+        self.assertEqual({"domain": "sales", "entity": "Customer", "column": "customer_id"}, fk["to"])
+
+        # Conformance maps the Customer concept to its canonical key + physical model,
+        # so an agent can treat dim_customer as the Customer entity and join on a stable key.
+        self.assertEqual(2, summary["conformance"])
+        conf = {c["concept"]: c for c in manifest["conformance"]}
+        self.assertIn("Order", conf)
+        customer = conf["Customer"]
+        self.assertEqual("sales", customer["domain"])
+        self.assertEqual(["customer_id"], customer["canonical_key"])
+        self.assertEqual(["email"], customer["business_key"])
+        self.assertEqual(["customer"], customer["implements"])
+        phys = {p["entity"]: p for p in customer["physical"]}
+        self.assertIn("DimCustomer", phys)
+        self.assertEqual({"kind": "table", "ref": "dim_customer"}, phys["DimCustomer"]["binding"])
+
 
 class DiffTests(unittest.TestCase):
     def test_explicit_rename_is_not_drop_add(self) -> None:

@@ -36,6 +36,16 @@
       "type": "array",
       "items": {"$ref": "#/$defs/domain"}
     },
+    "relationships": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/relationship"},
+      "description": "Typed relationships across entities (any layer). Enables grain-safe and cross-domain join planning by consumers (DQL, AI agents)."
+    },
+    "conformance": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/conformance"},
+      "description": "Concept-to-physical conformance: canonical key + the realizing physical models per business concept, so several physical tables can be treated as one entity."
+    },
     "diagnostics": {
       "type": "array",
       "items": {"$ref": "#/$defs/diagnostic"},
@@ -161,6 +171,64 @@
         "message": {"type": "string"},
         "path": {"type": "string"},
         "code": {"type": "string"}
+      }
+    },
+    "relationshipEndpoint": {
+      "type": "object",
+      "required": ["entity"],
+      "properties": {
+        "domain": {"type": "string"},
+        "entity": {"type": "string"},
+        "column": {"type": "string"},
+        "role": {"type": "string"}
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "required": ["name", "from", "to"],
+      "description": "A typed relationship between two entities. Consumers use cardinality + endpoint columns to plan grain-safe joins, including across domains.",
+      "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string", "enum": ["reference", "associative", "subtype", "supertype"]},
+        "layer": {"type": "string", "enum": ["conceptual", "logical", "physical"]},
+        "from": {"$ref": "#/$defs/relationshipEndpoint"},
+        "to": {"$ref": "#/$defs/relationshipEndpoint"},
+        "cardinality": {"type": "string", "enum": ["one_to_one", "one_to_many", "many_to_one", "many_to_many"]},
+        "optional": {"type": "boolean"},
+        "identifying": {"type": "boolean"},
+        "verb": {"type": "string"},
+        "role_name": {"type": "string"},
+        "description": {"type": "string"}
+      }
+    },
+    "conformance": {
+      "type": "object",
+      "required": ["concept"],
+      "description": "Maps one business concept to its canonical key and the physical models that realize it, so a consumer can treat several physical tables as the same entity and join them on a stable key.",
+      "properties": {
+        "concept": {"type": "string"},
+        "domain": {"type": "string"},
+        "layer": {"type": "string", "enum": ["conceptual", "logical"]},
+        "canonical_key": {"type": "array", "items": {"type": "string"}},
+        "business_key": {"type": "array", "items": {"type": "string"}},
+        "implements": {"type": "array", "items": {"type": "string"}},
+        "physical": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["entity"],
+            "properties": {
+              "entity": {"type": "string"},
+              "binding": {
+                "type": "object",
+                "properties": {
+                  "kind": {"type": "string"},
+                  "ref": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

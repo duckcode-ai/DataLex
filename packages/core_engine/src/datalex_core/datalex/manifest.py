@@ -138,6 +138,12 @@ def build_manifest(
         payload["project"]["dialect"] = manifest_project["default_dialect"]
     if manifest_project.get("owner"):
         payload["project"]["owners"] = [manifest_project["owner"]]
+    relationships = _build_relationships(project)
+    if relationships:
+        payload["relationships"] = relationships
+    conformance = _build_conformance(project)
+    if conformance:
+        payload["conformance"] = conformance
     if diagnostics:
         payload["diagnostics"] = diagnostics
     return payload
@@ -159,6 +165,8 @@ def manifest_summary(manifest: Dict[str, Any]) -> Dict[str, int]:
         "entities": entity_count,
         "contracts": contract_count,
         "metrics": metric_count,
+        "relationships": len(manifest.get("relationships") or []),
+        "conformance": len(manifest.get("conformance") or []),
         "diagnostics": len(manifest.get("diagnostics") or []),
     }
 
@@ -295,6 +303,124 @@ def _metric_contract_to_manifest(metric: Dict[str, Any], domain: str) -> Dict[st
     ):
         if metric.get(key):
             out[key] = metric[key]
+    return out
+
+
+def _build_relationships(project: DataLexProject) -> List[Dict[str, Any]]:
+    """Export typed relationships (with cardinality) so agents can plan grain-safe
+    joins. Endpoints are resolved to the manifest's domain + display-name convention
+    so a relationship lines up with the entities/contracts a consumer already resolved.
+    Relationships whose endpoints can't be resolved at their layer are skipped.
+    """
+    out: List[Dict[str, Any]] = []
+    for rel in sorted(project.relationships.values(), key=lambda r: str(r.get("name") or "")):
+        layer = str(rel.get("layer") or "physical")
+        endpoints: Dict[str, Dict[str, Any]] = {}
+        ok = True
+        for side in ("from", "to"):
+            ep = rel.get(side)
+            if not isinstance(ep, dict) or not ep.get("entity"):
+                ok = False
+                break
+            ent = project.entities.get(f"{layer}:{ep['entity']}")
+            resolved: Dict[str, Any] = {
+                "domain": _domain_of(ent) if ent else "core",
+                "entity": _entity_display_name((ent or {}).get("logical_name") or ep["entity"]),
+            }
+            if ep.get("column"):
+                resolved["column"] = ep["column"]
+            if ep.get("role"):
+                resolved["role"] = ep["role"]
+            endpoints[side] = resolved
+        if not ok:
+            continue
+        item: Dict[str, Any] = {
+            "name": rel.get("name"),
+            "type": rel.get("type") or "reference",
+            "layer": layer,
+            "from": endpoints["from"],
+            "to": endpoints["to"],
+        }
+        for key in ("cardinality", "verb", "role_name", "description"):
+            if rel.get(key):
+                item[key] = rel[key]
+        for key in ("optional", "identifying"):
+            if isinstance(rel.get(key), bool):
+                item[key] = rel[key]
+        out.append(item)
+    return out
+
+
+def _concept_keys(entity: Dict[str, Any]) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    candidate = entity.get("candidate_keys") or []
+    business = entity.get("business_keys") or []
+    if candidate and isinstance(candidate[0], list):
+        out["canonical_key"] = [str(c) for c in candidate[0]]
+    if business and isinstance(business[0], list):
+        out["business_key"] = [str(c) for c in business[0]]
+    return out
+
+
+def _build_conformance(project: DataLexProject) -> List[Dict[str, Any]]:
+    """Export entity conformance: one record per business concept with its canonical
+    key and the physical models that realize it. This is what lets an agent treat
+    several physical tables as the same entity and join them on a stable key.
+    """
+    physical_by_logical: Dict[str, List[Dict[str, Any]]] = {}
+    for key, ent in project.entities.items():
+        if not key.startswith("physical:"):
+            continue
+        logical_name = ent.get("logical")
+        if logical_name:
+            physical_by_logical.setdefault(str(logical_name), []).append(ent)
+
+    concept_names = {
+        key.split(":", 1)[1] for key in project.entities if key.startswith("logical:")
+    }
+    concept_names.update(physical_by_logical.keys())
+
+    out: List[Dict[str, Any]] = []
+    for name in sorted(concept_names):
+        concept = project.entities.get(f"logical:{name}") or project.entities.get(
+            f"conceptual:{name}"
+        )
+        physical = sorted(
+            physical_by_logical.get(name, []), key=lambda e: str(e.get("name") or "")
+        )
+        keys = _concept_keys(concept) if concept else {}
+        canonical = keys.get("canonical_key")
+        if not canonical and physical:
+            pk = [c.get("name") for c in (physical[0].get("columns") or []) if c.get("primary_key")]
+            if pk:
+                canonical = [str(c) for c in pk]
+        if not canonical and not physical:
+            continue
+        record: Dict[str, Any] = {
+            "concept": _entity_display_name((concept or {}).get("logical_name") or name),
+            "domain": _domain_of(concept)
+            if concept
+            else (_domain_of(physical[0]) if physical else "core"),
+            "layer": "logical" if project.entities.get(f"logical:{name}") else "conceptual",
+        }
+        if canonical:
+            record["canonical_key"] = canonical
+        if keys.get("business_key"):
+            record["business_key"] = keys["business_key"]
+        implements = (concept or {}).get("implements")
+        if implements:
+            record["implements"] = [str(i) for i in implements]
+        physical_out: List[Dict[str, Any]] = []
+        for p in physical:
+            entry: Dict[str, Any] = {
+                "entity": _entity_display_name(p.get("logical_name") or p.get("name"))
+            }
+            if p.get("physical_name"):
+                entry["binding"] = {"kind": "table", "ref": p["physical_name"]}
+            physical_out.append(entry)
+        if physical_out:
+            record["physical"] = physical_out
+        out.append(record)
     return out
 
 
