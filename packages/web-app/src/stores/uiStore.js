@@ -74,7 +74,7 @@ const VALID_SHELL_VIEW_MODES = [
 ];
 // Home is the default landing — the dedicated page that lays out the
 // AI-first flow with live status (replaces the old slide-in journey).
-const DEFAULT_SHELL = { viewMode: "home", rightTab: "COLUMNS", rightWidth: 320 };
+const DEFAULT_SHELL = { viewMode: "home", rightTab: "COLUMNS", rightWidth: 320, leftOpen: true, rightOpen: true };
 const RIGHT_PANEL_MIN = 280;
 const RIGHT_PANEL_MAX_RESERVE = 400; // leave this much room for the rest of the shell
 
@@ -95,7 +95,9 @@ function loadShell() {
     const viewMode = VALID_SHELL_VIEW_MODES.includes(parsed.viewMode) ? parsed.viewMode : DEFAULT_SHELL.viewMode;
     const rightTab = typeof parsed.rightTab === "string" && parsed.rightTab ? parsed.rightTab : DEFAULT_SHELL.rightTab;
     const rightWidth = typeof parsed.rightWidth === "number" ? clampRightWidth(parsed.rightWidth) : DEFAULT_SHELL.rightWidth;
-    return { viewMode, rightTab, rightWidth };
+    const leftOpen = typeof parsed.leftOpen === "boolean" ? parsed.leftOpen : DEFAULT_SHELL.leftOpen;
+    const rightOpen = typeof parsed.rightOpen === "boolean" ? parsed.rightOpen : DEFAULT_SHELL.rightOpen;
+    return { viewMode, rightTab, rightWidth, leftOpen, rightOpen };
   } catch (_e) { return { ...DEFAULT_SHELL }; }
 }
 
@@ -105,6 +107,8 @@ function saveShell(state) {
       viewMode: state.shellViewMode,
       rightTab: state.rightPanelTab,
       rightWidth: state.rightPanelWidth,
+      leftOpen: state.leftPanelOpen,
+      rightOpen: state.rightPanelOpen,
     }));
   } catch (_e) { /* ignore */ }
 }
@@ -138,10 +142,10 @@ const useUiStore = create((set, get) => ({
   bottomPanelMaximized: initialBottom.maximized,
 
   // ── Left panel (explorer) ──
-  leftPanelOpen: true,
+  leftPanelOpen: initialShell.leftOpen,
 
   // ── Right panel (entity properties) ──
-  rightPanelOpen: true,
+  rightPanelOpen: initialShell.rightOpen,
   rightPanelTab: initialShell.rightTab, // "COLUMNS" | "RELATIONS" | "INDEXES" | "SQL" | "YAML"
   rightPanelWidth: initialShell.rightWidth, // px; persisted across reloads
   aiPanelPayload: null,
@@ -209,8 +213,8 @@ const useUiStore = create((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidePanelOpen: !s.sidePanelOpen })),
   setSidebarOpen: (open) => set({ sidePanelOpen: open }),
   setSidePanelOpen: (open) => set({ sidePanelOpen: open }),
-  setLeftPanelOpen: (open) => set({ leftPanelOpen: !!open }),
-  toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
+  setLeftPanelOpen: (open) => { set({ leftPanelOpen: !!open }); saveShell(get()); },
+  toggleLeftPanel: () => { set((s) => ({ leftPanelOpen: !s.leftPanelOpen })); saveShell(get()); },
 
   // Legacy alias
   setActiveView: (view) => set({ activeActivity: view }),
@@ -252,10 +256,10 @@ const useUiStore = create((set, get) => ({
   clearSelection: () =>
     set({ selection: { kind: null, entityName: null, fieldName: null, relId: null } }),
 
-  toggleRightPanel: () => set((s) => ({ rightPanelOpen: !s.rightPanelOpen })),
+  toggleRightPanel: () => { set((s) => ({ rightPanelOpen: !s.rightPanelOpen })); saveShell(get()); },
   toggleDiagramFullscreen: () => set((s) => ({ diagramFullscreen: !s.diagramFullscreen })),
   setDiagramFullscreen: (open) => set({ diagramFullscreen: open }),
-  setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
+  setRightPanelOpen: (open) => { set({ rightPanelOpen: open }); saveShell(get()); },
   setRightPanelTab: (tab) => {
     set({ rightPanelTab: tab });
     saveShell(get());
