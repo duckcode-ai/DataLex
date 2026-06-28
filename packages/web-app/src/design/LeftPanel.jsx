@@ -13,6 +13,7 @@ import { buildFileTree, countFiles } from "../lib/fileTree";
 import useWorkspaceStore from "../stores/workspaceStore";
 import useUiStore from "../stores/uiStore";
 import ExplorerContextMenu from "../components/panels/ExplorerContextMenu";
+import { PanelLeftClose } from "lucide-react";
 
 function filterTreeNodes(nodes, query) {
   const needle = String(query || "").trim().toLowerCase();
@@ -259,6 +260,7 @@ function MoveExplorerItemDialog({ moveState, folders, onClose, onMove }) {
 export default function LeftPanel({ activeTable, onSelectTable, tables, theme, setTheme, subjectAreas = [], connectionLabel = "workspace", connectionDsn = "", schemas = [], onAddEntity, projects = [], activeProjectId = null, onSelectProject = null }) {
   const I = Icon;
   const [tab, setTab] = React.useState("EXPLORER");
+  const setLeftPanelOpen = useUiStore((s) => s.setLeftPanelOpen);
   const [query, setQuery] = React.useState("");
   const [explorerQuery, setExplorerQuery] = React.useState("");
   const [collapsed, setCollapsed] = React.useState({});
@@ -517,6 +519,15 @@ export default function LeftPanel({ activeTable, onSelectTable, tables, theme, s
         {["OBJECTS", "EXPLORER"].map((t) => (
           <button key={t} className={`left-tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{t}</button>
         ))}
+        <span style={{ flex: 1 }} />
+        <button
+          className="icon-btn"
+          title="Collapse explorer"
+          aria-label="Collapse explorer"
+          onClick={() => setLeftPanelOpen(false)}
+        >
+          <PanelLeftClose size={14} />
+        </button>
       </div>
 
       {tab === "OBJECTS" && (

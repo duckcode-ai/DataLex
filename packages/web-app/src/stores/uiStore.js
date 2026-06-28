@@ -137,6 +137,9 @@ const useUiStore = create((set, get) => ({
   bottomPanelHeight:    initialBottom.height, // px, drag-resized via top edge strip
   bottomPanelMaximized: initialBottom.maximized,
 
+  // ── Left panel (explorer) ──
+  leftPanelOpen: true,
+
   // ── Right panel (entity properties) ──
   rightPanelOpen: true,
   rightPanelTab: initialShell.rightTab, // "COLUMNS" | "RELATIONS" | "INDEXES" | "SQL" | "YAML"
@@ -206,6 +209,8 @@ const useUiStore = create((set, get) => ({
   toggleSidebar: () => set((s) => ({ sidePanelOpen: !s.sidePanelOpen })),
   setSidebarOpen: (open) => set({ sidePanelOpen: open }),
   setSidePanelOpen: (open) => set({ sidePanelOpen: open }),
+  setLeftPanelOpen: (open) => set({ leftPanelOpen: !!open }),
+  toggleLeftPanel: () => set((s) => ({ leftPanelOpen: !s.leftPanelOpen })),
 
   // Legacy alias
   setActiveView: (view) => set({ activeActivity: view }),

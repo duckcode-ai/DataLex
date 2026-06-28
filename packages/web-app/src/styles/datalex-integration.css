@@ -606,6 +606,28 @@ body.drawer-resizing .bottom-drawer-resize-grip { opacity: 1; background: var(--
 }
 .bottom-reopen:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-3); }
 
+/* Edge reopen tabs for the left explorer + right inspector — same language as
+   .bottom-reopen, pinned to the vertical center of each edge. */
+.left-reopen, .right-reopen {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-2);
+  color: var(--text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+}
+.left-reopen { left: 56px; border-left: none; border-top-right-radius: 999px; border-bottom-right-radius: 999px; }
+.right-reopen { right: 0; border-right: none; border-top-left-radius: 999px; border-bottom-left-radius: 999px; }
+.left-reopen:hover, .right-reopen:hover { color: var(--text-primary); border-color: var(--border-strong); background: var(--bg-3); }
+
 /* Panel toggle button in the status bar — the permanent, belt-and-
    suspenders way back to the drawer (the chip can be hidden by cursor
    position; ⌘J requires knowing the shortcut). */

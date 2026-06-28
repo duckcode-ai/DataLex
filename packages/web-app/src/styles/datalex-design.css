@@ -505,6 +505,14 @@ input { font: inherit; color: inherit; }
 .app.no-right {
   grid-template-columns: 56px var(--left-w, 280px) 1fr 0;
 }
+/* Left explorer collapsed — mirror of .no-right. Set via `!leftPanelOpen`. */
+.app.no-left {
+  grid-template-columns: 56px 0 1fr var(--right-w, 320px);
+}
+.app.no-left.no-right {
+  grid-template-columns: 56px 0 1fr 0;
+}
+.app.no-left .left-resizer { display: none; }
 
 .left-resizer {
   position: absolute;

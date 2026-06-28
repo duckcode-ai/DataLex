@@ -750,6 +750,7 @@ export default function Shell() {
   const {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
+    leftPanelOpen, setLeftPanelOpen,
     rightPanelOpen, setRightPanelOpen, rightPanelTab, rightPanelWidth, setRightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
     shellViewMode, setShellViewMode,
     activeDomain, setActiveDomain,
@@ -1971,7 +1972,7 @@ export default function Shell() {
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
     <div
-      className={`app ${(bottomPanelOpen && !isFullView) ? "with-bottom" : ""} ${(rightPanelOpen && !isFullView) ? "" : "no-right"} ${aiReviewDocument ? "with-ai-review" : ""}`}
+      className={`app ${(bottomPanelOpen && !isFullView) ? "with-bottom" : ""} ${(rightPanelOpen && !isFullView) ? "" : "no-right"} ${(!leftPanelOpen && !isFullView) ? "no-left" : ""} ${aiReviewDocument ? "with-ai-review" : ""}`}
       style={{ "--left-w": `${leftPanelWidth}px` }}
     >
       <TopBar
@@ -2066,6 +2067,7 @@ export default function Shell() {
         versionActive={bottomPanelOpen && (bottomPanelTab === "diff" || bottomPanelTab === "history")}
       />
 
+      {leftPanelOpen && (<>
       <LeftPanel
         activeTable={selected?.type === "table" ? selected.id : null}
         onSelectTable={(id) => handleSelect({ type: "table", id })}
@@ -2097,6 +2099,7 @@ export default function Shell() {
         aria-orientation="vertical"
         aria-label="Resize left sidebar"
       />
+      </>)}
 
       {/* Main canvas cell swaps based on the active rail/spine destination.
           Only one surface mounts at a time; the others lazy-load on first
@@ -2256,20 +2259,24 @@ export default function Shell() {
       {!isFullView && !rightPanelOpen && (
         <button
           type="button"
+          className="right-reopen"
           onClick={() => setRightPanelOpen(true)}
           title="Open inspector"
           aria-label="Open inspector"
-          style={{
-            position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", zIndex: 30,
-            display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", cursor: "pointer",
-            fontSize: 11, color: "var(--text-secondary)",
-            background: "var(--surface-2, var(--bg-1))", border: "1px solid var(--border-default)",
-            borderRight: "none", borderTopLeftRadius: 8, borderBottomLeftRadius: 8,
-            borderTopRightRadius: 0, borderBottomRightRadius: 0,
-            boxShadow: "var(--shadow-sm, 0 1px 6px rgba(0,0,0,0.12))",
-          }}
         >
           <Database size={12} /> Inspector
+        </button>
+      )}
+
+      {!isFullView && !leftPanelOpen && (
+        <button
+          type="button"
+          className="left-reopen"
+          onClick={() => setLeftPanelOpen(true)}
+          title="Open explorer"
+          aria-label="Open explorer"
+        >
+          <FileCode2 size={12} /> Explorer
         </button>
       )}
 
