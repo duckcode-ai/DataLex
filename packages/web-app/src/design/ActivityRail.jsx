@@ -13,7 +13,7 @@
 import React from "react";
 import {
   Boxes, ClipboardCheck, Network, ShieldCheck, Inbox,
-  GitBranch, Rocket, FolderGit2, Home, Settings,
+  GitBranch, Rocket, FolderGit2, Home, Settings, Share2,
 } from "lucide-react";
 
 /* Modes that mean "I'm working on the model" — the Model rail item stays
@@ -33,7 +33,7 @@ const GROUPS = [
   {
     key: "home",
     items: [
-      { id: "home", label: "Home", Icon: Home, tip: "Workspace home — your AI-first setup steps and live project status." },
+      { id: "home", label: "Home", Icon: Home, tip: "Home — your domain portfolio: pick a domain to work in." },
     ],
   },
   {
@@ -52,6 +52,7 @@ const GROUPS = [
     title: "Workspace",
     items: [
       { id: "domains",  label: "Domains", Icon: Network, tip: "AI-detected business domains and certification priorities." },
+      { id: "concept",  label: "Concept", Icon: Share2, tip: "What the agent understands — cross-domain relationships + conformance." },
       { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
     ],
   },

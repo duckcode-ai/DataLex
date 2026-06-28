@@ -114,6 +114,9 @@ const useUiStore = create((set, get) => ({
   // Primary activity determines what shows in the side panel AND the main content area
   activeActivity: "search", // "model" | "connect" | "validate" | "explore" | "search" | "settings"
 
+  // ── Active domain (Level-1 workspace context; set from the Home portfolio) ──
+  activeDomain: null,
+
   // ── Side panel ──
   sidePanelOpen: false,
   sidePanelWidth: 260,
@@ -185,6 +188,7 @@ const useUiStore = create((set, get) => ({
 
   // ── Actions ──
   setActiveActivity: (activity) => set({ activeActivity: activity }),
+  setActiveDomain: (domain) => set({ activeDomain: domain }),
   setPendingConnectorType: (type) => set({ pendingConnectorType: type }),
   setPendingConnectionId: (id) => set({ pendingConnectionId: id }),
   setPendingSearchQuery: (q) => set({ pendingSearchQuery: q }),

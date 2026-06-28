@@ -1,22 +1,20 @@
-/* Home — the dedicated landing for the workspace. Replaces the old
-   slide-in onboarding journey panel with a full page that lays out the
-   AI-first flow as clean, explained steps, each showing live status
-   derived from real project signals (not a localStorage checklist):
-
-     1. Connect a dbt project        done when a project is open
-     2. Set up your AI provider      done when a key/local provider is set
-     3. Detect with AI               done when contracts/proposals exist
-     4. Model conceptual→logical→…   done when diagrams exist
-     5. Certify & publish            done when a contract is certified
-
-   The status tiles up top summarize where the project stands at a glance.
-   Navigation is delegated to the shell (rail destinations / dialogs). */
+/* Home — the domain portfolio (Level 0 of the information architecture).
+ *
+ * This is the calm landing: connected repo + overall readiness, then the list
+ * of business domains with their dbt doc score and certification standing.
+ * Clicking a domain drills into its workspace (Overview / Concept model /
+ * Contracts) via `onSelectDomain`.
+ *
+ * When a project has no detectable domains yet (fresh connect, nothing modeled)
+ * we fall back to a compact getting-started so first-run users still have a
+ * clear path: Connect → AI → Generate.
+ */
 import React from "react";
 import {
-  FolderGit2, Sparkles, ScanSearch, Boxes, Rocket,
-  Check, ArrowRight, ShieldCheck, GitBranch, Database, Activity,
+  FolderGit2, Sparkles, ScanSearch, Rocket, ArrowRight, ChevronRight,
+  ShieldCheck, Boxes, Activity,
 } from "lucide-react";
-import { fetchEnterpriseScan } from "../lib/api";
+import { fetchEnterpriseReadiness, fetchEnterpriseScan } from "../lib/api";
 
 function aiConfigured() {
   try {
@@ -28,11 +26,60 @@ function aiConfigured() {
   }
 }
 
-function StatusTile({ icon: Icon, label, value, tone = "" }) {
+/* Normalize whatever shape the readiness endpoint returns into a flat list of
+   domain rows with the fields the portfolio needs. Defensive: the endpoint has
+   evolved, so we read several possible key names and fall back gracefully. */
+function normalizeDomains(readiness) {
+  const rows =
+    (Array.isArray(readiness?.domains) && readiness.domains) ||
+    (Array.isArray(readiness?.rows) && readiness.rows) ||
+    (Array.isArray(readiness) && readiness) ||
+    [];
+  return rows
+    .map((r) => ({
+      name: r?.name || r?.domain || "",
+      models: r?.models ?? r?.model_count ?? r?.total ?? null,
+      score: r?.score ?? r?.doc_score ?? r?.readiness ?? null,
+      certified: r?.certified ?? r?.certified_contracts ?? 0,
+      highValue: r?.high_value ?? r?.missing_contracts ?? r?.opportunities ?? 0,
+    }))
+    .filter((r) => r.name);
+}
+
+function scoreTone(score) {
+  if (score == null) return "var(--text-tertiary)";
+  if (score >= 70) return "var(--success, #1d9e75)";
+  if (score >= 50) return "var(--warning, #ba7517)";
+  return "var(--danger, #c0392b)";
+}
+
+function Stat({ label, value }) {
   return (
-    <div className={`home-tile ${tone ? `tone-${tone}` : ""}`}>
-      <div className="home-tile-head"><Icon size={14} strokeWidth={1.8} /> {label}</div>
-      <div className="home-tile-value">{value}</div>
+    <div style={{ border: "1px solid var(--border-default)", borderRadius: 8, padding: "10px 12px", background: "var(--bg-1)", minWidth: 0 }}>
+      <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--text-tertiary)" }}>{label}</div>
+      <div style={{ marginTop: 3, fontSize: 18, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function GettingStarted({ hasProject, aiReady, onConnect, onOpenAi, onGoto }) {
+  const steps = [
+    { id: "connect", Icon: FolderGit2, title: "Connect a dbt project", desc: "Point DataLex at a Git URL or a local dbt folder.", done: hasProject, cta: hasProject ? "Reconnect" : "Connect repo", onClick: onConnect },
+    { id: "ai", Icon: Sparkles, title: "Connect AI & your database", desc: "Add a provider key (or run a local model) so DataLex can propose contracts.", done: aiReady, cta: aiReady ? "AI ready" : "Set up AI", onClick: onOpenAi },
+    { id: "generate", Icon: ScanSearch, title: "Detect domains & generate", desc: "Scan the project, then generate contracts for the domains that matter.", done: false, cta: "Open Generate", onClick: () => onGoto?.("proposals") },
+  ];
+  return (
+    <div style={{ display: "grid", gap: 10, maxWidth: 640 }}>
+      {steps.map((s) => (
+        <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 12, border: "1px solid var(--border-default)", borderRadius: 10, padding: 14, background: "var(--bg-1)" }}>
+          <s.Icon size={18} style={{ color: s.done ? "var(--success, #1d9e75)" : "var(--accent, #5b6cff)", flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>{s.title}</div>
+            <div style={{ fontSize: 12, color: "var(--text-secondary)", marginTop: 2 }}>{s.desc}</div>
+          </div>
+          <button className={`panel-btn ${s.done ? "" : "primary"}`} onClick={s.onClick}>{s.cta}</button>
+        </div>
+      ))}
     </div>
   );
 }
@@ -42,127 +89,119 @@ export default function HomeView({
   hasProject,
   isDemo,
   projectId,
-  branch = "main",
-  changedCount = 0,
-  gate = { tone: "ok", label: "passing" },
   onGoto,
   onConnect,
   onOpenAi,
+  onSelectDomain,
 }) {
+  const [domains, setDomains] = React.useState([]);
   const [scan, setScan] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
-  const [tick, setTick] = React.useState(0);
 
   React.useEffect(() => {
-    if (!projectId) { setScan(null); return; }
+    if (!projectId) { setDomains([]); setScan(null); return; }
     let cancelled = false;
     setLoading(true);
-    fetchEnterpriseScan(projectId, tick ? { force: true } : {})
-      .then((res) => { if (!cancelled) setScan(res?.scan || res || null); })
-      .catch(() => { if (!cancelled) setScan(null); })
+    Promise.allSettled([fetchEnterpriseReadiness(projectId), fetchEnterpriseScan(projectId, {})])
+      .then(([readinessRes, scanRes]) => {
+        if (cancelled) return;
+        setDomains(readinessRes.status === "fulfilled" ? normalizeDomains(readinessRes.value) : []);
+        setScan(scanRes.status === "fulfilled" ? (scanRes.value?.scan || scanRes.value || null) : null);
+      })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId, tick]);
-
-  // Re-scan when AI is connected in Settings so the status flips live.
-  React.useEffect(() => {
-    const onChanged = () => setTick((n) => n + 1);
-    window.addEventListener("datalex:ai-changed", onChanged);
-    return () => window.removeEventListener("datalex:ai-changed", onChanged);
-  }, []);
+  }, [projectId]);
 
   const totals = scan?.totals || {};
-  // Use the server's readiness (provider saved + tested) when a project is
-  // loaded, so Home agrees with the enterprise pages. Fall back to the
-  // browser-config check only before a project exists.
   const aiReady = projectId ? Boolean(scan?.ai?.ready) : aiConfigured();
-  const detected = (totals.datalex_contracts || 0) > 0 || (totals.proposals || 0) > 0;
-  const modeled = (totals.diagrams || 0) > 0;
-  const certified = (totals.certified_contracts || 0) > 0;
+  const totalModels = totals.models ?? domains.reduce((n, d) => n + (Number(d.models) || 0), 0);
+  const certifiedTotal = totals.certified_contracts ?? domains.reduce((n, d) => n + (Number(d.certified) || 0), 0);
+  const overallScore = scan?.doc_score ?? (
+    domains.length
+      ? Math.round(domains.reduce((n, d) => n + (Number(d.score) || 0), 0) / domains.length)
+      : null
+  );
 
-  const steps = [
-    {
-      id: "connect", icon: FolderGit2, title: "Connect a dbt project",
-      desc: "Point DataLex at a Git URL or a local dbt folder. Your YAML stays in place — DataLex reads it and indexes the manifest.",
-      done: hasProject, cta: hasProject ? "Reconnect" : "Connect repo", onClick: onConnect,
-    },
-    {
-      id: "ai", icon: Sparkles, title: "Connect AI & your database",
-      desc: "Add an AI provider (OpenAI / Anthropic / local) and, optionally, a warehouse connection. Both test in place and save automatically — no other setup.",
-      done: aiReady, cta: aiReady ? "Open settings" : "Set up AI & database", onClick: onOpenAi,
-    },
-    {
-      id: "detect", icon: ScanSearch, title: "Detect domains, contracts & proposals",
-      desc: "Let AI group models into business domains, surface missing contracts, and stage reviewable proposal packs — your governance surface, drafted for you.",
-      done: detected, locked: !hasProject, cta: "Open Readiness", onClick: () => onGoto?.("readiness"),
-    },
-    {
-      id: "model", icon: Boxes, title: "Model conceptual → logical → physical",
-      desc: "Draw the conceptual layer first — the primary, platform-free business view — then generate logical and physical diagrams from it.",
-      done: modeled, locked: !hasProject, cta: "Open Model", onClick: () => onGoto?.("diagram"),
-    },
-    {
-      id: "ship", icon: Rocket, title: "Certify & publish",
-      desc: "Review the readiness gate, certify contracts, then build the DataLex manifest and check integration readiness before you ship.",
-      done: certified, locked: !hasProject, cta: "Open Publish", onClick: () => onGoto?.("publish"),
-    },
-  ];
-
-  const doneCount = steps.filter((s) => s.done).length;
+  const showPortfolio = hasProject && domains.length > 0;
 
   return (
-    <div className="home-view">
-      <header className="home-hero">
-        <div className="home-hero-eyebrow">Workspace</div>
-        <h1 className="home-hero-title">{hasProject ? projectName : "Welcome to DataLex"}</h1>
-        <p className="home-hero-sub">
-          Turn your dbt project into a governed, AI-ready model — without leaving Git.
-          Follow the steps below; each lights up as you go.
-        </p>
-        <div className="home-progress">
-          <div className="home-progress-bar"><span style={{ width: `${(doneCount / steps.length) * 100}%` }} /></div>
-          <span className="home-progress-label">{doneCount} of {steps.length} done</span>
+    <div className="shell-view" style={{ padding: 24, overflow: "auto", color: "var(--text-primary)" }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+        <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>{projectName || "Workspace"}</h1>
+        {isDemo && <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>demo workspace</span>}
+      </div>
+      <p style={{ margin: "0 0 18px", fontSize: 12, color: "var(--text-secondary)" }}>
+        {showPortfolio
+          ? "Your business domains. Pick one to model, review, and certify what matters."
+          : "Connect a dbt project to see your domains, readiness, and what an AI would get wrong."}
+      </p>
+
+      {showPortfolio && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, maxWidth: 620, marginBottom: 22 }}>
+          <Stat label="Domains" value={domains.length} />
+          <Stat label="Models" value={totalModels || "—"} />
+          <Stat label="Overall doc score" value={overallScore == null ? "—" : `${overallScore}`} />
+          <Stat label="Certified" value={certifiedTotal} />
         </div>
-      </header>
+      )}
 
-      <section className="home-tiles" aria-label="Project status">
-        <StatusTile icon={Database} label="Connection" value={isDemo ? "Demo mode" : hasProject ? "Connected" : "None"} tone={hasProject && !isDemo ? "ok" : ""} />
-        <StatusTile icon={Sparkles} label="AI provider" value={aiReady ? "Ready" : "Not set"} tone={aiReady ? "ok" : "warn"} />
-        <StatusTile icon={Boxes} label="Models" value={loading ? "…" : (totals.models ?? 0)} />
-        <StatusTile icon={ShieldCheck} label="Contracts" value={loading ? "…" : `${totals.existing_dbt_contracts ?? 0} / ${(totals.existing_dbt_contracts ?? 0) + (totals.missing_contracts ?? 0)}`} tone={(totals.missing_contracts ?? 0) > 0 ? "warn" : "ok"} />
-        <StatusTile icon={Activity} label="Readiness gate" value={gate.label} tone={gate.tone === "ok" ? "ok" : gate.tone === "error" ? "bad" : "warn"} />
-        <StatusTile icon={GitBranch} label="Changes" value={isDemo ? "—" : `${changedCount} on ${branch}`} />
-      </section>
+      {loading && !showPortfolio && (
+        <div style={{ padding: 24, fontSize: 13, color: "var(--text-tertiary)" }}>Loading workspace…</div>
+      )}
 
-      <section className="home-steps" aria-label="Setup steps">
-        {steps.map((step, i) => {
-          const Icon = step.icon;
-          const state = step.done ? "done" : step.locked ? "locked" : "active";
-          return (
-            <div key={step.id} className={`home-step ${state}`}>
-              <div className="home-step-rail">
-                <div className="home-step-badge">
-                  {step.done ? <Check size={15} strokeWidth={2.4} /> : <span className="home-step-num">{i + 1}</span>}
-                </div>
-                {i < steps.length - 1 && <div className="home-step-line" />}
+      {!loading && !showPortfolio && (
+        <GettingStarted
+          hasProject={hasProject}
+          aiReady={aiReady}
+          onConnect={onConnect}
+          onOpenAi={onOpenAi}
+          onGoto={onGoto}
+        />
+      )}
+
+      {showPortfolio && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12, maxWidth: 920 }}>
+          {domains.map((d) => (
+            <button
+              key={d.name}
+              type="button"
+              onClick={() => onSelectDomain?.(d.name)}
+              style={{
+                textAlign: "left", cursor: "pointer",
+                border: "1px solid var(--border-default)", borderRadius: 12,
+                padding: 14, background: "var(--bg-1)", display: "grid", gap: 8,
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Boxes size={15} style={{ color: "var(--text-secondary)" }} />
+                <span style={{ fontSize: 14, fontWeight: 700, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</span>
+                <ChevronRight size={15} style={{ color: "var(--text-tertiary)" }} />
               </div>
-              <div className="home-step-body">
-                <div className="home-step-head">
-                  <Icon size={16} strokeWidth={1.8} />
-                  <span className="home-step-title">{step.title}</span>
-                  <span className={`home-step-status ${state}`}>
-                    {step.done ? "Done" : step.locked ? "Connect first" : "Next"}
-                  </span>
-                </div>
-                <p className="home-step-desc">{step.desc}</p>
-                <button type="button" className="home-step-cta" onClick={step.onClick} disabled={step.locked}>
-                  {step.cta} <ArrowRight size={13} strokeWidth={2} />
-                </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {d.score != null && (
+                  <span style={{ fontSize: 11, fontWeight: 700, color: scoreTone(d.score) }}>doc {d.score}</span>
+                )}
+                {d.models != null && (
+                  <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{d.models} models</span>
+                )}
               </div>
-            </div>
-          );
-        })}
-      </section>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)" }}>
+                <ShieldCheck size={13} style={{ color: "var(--success, #1d9e75)" }} />
+                {Number(d.certified) || 0} certified
+                {Number(d.highValue) ? <span style={{ color: "var(--text-tertiary)" }}>· {d.highValue} high-value</span> : null}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      {showPortfolio && (
+        <div style={{ marginTop: 20, display: "flex", gap: 8 }}>
+          <button className="panel-btn" onClick={() => onGoto?.("concept")}><Activity size={13} /> Concept model</button>
+          <button className="panel-btn" onClick={() => onGoto?.("readiness")}><ScanSearch size={13} /> Readiness</button>
+          <button className="panel-btn" onClick={() => onGoto?.("publish")}><Rocket size={13} /> Publish manifest</button>
+        </div>
+      )}
     </div>
   );
 }

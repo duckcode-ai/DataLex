@@ -147,6 +147,8 @@ const EnumsView           = React.lazy(() => import("./views/EnumsView"));
 const DocsView            = React.lazy(() => import("../components/docs/DocsView"));
 const CapabilityMap       = React.lazy(() => import("./views/CapabilityMap"));
 const EnterpriseWorkbench = React.lazy(() => import("../components/enterprise/EnterpriseWorkbench"));
+const ConceptModelView    = React.lazy(() => import("./views/ConceptModelView"));
+const DomainWorkspace     = React.lazy(() => import("./views/DomainWorkspace"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -162,6 +164,9 @@ const LEFT_PANEL_WIDTH_STORAGE = "datalex.leftPanelWidth";
 const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 520;
 const ENTERPRISE_VIEW_MODES = new Set(["ai-setup", "readiness", "domains", "proposals", "contracts", "publish"]);
+// Full-canvas IA surfaces that must NOT auto-bounce to the diagram when a file
+// becomes active (Home portfolio, the domain workspace, and the concept model).
+const FULL_CANVAS_MODES = new Set(["home", "domain", "concept"]);
 
 /* Bottom-drawer tab order.
    - Validation comes first so "what's broken / missing" is the default answer.
@@ -753,6 +758,7 @@ export default function Shell() {
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
     rightPanelOpen, rightPanelTab, rightPanelWidth, setRightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
     shellViewMode, setShellViewMode,
+    activeDomain, setActiveDomain,
     openAiPanel,
     addToast,
     aiReviewDocument,
@@ -973,7 +979,8 @@ export default function Shell() {
       shouldOpenDiagramSurface &&
       diagramSurfaceFileKey &&
       lastAutoOpenedDiagramFileRef.current !== diagramSurfaceFileKey &&
-      !ENTERPRISE_VIEW_MODES.has(shellViewMode)
+      !ENTERPRISE_VIEW_MODES.has(shellViewMode) &&
+      !FULL_CANVAS_MODES.has(shellViewMode)
     ) {
       lastAutoOpenedDiagramFileRef.current = diagramSurfaceFileKey;
       setShellViewMode("diagram");
@@ -1960,9 +1967,12 @@ export default function Shell() {
 
   const isEnterpriseView = ENTERPRISE_VIEW_MODES.has(shellViewMode);
   const isHome = shellViewMode === "home";
-  // Home and the enterprise workflow views take the full canvas — no
-  // inspector or bottom drawer.
-  const isFullView = isEnterpriseView || isHome;
+  const isDomainWorkspace = shellViewMode === "domain";
+  const isConceptView = shellViewMode === "concept";
+  const activeProjectPath = (projects.find((p) => p.id === activeProjectId)?.path) || "";
+  // Home, the enterprise workflow, the domain workspace, and the concept model
+  // take the full canvas — no inspector or bottom drawer.
+  const isFullView = isEnterpriseView || isHome || isDomainWorkspace || isConceptView;
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
@@ -2109,7 +2119,29 @@ export default function Shell() {
           onGoto={setShellViewMode}
           onConnect={() => openModal("importDbtRepo")}
           onOpenAi={() => openModal("settings", { initialTab: "ai" })}
+          onSelectDomain={(d) => { setActiveDomain(d); setShellViewMode("domain"); }}
         />
+      )}
+      {isDomainWorkspace && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading domain…</div>}>
+          <DomainWorkspace
+            domain={activeDomain}
+            projectId={activeProjectId}
+            projectPath={activeProjectPath}
+            onGoto={setShellViewMode}
+            onBack={() => setShellViewMode("home")}
+          />
+        </React.Suspense>
+      )}
+      {isConceptView && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading concept model…</div>}>
+          <ConceptModelView
+            projectId={activeProjectId}
+            projectPath={activeProjectPath}
+            domain={activeDomain || undefined}
+            onGoto={setShellViewMode}
+          />
+        </React.Suspense>
       )}
       {isEnterpriseView && (
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading enterprise workflow...</div>}>
