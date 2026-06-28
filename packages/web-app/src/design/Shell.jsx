@@ -186,17 +186,13 @@ const FULL_CANVAS_MODES = new Set(["home", "domain", "concept"]);
    tab self-documents without anyone having to ask "what is this for?". */
 const LOGICAL_BOTTOM_TABS = [
   { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings, blockers, dimensional nudges, and a documentation completeness score for the active file." },
-  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
   { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create and edit logical entities, relationships, and keys for the active layer." },
-  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
 const PHYSICAL_BOTTOM_TABS = [
   { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings, blockers, dbt readiness review, and a documentation completeness score for the active file." },
-  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
   { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create and edit physical entities, relationships, and dbt model targets for the active diagram." },
-  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
 
@@ -206,9 +202,7 @@ const PHYSICAL_BOTTOM_TABS = [
 // panel, so there is no separate Relationships tab here.
 const CONCEPTUAL_BOTTOM_TABS = [
   { id: "validation",    label: "Validate",      icon: ShieldCheck, description: "Findings and completeness for the conceptual model." },
-  { id: "diff",          label: "Version",       icon: GitCompare,  description: "The ship surface — what changed vs the baseline, the breaking-change check, and the git workspace (status, staging, commit, push, PR)." },
   { id: "modeler",       label: "Author",        icon: Wand2,       description: "Create concepts, business relationships, DataLex contracts, and certification rules." },
-  { id: "policy_packs",  label: "Policy",        icon: Shield,      description: "Author and review .datalex/policies governance rules for this project." },
   { id: "dictionary",    label: "Dictionary",    icon: BookOpen,    description: "Project-wide glossary of terms and concepts referenced from this model." },
   { id: "history",       label: "History",       icon: Clock,       description: "Snapshot history for the active project." },
 ];
@@ -756,7 +750,7 @@ export default function Shell() {
   const {
     activeModal, openModal, closeModal,
     bottomPanelOpen, bottomPanelTab, setBottomPanelTab, toggleBottomPanel,
-    rightPanelOpen, rightPanelTab, rightPanelWidth, setRightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
+    rightPanelOpen, setRightPanelOpen, rightPanelTab, rightPanelWidth, setRightPanelWidth, commandPaletteOpen, setCommandPaletteOpen,
     shellViewMode, setShellViewMode,
     activeDomain, setActiveDomain,
     openAiPanel,
@@ -1957,7 +1951,7 @@ export default function Shell() {
   // "diff" (Version) and "history" are project-level surfaces that are valid
   // on every layer — never reset away from them, even if a given tab list
   // omits them. This is what lets the rail "Version" item open reliably.
-  const PROJECT_LEVEL_TABS = ["diff", "history"];
+  const PROJECT_LEVEL_TABS = ["diff", "history", "policy_packs"];
   React.useEffect(() => {
     if (PROJECT_LEVEL_TABS.includes(bottomPanelTab)) return;
     if (!activeBottomTabs.some((tab) => tab.id === bottomPanelTab)) {
@@ -2259,7 +2253,27 @@ export default function Shell() {
         </button>
       )}
 
-      {!(rightPanelOpen && rightPanelTab === "AI") && (
+      {!isFullView && !rightPanelOpen && (
+        <button
+          type="button"
+          onClick={() => setRightPanelOpen(true)}
+          title="Open inspector"
+          aria-label="Open inspector"
+          style={{
+            position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", zIndex: 30,
+            display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", cursor: "pointer",
+            fontSize: 11, color: "var(--text-secondary)",
+            background: "var(--surface-2, var(--bg-1))", border: "1px solid var(--border-default)",
+            borderRight: "none", borderTopLeftRadius: 8, borderBottomLeftRadius: 8,
+            borderTopRightRadius: 0, borderBottomRightRadius: 0,
+            boxShadow: "var(--shadow-sm, 0 1px 6px rgba(0,0,0,0.12))",
+          }}
+        >
+          <Database size={12} /> Inspector
+        </button>
+      )}
+
+      {activeModal !== "askAi" && (
         <button
           type="button"
           className="ai-fab"
@@ -2333,6 +2347,7 @@ export default function Shell() {
           { id: "git-branch", section: "Git",     label: "Switch / create branch", meta: "",    icon: <span style={{ fontSize: 12 }}>⎇</span>,  run: () => activeProjectId && openModal("gitBranch") },
           { id: "commit",     section: "Git",     label: "Commit changes…",        meta: "",    icon: <span style={{ fontSize: 12 }}>✓</span>,  run: () => openModal("commit") },
           { id: "settings",   section: "Actions", label: "Settings…",              meta: "",    icon: <span style={{ fontSize: 12 }}>⚙</span>,  run: () => openModal("settings") },
+          { id: "policy",     section: "Actions", label: "Policy packs…",          meta: "",    icon: <Shield size={12} />,                 run: () => setBottomPanelTab("policy_packs") },
           { id: "connect",    section: "Actions", label: "Manage connections…",    meta: "",    icon: <span style={{ fontSize: 12 }}>⛁</span>,  run: () => openModal("connectionsManager") },
           { id: "ask-ai",     section: "Actions", label: "Ask AI…",                 meta: "",    icon: <Wand2 size={12} />,                 run: () => openCurrentAiPanel("command-palette") },
           { id: "import",     section: "Actions", label: "Import schema…",         meta: "",    icon: <span style={{ fontSize: 12 }}>⇩</span>,  run: () => openModal("importDialog") },

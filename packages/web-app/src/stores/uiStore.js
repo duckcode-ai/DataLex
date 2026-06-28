@@ -6,7 +6,10 @@ import { create } from "zustand";
    reloads. Loaded once at store init; written on every mutation. */
 const BOTTOM_STORAGE = "datalex.bottomPanel";
 const DEFAULT_BOTTOM = {
-  open: true,
+  // Collapsed by default so the canvas/inspector get the room. The Validate
+  // signal stays visible in the status bar; the drawer is one click (⌘J /
+  // the status-bar Panel control) away.
+  open: false,
   // Default to Validation so the first thing a user sees on open is
   // "what's broken / missing" rather than a structural panel. The Shell's
   // activeBottomTabs effect falls back to the first tab in the active
@@ -253,8 +256,9 @@ const useUiStore = create((set, get) => ({
     saveShell(get());
   },
   openAiPanel: (payload = null) => {
-    set({ rightPanelOpen: true, rightPanelTab: "AI", aiPanelPayload: payload });
-    saveShell(get());
+    // AI is one global assistant (the Ask AI dialog), not an inspector tab —
+    // it stays grounded in the current selection/file/domain via the payload.
+    set({ activeModal: "askAi", modalPayload: payload, aiPanelPayload: payload });
   },
   setAiPanelPayload: (payload = null) => set({ aiPanelPayload: payload }),
   openAiReviewDocument: (document = null) => set({ aiReviewDocument: document }),

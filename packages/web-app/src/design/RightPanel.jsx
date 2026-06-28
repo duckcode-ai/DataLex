@@ -14,7 +14,7 @@
      - Editable indexes (addIndex / removeIndex). */
 import React from "react";
 import {
-  Box, Copy, Trash2, Pencil, GitBranch, Database,
+  Box, Copy, Trash2, Pencil, GitBranch, Database, PanelRightClose,
 } from "lucide-react";
 import {
   PanelFrame, PanelEmpty, StatusPill,
@@ -35,7 +35,6 @@ const YamlEditorShell = React.lazy(() => import("./inspector/YamlEditorShell"));
 const AiAssistantSurface = React.lazy(() => import("../components/ai/AiAssistantSurface"));
 
 const BASE_TABS = [
-  { id: "AI",        label: "AI" },
   { id: "COLUMNS",   label: "Columns" },
   { id: "RELATIONS", label: "Relations" },
   { id: "INDEXES",   label: "Indexes" },
@@ -44,14 +43,12 @@ const BASE_TABS = [
 ];
 
 const CONCEPTUAL_TABS = [
-  { id: "AI",        label: "AI" },
   { id: "DETAILS",   label: "Details" },
   { id: "RELATIONS", label: "Relationships" },
   { id: "YAML",      label: "YAML" },
 ];
 
 const LOGICAL_TABS = [
-  { id: "AI",        label: "AI" },
   { id: "DETAILS",   label: "Details" },
   { id: "RELATIONS", label: "Relationships" },
   { id: "YAML",      label: "YAML" },
@@ -125,6 +122,7 @@ export default function RightPanel({
   const setRightPanelTab = useUiStore((s) => s.setRightPanelTab);
   const rightPanelWidth = useUiStore((s) => s.rightPanelWidth);
   const setRightPanelWidth = useUiStore((s) => s.setRightPanelWidth);
+  const setRightPanelOpen = useUiStore((s) => s.setRightPanelOpen);
   const openAiPanel = useUiStore((s) => s.openAiPanel);
   const aiPanelPayload = useUiStore((s) => s.aiPanelPayload);
   const modelKind = String(schema?.modelKind || "physical").trim().toLowerCase();
@@ -300,7 +298,19 @@ export default function RightPanel({
         status={header.statusLabel && (
           <StatusPill tone={header.statusTone}>{header.statusLabel}</StatusPill>
         )}
-        actions={headerActions}
+        actions={(
+          <>
+            {headerActions}
+            <button
+              className="panel-btn"
+              title="Minimize inspector"
+              aria-label="Minimize inspector"
+              onClick={() => setRightPanelOpen(false)}
+            >
+              <PanelRightClose size={13} />
+            </button>
+          </>
+        )}
         toolbar={
           <InspectorTabs
             tab={tab}
