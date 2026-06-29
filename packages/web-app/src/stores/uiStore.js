@@ -71,6 +71,9 @@ const VALID_SHELL_VIEW_MODES = [
   "views",
   "enums",
   "capabilities",
+  "domain",
+  "concept",
+  "lineage",
 ];
 // Home is the default landing — the dedicated page that lays out the
 // AI-first flow with live status (replaces the old slide-in journey).
