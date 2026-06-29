@@ -7,6 +7,46 @@ from `v0.1.0` onward.
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-06-29
+
+Minor release - the cross-domain accuracy moat (modeling → grain-safe joins) and
+a modeling-first information architecture.
+
+### Added
+- **Manifest exports typed `relationships` + entity `conformance`.** The v1
+  manifest now carries cross-entity relationships (from/to endpoints, join
+  columns, cardinality, layer) and conformance records (each business concept's
+  canonical key + the physical models that realize it) — the substrate an agent
+  needs to plan grain-safe cross-domain joins. Schema + spec under
+  `docs/manifest-spec/v1` updated.
+- **Diagram-only models now reach the manifest.** A project authored purely as
+  diagrams (no standalone `kind: entity` files) has its diagram-embedded entities
+  and relationships lifted into the manifest. Physical-first models get
+  **physical-anchored conformance** — a physical/dbt entity anchors a joinable
+  concept on its own key + table binding even without a logical link.
+- **Domain-first information architecture** in the web app: a Home portfolio of
+  domains → a per-domain workspace (Overview, Model, Concept model, Lineage) →
+  detail, with a decision rule that keeps every feature at one altitude.
+- **End-to-end lineage view** (DataLex concept → dbt model → DQL → app): a
+  per-domain coverage roll-up that drills into a concept-level trace, collapsing
+  each concept's conceptual/logical/physical entities into one row via conformance
+  and surfacing the canonical join key.
+- **Guided conceptual → logical → physical build-or-skip flow**, an add-domain
+  UI, and an editable Domain field on the entity inspector.
+
+### Changed
+- **Modeling is the primary surface; contracts are hidden (not removed).**
+  Certification lives in DQL; DataLex leads with the model, diagram, and lineage.
+- **Cleaner modeler layout** — a global AI panel, collapsible inspector and
+  explorer, a slim bottom drawer, and panel-collapse state persisted across
+  reloads.
+
+### Fixed
+- Diagram drag no longer snaps back (stale layout-cache race).
+- Opening a file from the explorer now switches to the modeler from full-canvas
+  views; subject-area groups render without a React key warning; the lineage
+  drill-in selection is no longer reset by the active domain.
+
 ## [1.12.0] - 2026-06-25
 
 Minor release - smoother install and self-update experience.
