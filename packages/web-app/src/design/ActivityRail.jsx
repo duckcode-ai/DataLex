@@ -43,6 +43,7 @@ const GROUPS = [
       { id: "domains",   label: "Domains",   Icon: Network,        tip: "Your business domains. Start here — click a domain to model it." },
       { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tip: "What's modeled vs. missing, by domain. Works without AI." },
       { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
+      { id: "lineage",   label: "Lineage",   Icon: Share2,         tip: "End-to-end trace: DataLex → dbt → DQL → app." },
       { id: "publish",   label: "Export",    Icon: Rocket,         tip: "Build the model manifest that DQL reads — your DataLex modeling, exported to DQL." },
     ],
   },

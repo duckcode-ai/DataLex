@@ -149,6 +149,7 @@ const CapabilityMap       = React.lazy(() => import("./views/CapabilityMap"));
 const EnterpriseWorkbench = React.lazy(() => import("../components/enterprise/EnterpriseWorkbench"));
 const ConceptModelView    = React.lazy(() => import("./views/ConceptModelView"));
 const DomainWorkspace     = React.lazy(() => import("./views/DomainWorkspace"));
+const LineageView         = React.lazy(() => import("./views/LineageView"));
 
 import useWorkspaceStore from "../stores/workspaceStore";
 import useAuthStore from "../stores/authStore";
@@ -166,7 +167,7 @@ const LEFT_PANEL_MAX = 520;
 const ENTERPRISE_VIEW_MODES = new Set(["ai-setup", "readiness", "domains", "proposals", "contracts", "publish"]);
 // Full-canvas IA surfaces that must NOT auto-bounce to the diagram when a file
 // becomes active (Home portfolio, the domain workspace, and the concept model).
-const FULL_CANVAS_MODES = new Set(["home", "domain", "concept"]);
+const FULL_CANVAS_MODES = new Set(["home", "domain", "concept", "lineage"]);
 
 /* Bottom-drawer tab order.
    - Validation comes first so "what's broken / missing" is the default answer.
@@ -1980,10 +1981,11 @@ export default function Shell() {
   const isHome = shellViewMode === "home";
   const isDomainWorkspace = shellViewMode === "domain";
   const isConceptView = shellViewMode === "concept";
+  const isLineageView = shellViewMode === "lineage";
   const activeProjectPath = (projects.find((p) => p.id === activeProjectId)?.path) || "";
-  // Home, the enterprise workflow, the domain workspace, and the concept model
-  // take the full canvas — no inspector or bottom drawer.
-  const isFullView = isEnterpriseView || isHome || isDomainWorkspace || isConceptView;
+  // Home, the enterprise workflow, the domain workspace, the concept model, and
+  // the lineage view take the full canvas — no inspector or bottom drawer.
+  const isFullView = isEnterpriseView || isHome || isDomainWorkspace || isConceptView || isLineageView;
 
   /* ── Shell render ──────────────────────────────────────────────── */
   return (
@@ -2149,6 +2151,16 @@ export default function Shell() {
       {isConceptView && (
         <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading concept model…</div>}>
           <ConceptModelView
+            projectId={activeProjectId}
+            projectPath={activeProjectPath}
+            domain={activeDomain || undefined}
+            onGoto={setShellViewMode}
+          />
+        </React.Suspense>
+      )}
+      {isLineageView && (
+        <React.Suspense fallback={<div className="shell-view" style={{ padding: 20, color: "var(--text-tertiary)", fontSize: 12 }}>Loading lineage…</div>}>
+          <LineageView
             projectId={activeProjectId}
             projectPath={activeProjectPath}
             domain={activeDomain || undefined}
