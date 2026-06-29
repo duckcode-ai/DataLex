@@ -24,7 +24,6 @@ const slugify = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/
 const TABS = [
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
   { id: "concept", label: "Concept model", Icon: Boxes },
-  { id: "contracts", label: "Contracts", Icon: FileCheck2 },
 ];
 
 function findDomainRow(readiness, domain) {
@@ -74,10 +73,10 @@ function Overview({ domain, projectId, onGoto, setTab }) {
       <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 14, background: "var(--bg-1)", maxWidth: 620, display: "flex", alignItems: "center", gap: 10 }}>
         <Sparkles size={16} style={{ color: "var(--accent, #5b6cff)", flexShrink: 0 }} />
         <div style={{ flex: 1, fontSize: 12, color: "var(--text-secondary)" }}>
-          Suggested next: review the concept model for this domain, then certify the high-value contracts.
+          Suggested next: review the concept model for this domain, then build out the logical and physical layers.
         </div>
-        <button className="panel-btn" onClick={() => setTab("concept")}>Concept model</button>
-        <button className="panel-btn primary" onClick={() => setTab("contracts")}>Contracts</button>
+        <button className="panel-btn primary" onClick={() => setTab("concept")}>Concept model</button>
+        <button className="panel-btn" onClick={() => onGoto?.("diagram")}>Open modeler</button>
       </div>
     </div>
   );

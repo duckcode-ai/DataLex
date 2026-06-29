@@ -40,18 +40,10 @@ const GROUPS = [
     key: "workspace",
     title: "Workspace",
     items: [
-      { id: "domains",   label: "Domains",   Icon: Network,        tip: "Your business domains and certification priorities. Start here — click a domain to work in it." },
-      { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tip: "What's missing before certification, by domain. Works without AI." },
+      { id: "domains",   label: "Domains",   Icon: Network,        tip: "Your business domains. Start here — click a domain to model it." },
+      { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tip: "What's modeled vs. missing, by domain. Works without AI." },
       { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
-    ],
-  },
-  {
-    key: "govern",
-    title: "Govern",
-    items: [
-      { id: "proposals", step: 1, label: "Generate",  Icon: Inbox,       tip: "Step 1 — AI drafts contracts from your dbt evidence; review the drafts, then certify the ones you trust. This is where you create a contract." },
-      { id: "contracts", step: 2, label: "Certified", Icon: ShieldCheck, tip: "Step 2 — The library of certified contracts. Create new ones under Generate." },
-      { id: "publish",   step: 3, label: "Publish",   Icon: Rocket,      tip: "Step 3 — Build the DataLex manifest from your certified contracts." },
+      { id: "publish",   label: "Export",    Icon: Rocket,         tip: "Build the model manifest that DQL reads — your DataLex modeling, exported to DQL." },
     ],
   },
   {
