@@ -1,0 +1,39 @@
+kind: diagram
+name: sales_physical
+title: Sales Physical Model (diagram-only fixture)
+layer: physical
+domain: sales
+dialect: duckdb
+entities:
+  - name: dim_customer
+    type: dimension
+    domain: sales
+    description: Customer dimension table.
+    interface:
+      unique_key: customer_id
+    fields:
+      - { name: customer_id, type: integer, primary_key: true, nullable: false }
+      - { name: customer_name, type: varchar, nullable: false }
+    x: 80
+    y: 100
+    width: 320
+  - name: fct_order
+    type: fact
+    domain: sales
+    description: Order fact at one row per order.
+    fields:
+      - { name: order_id, type: integer, primary_key: true, nullable: false }
+      - name: customer_id
+        type: integer
+        nullable: false
+        foreign_key: { entity: dim_customer, field: customer_id }
+      - { name: order_total, type: double }
+    x: 480
+    y: 100
+    width: 360
+relationships:
+  - name: fct_order_customer_fk
+    from: { entity: fct_order, field: customer_id }
+    to: { entity: dim_customer, field: customer_id }
+    cardinality: many_to_one
+    description: Every order belongs to one customer.

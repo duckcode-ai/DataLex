@@ -286,6 +286,39 @@ class ProjectLoaderTests(unittest.TestCase):
         self.assertIn("DimCustomer", phys)
         self.assertEqual({"kind": "table", "ref": "dim_customer"}, phys["DimCustomer"]["binding"])
 
+    def test_diagram_only_project_extracts_entities_relationships_and_physical_conformance(self) -> None:
+        # A project that authors its model only as diagrams (no standalone entities)
+        # still reaches the manifest: entities + relationships are lifted from the
+        # diagram, and physical entities anchor conformance on their own key + table.
+        fixture = ROOT / "tests" / "datalex" / "fixtures" / "diagram_only"
+        project = load_project(fixture, strict=False)
+        manifest = build_manifest(project)
+
+        # Diagram-embedded entities reached the manifest.
+        entity_count = sum(len(d.get("entities", [])) for d in manifest["domains"])
+        self.assertEqual(2, entity_count)
+
+        # The diagram relationship was extracted, with `field` mapped to `column`
+        # and the layer stamped from the owning diagram.
+        rels = {r["name"]: r for r in manifest["relationships"]}
+        fk = rels["fct_order_customer_fk"]
+        self.assertEqual("physical", fk["layer"])
+        self.assertEqual("many_to_one", fk["cardinality"])
+        self.assertEqual("customer_id", fk["from"]["column"])
+        self.assertEqual("customer_id", fk["to"]["column"])
+
+        # Physical-anchored conformance: each physical table is a joinable concept with
+        # its own canonical key + table binding, even though no logical link was authored.
+        by_ref = {
+            p["binding"]["ref"]: c
+            for c in manifest["conformance"]
+            for p in c.get("physical", [])
+            if p.get("binding")
+        }
+        self.assertIn("dim_customer", by_ref)
+        self.assertEqual(["customer_id"], by_ref["dim_customer"]["canonical_key"])
+        self.assertEqual(["order_id"], by_ref["fct_order"]["canonical_key"])
+
 
 class DiffTests(unittest.TestCase):
     def test_explicit_rename_is_not_drop_add(self) -> None:

@@ -362,6 +362,24 @@ def _concept_keys(entity: Dict[str, Any]) -> Dict[str, Any]:
     return out
 
 
+def _physical_canonical_key(entity: Dict[str, Any]) -> Optional[List[str]]:
+    """Canonical join key for a physical entity standing on its own: primary-key
+    columns, else a declared unique_key, else the first candidate-key set."""
+    cols = entity.get("columns") or []
+    pk = [c.get("name") for c in cols if isinstance(c, dict) and c.get("primary_key") and c.get("name")]
+    if pk:
+        return [str(c) for c in pk]
+    uk = entity.get("unique_key")
+    if isinstance(uk, str) and uk:
+        return [uk]
+    if isinstance(uk, list) and uk:
+        return [str(x) for x in uk]
+    cks = entity.get("candidate_keys")
+    if isinstance(cks, list) and cks and isinstance(cks[0], list) and cks[0]:
+        return [str(x) for x in cks[0]]
+    return None
+
+
 def _build_conformance(project: DataLexProject) -> List[Dict[str, Any]]:
     """Export entity conformance: one record per business concept with its canonical
     key and the physical models that realize it. This is what lets an agent treat
@@ -421,6 +439,28 @@ def _build_conformance(project: DataLexProject) -> List[Dict[str, Any]]:
         if physical_out:
             record["physical"] = physical_out
         out.append(record)
+
+    # Physical-anchored conformance: a physical entity not tied to a logical concept
+    # (a diagram-only / physical-first model, e.g. dbt tables modeled directly) still
+    # anchors a joinable concept on its own key + table binding, so agents can plan
+    # grain-safe joins on the real tables even when the logical<->physical link wasn't
+    # authored. Entities already realized under a logical concept are skipped.
+    linked = {id(e) for ents in physical_by_logical.values() for e in ents}
+    for key, ent in sorted(project.entities.items()):
+        if not key.startswith("physical:") or ent.get("logical") or id(ent) in linked:
+            continue
+        canonical = _physical_canonical_key(ent)
+        physical_name = ent.get("physical_name") or ent.get("name")
+        if not canonical or not physical_name:
+            continue
+        concept = _entity_display_name(ent.get("logical_name") or ent.get("name"))
+        out.append({
+            "concept": concept,
+            "domain": _domain_of(ent),
+            "layer": "physical",
+            "canonical_key": canonical,
+            "physical": [{"entity": concept, "binding": {"kind": "table", "ref": physical_name}}],
+        })
     return out
 
 

@@ -1,0 +1,7 @@
+kind: project
+name: diagram_only_demo
+version: '1'
+description: Diagram-only project (no standalone entities) — exercises the fallback
+  extraction of diagram-embedded entities + relationships into the manifest.
+diagrams:
+  - '**/*.diagram.yaml'

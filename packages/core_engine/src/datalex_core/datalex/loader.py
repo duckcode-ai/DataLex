@@ -292,6 +292,99 @@ def _try_cache_get(path: Path, cache: ParseCache) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _diagram_field_to_column(field: Any) -> Any:
+    """Map a diagram entity `field` to the `columns` shape the manifest reads."""
+    if not isinstance(field, dict):
+        return field
+    col: Dict[str, Any] = {}
+    for key in ("name", "type", "nullable", "primary_key", "unique", "description", "tags", "foreign_key"):
+        if field.get(key) is not None:
+            col[key] = field[key]
+    return col
+
+
+def _diagram_entity_to_entity(de: Dict[str, Any], layer: str, fallback_domain: Optional[str]) -> Dict[str, Any]:
+    """Normalize a diagram-embedded entity into the standard `kind: entity` shape
+    (drops layout x/y/width; `fields` -> `columns`; physical entities get a
+    `physical_name` binding + carry `interface.unique_key` for key derivation)."""
+    out: Dict[str, Any] = {"kind": "entity", "layer": layer, "name": de.get("name")}
+    domain = de.get("domain") or fallback_domain
+    if domain:
+        out["domain"] = domain
+    for key in ("description", "logical_name", "logical", "type", "subtype_of",
+                "candidate_keys", "business_keys", "surrogate_key", "tags"):
+        if de.get(key) is not None:
+            out[key] = de[key]
+    cols = de.get("fields") or de.get("columns")
+    if cols:
+        out["columns"] = [_diagram_field_to_column(f) for f in cols]
+    if layer == "physical":
+        out["physical_name"] = de.get("physical_name") or de.get("name")
+        unique_key = (de.get("interface") or {}).get("unique_key")
+        if unique_key is not None and out.get("surrogate_key") is None:
+            out["unique_key"] = unique_key
+    return out
+
+
+def _diagram_relationship_to_relationship(dr: Dict[str, Any], layer: str) -> Dict[str, Any]:
+    """Normalize a diagram relationship to the `kind: relationship` shape. Diagram
+    endpoints use `field`; the manifest reads `column`, so we map it. The layer is
+    stamped from the owning diagram so endpoints resolve at the right altitude."""
+    out: Dict[str, Any] = {"kind": "relationship", "name": dr.get("name"), "layer": layer}
+    for side in ("from", "to"):
+        ep = dr.get(side)
+        if isinstance(ep, dict):
+            nep: Dict[str, Any] = {}
+            if ep.get("entity"):
+                nep["entity"] = ep["entity"]
+            column = ep.get("column") or ep.get("field")
+            if column:
+                nep["column"] = column
+            if ep.get("role"):
+                nep["role"] = ep["role"]
+            out[side] = nep
+    for key in ("cardinality", "type", "verb", "role_name", "description",
+                "optional", "identifying", "from_role", "to_role"):
+        if dr.get(key) is not None:
+            out[key] = dr[key]
+    return out
+
+
+def _extract_entities_from_diagrams(
+    diagrams: Dict[str, Dict[str, Any]],
+    entities: Dict[str, Dict[str, Any]],
+    relationships: Dict[str, Dict[str, Any]],
+    file_of: Dict[Tuple[str, str], str],
+) -> None:
+    """Lift diagram-embedded entities + relationships into the project. Additive:
+    an entity is added under `<layer>:<name>` only if that key is absent, and a
+    relationship only if its name is unused — so anything authored standalone wins."""
+    for dkey, diagram in diagrams.items():
+        if not isinstance(diagram, dict):
+            continue
+        layer = str(diagram.get("layer") or "conceptual")
+        ddomain = diagram.get("domain")
+        diagram_file = file_of.get(("diagram", dkey))
+        for de in diagram.get("entities") or []:
+            if not isinstance(de, dict) or not de.get("name"):
+                continue
+            key = f"{layer}:{de['name']}"
+            if key in entities:
+                continue
+            entities[key] = _diagram_entity_to_entity(de, layer, ddomain)
+            if diagram_file:
+                file_of[("entity", key)] = diagram_file
+        for dr in diagram.get("relationships") or []:
+            if not isinstance(dr, dict) or not dr.get("name"):
+                continue
+            name = dr["name"]
+            if name in relationships:
+                continue
+            relationships[name] = _diagram_relationship_to_relationship(dr, layer)
+            if diagram_file:
+                file_of[("relationship", name)] = diagram_file
+
+
 def load_project(
     project_root: Union[str, Path],
     schemas_root: Optional[Union[str, Path]] = None,
@@ -480,6 +573,14 @@ def load_project(
             doc = load_file(p, schemas_root, bag, cache=cache)
             if doc is not None:
                 _register(doc, p)
+
+    # Fallback: when a project authors its model only as diagrams (no standalone
+    # `kind: entity` files — e.g. the jaffle-shop layout), lift the diagram-embedded
+    # entities + relationships into the project so they reach the manifest. Gated on
+    # `not entities` so any project that uses standalone entities is byte-for-byte
+    # unchanged; standalone artifacts are always the source of truth.
+    if not entities:
+        _extract_entities_from_diagrams(diagrams, entities, relationships, file_of)
 
     project = DataLexProject(
         root=root,
