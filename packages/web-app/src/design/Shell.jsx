@@ -966,17 +966,23 @@ export default function Shell() {
     // *different* file afterwards still switches to the diagram.
     if (!autoOpenBaselineRef.current && diagramSurfaceFileKey) {
       autoOpenBaselineRef.current = true;
-      if (shellViewMode === "home") {
+      // On the first restored file, if we're on a full-canvas surface (Home,
+      // domain, concept, lineage), adopt it as the baseline and stay put — a
+      // restored file shouldn't bounce a fresh session into the diagram.
+      if (FULL_CANVAS_MODES.has(shellViewMode)) {
         lastAutoOpenedDiagramFileRef.current = diagramSurfaceFileKey;
         return;
       }
     }
+    // After the baseline, an explicit file open (a *different* diagram-able file
+    // becomes active — e.g. the explorer click) switches to the modeler, even
+    // from a full-canvas view. Same-file view changes don't re-fire (the ref
+    // guard below), so navigating between full-canvas views never bounces.
     if (
       shouldOpenDiagramSurface &&
       diagramSurfaceFileKey &&
       lastAutoOpenedDiagramFileRef.current !== diagramSurfaceFileKey &&
-      !ENTERPRISE_VIEW_MODES.has(shellViewMode) &&
-      !FULL_CANVAS_MODES.has(shellViewMode)
+      !ENTERPRISE_VIEW_MODES.has(shellViewMode)
     ) {
       lastAutoOpenedDiagramFileRef.current = diagramSurfaceFileKey;
       setShellViewMode("diagram");

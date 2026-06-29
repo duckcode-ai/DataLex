@@ -95,7 +95,11 @@ function loadShell() {
     const raw = localStorage.getItem(SHELL_STORAGE);
     if (!raw) return { ...DEFAULT_SHELL };
     const parsed = JSON.parse(raw);
-    const viewMode = VALID_SHELL_VIEW_MODES.includes(parsed.viewMode) ? parsed.viewMode : DEFAULT_SHELL.viewMode;
+    let viewMode = VALID_SHELL_VIEW_MODES.includes(parsed.viewMode) ? parsed.viewMode : DEFAULT_SHELL.viewMode;
+    // Transient views need runtime context (the active domain) that isn't
+    // persisted — restore to Home rather than a context-less domain/concept/
+    // lineage surface.
+    if (["domain", "concept", "lineage"].includes(viewMode)) viewMode = "home";
     const rightTab = typeof parsed.rightTab === "string" && parsed.rightTab ? parsed.rightTab : DEFAULT_SHELL.rightTab;
     const rightWidth = typeof parsed.rightWidth === "number" ? clampRightWidth(parsed.rightWidth) : DEFAULT_SHELL.rightWidth;
     const leftOpen = typeof parsed.leftOpen === "boolean" ? parsed.leftOpen : DEFAULT_SHELL.leftOpen;
