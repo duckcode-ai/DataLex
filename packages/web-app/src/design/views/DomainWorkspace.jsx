@@ -12,8 +12,9 @@
  */
 import React from "react";
 import yaml from "js-yaml";
-import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles, Plus, ShieldCheck, Layers, Wand2, FolderOpen } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles, Plus, ShieldCheck, Layers, Wand2, FolderOpen, Share2 } from "lucide-react";
 import ConceptModelView from "./ConceptModelView";
+import LineageView from "./LineageView";
 import { fetchEnterpriseReadiness, createProjectFile, aiConceptualize } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
 import useWorkspaceStore from "../../stores/workspaceStore";
@@ -26,6 +27,7 @@ const TABS = [
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
   { id: "model", label: "Model", Icon: Layers },
   { id: "concept", label: "Concept model", Icon: Boxes },
+  { id: "lineage", label: "Lineage", Icon: Share2 },
 ];
 
 function findDomainRow(readiness, domain) {
@@ -281,6 +283,7 @@ export default function DomainWorkspace({ domain, projectId, projectPath, onGoto
       {tab === "overview" && <Overview domain={domain} projectId={projectId} onGoto={onGoto} setTab={setTab} />}
       {tab === "model" && <BuildModel domain={domain} projectId={projectId} onGoto={onGoto} />}
       {tab === "concept" && <ConceptModelView projectId={projectId} projectPath={projectPath} domain={domain} onGoto={onGoto} />}
+      {tab === "lineage" && <LineageView projectId={projectId} projectPath={projectPath} domain={domain} embedded onGoto={onGoto} />}
       {tab === "contracts" && <Contracts domain={domain} projectId={projectId} onGoto={onGoto} />}
     </div>
   );
