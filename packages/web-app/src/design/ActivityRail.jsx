@@ -37,30 +37,29 @@ const GROUPS = [
     ],
   },
   {
-    key: "workflow",
-    title: "Workflow",
-    items: [
-      { id: "__connect", step: 1, label: "Connect",   Icon: FolderGit2,    tip: "Step 1 — Attach a dbt project (a Git URL or a local folder). Start here. (Configure your AI provider in Settings.)" },
-      { id: "readiness", step: 2, label: "Readiness", Icon: ClipboardCheck, tip: "Step 2 — See what's missing before certification, by domain. Works without AI." },
-      { id: "proposals", step: 3, label: "Generate",  Icon: Inbox,         tip: "Step 3 — Generate contracts with AI, review the drafts, then certify the ones you trust. This is where you create a contract." },
-      { id: "contracts", step: 4, label: "Certified", Icon: ShieldCheck,   tip: "Step 4 — The library of certified contracts. Read-only; create new ones under Generate." },
-      { id: "publish",   step: 5, label: "Publish",   Icon: Rocket,        tip: "Step 5 — Build the DataLex manifest from your certified contracts." },
-    ],
-  },
-  {
     key: "workspace",
     title: "Workspace",
     items: [
-      { id: "domains",  label: "Domains", Icon: Network, tip: "AI-detected business domains and certification priorities." },
-      { id: "concept",  label: "Concept", Icon: Share2, tip: "What the agent understands — cross-domain relationships + conformance." },
+      { id: "domains",   label: "Domains",   Icon: Network,        tip: "Your business domains and certification priorities. Start here — click a domain to work in it." },
+      { id: "readiness", label: "Readiness", Icon: ClipboardCheck, tip: "What's missing before certification, by domain. Works without AI." },
       { id: "diagram", rail: "model", label: "Model", Icon: Boxes, tip: "Conceptual → logical → physical diagrams of the active layer." },
+    ],
+  },
+  {
+    key: "govern",
+    title: "Govern",
+    items: [
+      { id: "proposals", step: 1, label: "Generate",  Icon: Inbox,       tip: "Step 1 — AI drafts contracts from your dbt evidence; review the drafts, then certify the ones you trust. This is where you create a contract." },
+      { id: "contracts", step: 2, label: "Certified", Icon: ShieldCheck, tip: "Step 2 — The library of certified contracts. Create new ones under Generate." },
+      { id: "publish",   step: 3, label: "Publish",   Icon: Rocket,      tip: "Step 3 — Build the DataLex manifest from your certified contracts." },
     ],
   },
   {
     key: "system",
     items: [
-      { id: "__version",  label: "Version",   Icon: GitBranch, tip: "Branch, working changes, breaking-change check, history, and commit." },
-      { id: "__settings", label: "Settings",  Icon: Settings,  tip: "AI provider, database connection, and agent skills." },
+      { id: "__connect",  label: "Connect",  Icon: FolderGit2, tip: "Attach a dbt project (Git URL or local folder). One-time setup." },
+      { id: "__version",  label: "Version",  Icon: GitBranch,  tip: "Branch, working changes, breaking-change check, history, and commit." },
+      { id: "__settings", label: "Settings", Icon: Settings,   tip: "AI provider, database connection, and agent skills." },
     ],
   },
 ];

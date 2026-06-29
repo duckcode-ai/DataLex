@@ -410,8 +410,21 @@ function AiSetupView({ scan, aiSettings, contextStatus, providerInputs, onProvid
 }
 
 function DomainCard({ domain, compact = false }) {
+  const open = () => {
+    const ui = useUiStore.getState();
+    ui.setActiveDomain(domain.name);
+    ui.setShellViewMode("domain");
+  };
   return (
-    <article className="enterprise-domain-card">
+    <article
+      className="enterprise-domain-card is-clickable"
+      role="button"
+      tabIndex={0}
+      style={{ cursor: "pointer" }}
+      onClick={open}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } }}
+      title={`Open the ${label(domain.name)} workspace`}
+    >
       <div className="enterprise-card-head">
         <div>
           <h3>{label(domain.name)}</h3>
