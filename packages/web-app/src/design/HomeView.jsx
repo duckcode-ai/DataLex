@@ -10,11 +10,15 @@
  * clear path: Connect → AI → Generate.
  */
 import React from "react";
+import yaml from "js-yaml";
 import {
   FolderGit2, Sparkles, ScanSearch, Rocket, ArrowRight, ChevronRight,
-  ShieldCheck, Boxes, Activity,
+  ShieldCheck, Boxes, Activity, Plus,
 } from "lucide-react";
-import { fetchEnterpriseReadiness, fetchEnterpriseScan } from "../lib/api";
+import { fetchEnterpriseReadiness, fetchEnterpriseScan, createProjectFile } from "../lib/api";
+import useUiStore from "../stores/uiStore";
+
+const slugifyDomain = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 
 function aiConfigured() {
   try {
@@ -97,6 +101,12 @@ export default function HomeView({
   const [domains, setDomains] = React.useState([]);
   const [scan, setScan] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
+  const [tick, setTick] = React.useState(0);
+  const [addOpen, setAddOpen] = React.useState(false);
+  const [dName, setDName] = React.useState("");
+  const [dDesc, setDDesc] = React.useState("");
+  const [dBusy, setDBusy] = React.useState(false);
+  const addToast = useUiStore((s) => s.addToast);
 
   React.useEffect(() => {
     if (!projectId) { setDomains([]); setScan(null); return; }
@@ -110,7 +120,24 @@ export default function HomeView({
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, tick]);
+
+  const createDomain = async () => {
+    const slug = slugifyDomain(dName);
+    if (!slug) { addToast?.({ type: "error", message: "Domain needs a name." }); return; }
+    if (!projectId) { addToast?.({ type: "error", message: "Open a project first." }); return; }
+    const obj = { kind: "domain", name: slug };
+    if (dDesc.trim()) obj.description = dDesc.trim();
+    setDBusy(true);
+    try {
+      await createProjectFile(projectId, `domains/${slug}.yaml`, yaml.dump(obj));
+      addToast?.({ type: "success", message: `Created domain "${slug}". Assign models to it to see readiness.` });
+      setAddOpen(false); setDName(""); setDDesc("");
+      setTick((t) => t + 1);
+    } catch (err) {
+      addToast?.({ type: "error", message: `Could not create domain: ${err?.message || err}` });
+    } finally { setDBusy(false); }
+  };
 
   const totals = scan?.totals || {};
   const aiReady = projectId ? Boolean(scan?.ai?.ready) : aiConfigured();
@@ -157,6 +184,33 @@ export default function HomeView({
           onOpenAi={onOpenAi}
           onGoto={onGoto}
         />
+      )}
+
+      {showPortfolio && (
+        <div style={{ marginBottom: 12, maxWidth: 920 }}>
+          {!addOpen ? (
+            <button className="panel-btn" onClick={() => setAddOpen(true)}><Plus size={13} /> New domain</button>
+          ) : (
+            <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 12, background: "var(--bg-1)", display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div>
+                <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>Domain name</label>
+                <input
+                  style={{ padding: "7px 9px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--bg-1)", color: "var(--text-primary)" }}
+                  placeholder="finance" value={dName} onChange={(e) => setDName(e.target.value)}
+                />
+              </div>
+              <div style={{ flex: 1, minWidth: 180 }}>
+                <label style={{ fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 }}>Description (optional)</label>
+                <input
+                  style={{ width: "100%", padding: "7px 9px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--bg-1)", color: "var(--text-primary)", boxSizing: "border-box" }}
+                  placeholder="Finance and revenue logic" value={dDesc} onChange={(e) => setDDesc(e.target.value)}
+                />
+              </div>
+              <button className="panel-btn primary" disabled={dBusy} onClick={createDomain}>{dBusy ? "Creating…" : "Create"}</button>
+              <button className="panel-btn" onClick={() => setAddOpen(false)}>Cancel</button>
+            </div>
+          )}
+        </div>
       )}
 
       {showPortfolio && (

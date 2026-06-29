@@ -11,9 +11,15 @@
  * and add a light per-domain Overview from the enterprise readiness scan.
  */
 import React from "react";
-import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles } from "lucide-react";
+import yaml from "js-yaml";
+import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles, Plus, ShieldCheck } from "lucide-react";
 import ConceptModelView from "./ConceptModelView";
-import { fetchEnterpriseReadiness } from "../../lib/api";
+import { fetchEnterpriseReadiness, createProjectFile } from "../../lib/api";
+import useUiStore from "../../stores/uiStore";
+
+const LBL = { fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 };
+const INP = { width: "100%", padding: "7px 9px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--bg-1)", color: "var(--text-primary)", boxSizing: "border-box" };
+const slugify = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 
 const TABS = [
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
@@ -77,20 +83,84 @@ function Overview({ domain, projectId, onGoto, setTab }) {
   );
 }
 
-function Contracts({ onGoto }) {
+function Contracts({ domain, projectId, onGoto }) {
+  const addToast = useUiStore((s) => s.addToast);
+  const [open, setOpen] = React.useState(false);
+  const [busy, setBusy] = React.useState(false);
+  const [f, setF] = React.useState({ name: "", entity: "", definition: "", grain: "", dimensions: "", ref: "", owner: "" });
+  const set = (k) => (e) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const domainSlug = slugify(domain) || "core";
+
+  const submit = async () => {
+    const name = slugify(f.name);
+    const entity = f.entity.trim();
+    if (!name) { addToast?.({ type: "error", message: "Contract needs a name." }); return; }
+    if (!entity) { addToast?.({ type: "error", message: "Contract needs an entity (e.g. Customer)." }); return; }
+    if (!projectId) { addToast?.({ type: "error", message: "Open a project first." }); return; }
+    const obj = { kind: "contract", name, domain: domainSlug, entity, version: 1, status: "draft" };
+    if (f.definition.trim()) obj.business_definition = f.definition.trim();
+    if (f.grain.trim()) obj.grain = f.grain.trim();
+    const dims = f.dimensions.split(",").map((s) => s.trim()).filter(Boolean);
+    if (dims.length) obj.dimensions = dims;
+    if (f.ref.trim()) obj.source = { kind: "dbt_model", ref: f.ref.trim() };
+    if (f.owner.trim()) obj.owner = f.owner.trim();
+    setBusy(true);
+    try {
+      await createProjectFile(projectId, `${domainSlug}/contracts/${name}.contract.yaml`, yaml.dump(obj));
+      addToast?.({ type: "success", message: `Created contract "${name}" as a draft. Review and certify it under Generate.` });
+      setOpen(false);
+      setF({ name: "", entity: "", definition: "", grain: "", dimensions: "", ref: "", owner: "" });
+    } catch (err) {
+      addToast?.({ type: "error", message: `Could not create contract: ${err?.message || err}` });
+    } finally { setBusy(false); }
+  };
+
   return (
-    <div style={{ border: "1px dashed var(--border-default)", borderRadius: 10, padding: 24, background: "var(--bg-1)", maxWidth: 620 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-        <ClipboardCheck size={16} />
-        <span style={{ fontSize: 13, fontWeight: 700 }}>Certify what matters</span>
+    <div style={{ maxWidth: 640 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <ShieldCheck size={16} style={{ color: "var(--accent, #5b6cff)" }} />
+        <span style={{ fontSize: 13, fontWeight: 700 }}>Contracts · {domain}</span>
+        <span style={{ flex: 1 }} />
+        {!open && <button className="panel-btn primary" onClick={() => setOpen(true)}><Plus size={13} /> New contract</button>}
       </div>
-      <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 12 }}>
-        Generate and certify contracts for this domain, ranked by impact. Everything else stays draft —
-        DQL still runs without certification; it just adds trust.
-      </div>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button className="panel-btn primary" onClick={() => onGoto?.("proposals")}>Generate</button>
-        <button className="panel-btn" onClick={() => onGoto?.("contracts")}>Certified library</button>
+
+      {open && (
+        <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 14, background: "var(--bg-1)", marginBottom: 14 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div><label style={LBL}>Name (snake_case)</label><input style={INP} placeholder="active_customers" value={f.name} onChange={set("name")} /></div>
+            <div><label style={LBL}>Entity</label><input style={INP} placeholder="Customer" value={f.entity} onChange={set("entity")} /></div>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <label style={LBL}>Business definition</label>
+            <textarea style={{ ...INP, minHeight: 56, resize: "vertical" }} placeholder="One row per customer who placed an order in the period." value={f.definition} onChange={set("definition")} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+            <div><label style={LBL}>Grain</label><input style={INP} placeholder="customer_id" value={f.grain} onChange={set("grain")} /></div>
+            <div><label style={LBL}>Owner</label><input style={INP} placeholder="growth@acme.com" value={f.owner} onChange={set("owner")} /></div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+            <div><label style={LBL}>Dimensions (comma-separated)</label><input style={INP} placeholder="region, tier" value={f.dimensions} onChange={set("dimensions")} /></div>
+            <div><label style={LBL}>Source dbt model</label><input style={INP} placeholder="dim_customers" value={f.ref} onChange={set("ref")} /></div>
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <button className="panel-btn primary" disabled={busy} onClick={submit}>{busy ? "Creating…" : "Create draft contract"}</button>
+            <button className="panel-btn" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+          <p style={{ fontSize: 11, color: "var(--text-tertiary)", margin: "10px 0 0" }}>
+            Writes <code>{domainSlug}/contracts/{slugify(f.name) || "<name>"}.contract.yaml</code> as a draft. Certify it under Generate when ready.
+          </p>
+        </div>
+      )}
+
+      <div style={{ border: "1px dashed var(--border-default)", borderRadius: 10, padding: 16, background: "var(--bg-1)" }}>
+        <div style={{ fontSize: 12, color: "var(--text-secondary)", lineHeight: 1.5, marginBottom: 12 }}>
+          Prefer AI? Generate drafts from your dbt evidence, then certify. Everything stays draft until certified —
+          DQL still runs without certification; it just adds trust.
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="panel-btn" onClick={() => onGoto?.("proposals")}>Generate with AI</button>
+          <button className="panel-btn" onClick={() => onGoto?.("contracts")}>Certified library</button>
+        </div>
       </div>
     </div>
   );
@@ -130,7 +200,7 @@ export default function DomainWorkspace({ domain, projectId, projectPath, onGoto
 
       {tab === "overview" && <Overview domain={domain} projectId={projectId} onGoto={onGoto} setTab={setTab} />}
       {tab === "concept" && <ConceptModelView projectId={projectId} projectPath={projectPath} domain={domain} onGoto={onGoto} />}
-      {tab === "contracts" && <Contracts onGoto={onGoto} />}
+      {tab === "contracts" && <Contracts domain={domain} projectId={projectId} onGoto={onGoto} />}
     </div>
   );
 }
