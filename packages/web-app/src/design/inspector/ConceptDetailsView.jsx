@@ -134,6 +134,13 @@ export default function ConceptDetailsView({ table, schema, relationships = [] }
             placeholder="Explain what this concept means to the business and when teams should use it."
             onBlur={(e) => applyScalar("description", e.target.value)}
           />
+          <label>Domain</label>
+          <input
+            className="panel-input"
+            defaultValue={table?.domain || ""}
+            placeholder="commerce, finance, marketing… — groups this concept under a domain"
+            onBlur={(e) => applyScalar("domain", e.target.value)}
+          />
           <label>Subject area</label>
           <input
             className="panel-input"

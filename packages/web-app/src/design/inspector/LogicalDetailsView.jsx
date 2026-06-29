@@ -91,6 +91,14 @@ export default function LogicalDetailsView({ table }) {
             placeholder="What does this logical entity represent?"
           />
 
+          <label>Domain</label>
+          <input
+            className="panel-input"
+            value={table.domain || ""}
+            onChange={(e) => applyEntityScalar("domain", e.target.value)}
+            placeholder="commerce, finance, marketing… — groups this entity under a domain"
+          />
+
           <label>Subject Area</label>
           <input
             className="panel-input"
