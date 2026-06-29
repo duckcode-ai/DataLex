@@ -65,11 +65,9 @@ function Overview({ domain, projectId, onGoto, setTab }) {
 
   return (
     <div style={{ padding: "4px 0" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, maxWidth: 620, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10, maxWidth: 320, marginBottom: 18 }}>
         <StatTile label="Models" value={models} />
         <StatTile label="dbt doc score" value={score} />
-        <StatTile label="Certified" value={certified} />
-        <StatTile label="High-value" value={highValue} />
       </div>
 
       <div style={{ border: "1px solid var(--border-default)", borderRadius: 10, padding: 14, background: "var(--bg-1)", maxWidth: 620, display: "flex", alignItems: "center", gap: 10 }}>

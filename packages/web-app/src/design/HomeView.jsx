@@ -159,16 +159,15 @@ export default function HomeView({
       </div>
       <p style={{ margin: "0 0 18px", fontSize: 12, color: "var(--text-secondary)" }}>
         {showPortfolio
-          ? "Your business domains. Pick one to model, review, and certify what matters."
+          ? "Your business domains. Pick one to model and build out — one domain at a time."
           : "Connect a dbt project to see your domains, readiness, and what an AI would get wrong."}
       </p>
 
       {showPortfolio && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10, maxWidth: 620, marginBottom: 22 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10, maxWidth: 480, marginBottom: 22 }}>
           <Stat label="Domains" value={domains.length} />
           <Stat label="Models" value={totalModels || "—"} />
           <Stat label="Overall doc score" value={overallScore == null ? "—" : `${overallScore}`} />
-          <Stat label="Certified" value={certifiedTotal} />
         </div>
       )}
 
@@ -239,10 +238,9 @@ export default function HomeView({
                   <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>{d.models} models</span>
                 )}
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-secondary)" }}>
-                <ShieldCheck size={13} style={{ color: "var(--success, #1d9e75)" }} />
-                {Number(d.certified) || 0} certified
-                {Number(d.highValue) ? <span style={{ color: "var(--text-tertiary)" }}>· {d.highValue} high-value</span> : null}
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--text-tertiary)" }}>
+                <Boxes size={13} style={{ color: "var(--text-secondary)" }} />
+                Open to model
               </div>
             </button>
           ))}
