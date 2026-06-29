@@ -12,10 +12,11 @@
  */
 import React from "react";
 import yaml from "js-yaml";
-import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles, Plus, ShieldCheck } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Boxes, FileCheck2, ClipboardCheck, Sparkles, Plus, ShieldCheck, Layers, Wand2, FolderOpen } from "lucide-react";
 import ConceptModelView from "./ConceptModelView";
-import { fetchEnterpriseReadiness, createProjectFile } from "../../lib/api";
+import { fetchEnterpriseReadiness, createProjectFile, aiConceptualize } from "../../lib/api";
 import useUiStore from "../../stores/uiStore";
+import useWorkspaceStore from "../../stores/workspaceStore";
 
 const LBL = { fontSize: 11, color: "var(--text-secondary)", display: "block", marginBottom: 4 };
 const INP = { width: "100%", padding: "7px 9px", fontSize: 12, borderRadius: 8, border: "1px solid var(--border-default)", background: "var(--bg-1)", color: "var(--text-primary)", boxSizing: "border-box" };
@@ -23,6 +24,7 @@ const slugify = (s) => String(s || "").trim().toLowerCase().replace(/[^a-z0-9]+/
 
 const TABS = [
   { id: "overview", label: "Overview", Icon: LayoutDashboard },
+  { id: "model", label: "Model", Icon: Layers },
   { id: "concept", label: "Concept model", Icon: Boxes },
 ];
 
@@ -165,6 +167,87 @@ function Contracts({ domain, projectId, onGoto }) {
   );
 }
 
+/* Guided model builder — Conceptual → Logical → Physical, one layer at a time,
+   build-with-AI or build-by-hand, skip what you don't need. Reuses the
+   conceptualizer (/ai/conceptualize) and the modeler's forward-generation
+   (LayerSpine conceptual→logical→physical). Layer state is read from the
+   project's files under DataLex/<domain>/<layer>/. */
+function BuildModel({ domain, projectId, onGoto }) {
+  const addToast = useUiStore((s) => s.addToast);
+  const projectFiles = useWorkspaceStore((s) => s.projectFiles);
+  const openFile = useWorkspaceStore((s) => s.openFile);
+  const [busy, setBusy] = React.useState("");
+  const domainSlug = slugify(domain);
+
+  const layerFiles = (layer) => (projectFiles || []).filter((file) => {
+    const p = String(file?.path || file?.fullPath || "").toLowerCase();
+    return p.includes(`/${domainSlug}/${layer}/`) || p.startsWith(`${domainSlug}/${layer}/`);
+  });
+
+  const openLayer = (layer) => {
+    const files = layerFiles(layer);
+    if (files.length && openFile) openFile(files[0]);
+    onGoto?.("diagram");
+  };
+
+  const buildConceptualAI = async () => {
+    if (!projectId) { addToast?.({ type: "error", message: "Open a project first." }); return; }
+    setBusy("conceptual");
+    try {
+      await aiConceptualize(projectId);
+      addToast?.({ type: "success", message: "AI proposed conceptual entities — review and edit them in the modeler." });
+      onGoto?.("diagram");
+    } catch (err) {
+      addToast?.({ type: "error", message: `Build with AI failed: ${err?.message || err}` });
+    } finally { setBusy(""); }
+  };
+
+  const LAYERS = [
+    { id: "conceptual", label: "Conceptual", desc: "Business concepts — what this domain means, in plain terms.", ai: true },
+    { id: "logical", label: "Logical", desc: "Conformed entities, keys, and relationships.", ai: false },
+    { id: "physical", label: "Physical", desc: "dbt-backed tables, columns, and types.", ai: false },
+  ];
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <p style={{ fontSize: 12, color: "var(--text-secondary)", margin: "0 0 16px", lineHeight: 1.5 }}>
+        Build the <strong>{domain}</strong> model one layer at a time — with AI or by hand. Skip any layer you don't
+        need; each one generates forward from the last in the modeler.
+      </p>
+      <div style={{ display: "grid", gap: 10 }}>
+        {LAYERS.map((L, i) => {
+          const files = layerFiles(L.id);
+          const built = files.length > 0;
+          return (
+            <div key={L.id} style={{ border: "1px solid var(--border-default)", borderRadius: 12, padding: 14, background: "var(--bg-1)", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 24, height: 24, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, background: built ? "var(--success, #1d9e75)" : "var(--bg-2)", color: built ? "#fff" : "var(--text-secondary)", border: built ? "none" : "1px solid var(--border-default)" }}>
+                {built ? "✓" : i + 1}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>{L.label}</div>
+                <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>{L.desc}</div>
+                <div style={{ fontSize: 11, color: built ? "var(--success, #1d9e75)" : "var(--text-tertiary)", marginTop: 3 }}>
+                  {built ? `Built · ${files.length} file${files.length === 1 ? "" : "s"}` : "Not started"}
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+                {L.ai && (
+                  <button className="panel-btn primary" disabled={busy === L.id} onClick={buildConceptualAI}>
+                    <Wand2 size={12} /> {busy === L.id ? "Building…" : "Build with AI"}
+                  </button>
+                )}
+                <button className="panel-btn" onClick={() => openLayer(L.id)}>
+                  <FolderOpen size={12} /> {built ? "Open" : "Build in modeler"}
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DomainWorkspace({ domain, projectId, projectPath, onGoto, onBack }) {
   const [tab, setTab] = React.useState("overview");
 
@@ -198,6 +281,7 @@ export default function DomainWorkspace({ domain, projectId, projectPath, onGoto
       </div>
 
       {tab === "overview" && <Overview domain={domain} projectId={projectId} onGoto={onGoto} setTab={setTab} />}
+      {tab === "model" && <BuildModel domain={domain} projectId={projectId} onGoto={onGoto} />}
       {tab === "concept" && <ConceptModelView projectId={projectId} projectPath={projectPath} domain={domain} onGoto={onGoto} />}
       {tab === "contracts" && <Contracts domain={domain} projectId={projectId} onGoto={onGoto} />}
     </div>
