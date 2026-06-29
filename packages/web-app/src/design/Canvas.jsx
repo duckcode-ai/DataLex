@@ -628,9 +628,9 @@ function SubjectAreas({ areas, tables, setTables, onMoveGroupEnd, zoom, interact
 
   return (
     <>
-      {areas.map((a) => (
+      {areas.map((a, idx) => (
         <div
-          key={a.id}
+          key={a.id || a.label || `area-${idx}`}
           className={`subject-area cat-${a.cat} ${interactive ? "" : "visual-only"}`}
           style={{ left: a.x, top: a.y, width: a.w, height: a.h }}
           onMouseDown={interactive ? (event) => onMouseDown(a, event) : undefined}
