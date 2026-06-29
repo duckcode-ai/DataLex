@@ -1686,11 +1686,26 @@ export default function Shell() {
    * history and flushes to the offline doc store. Cheap enough to run
    * synchronously on drag end; the mutate helper is ~microseconds on
    * jaffle-scale YAML. */
+  /* Write the current canvas positions to the layout cache synchronously.
+     The schema-rebuild reset effect prefers this cache over freshly-written
+     YAML, and the debounced writer only fires ~300ms later — so without this a
+     drag snaps back to the stale cached position on the next rebuild. */
+  const syncLayoutCache = React.useCallback((s) => {
+    try {
+      const fp = s?.activeFile?.fullPath || s?.activeFile?.name || s?.activeFile?.id || "";
+      if (!s?.activeProjectId || !fp) return;
+      const map = {};
+      tablesRef.current.forEach((tbl) => { map[tbl.id] = { x: tbl.x, y: tbl.y }; });
+      window.localStorage.setItem(`datalex.layout.${s.activeProjectId}.${fp}`, JSON.stringify(map));
+    } catch (_e) { /* quota / disabled — the debounced writer still runs */ }
+  }, []);
+
   const handleTableMoveEnd = React.useCallback((tableId) => {
     const t = tablesRef.current.find((x) => x.id === tableId);
     if (!t) return;
     const s = useWorkspaceStore.getState();
     if (!s.activeFileContent) return;
+    syncLayoutCache(s);
     // When the active file is a diagram, positions live in the diagram
     // YAML's `entities[i].{x,y}` — keyed by (file, entity). Otherwise the
     // position belongs to the model file's `display:` block.
@@ -1759,6 +1774,7 @@ export default function Shell() {
     if (moved.length === 0) return;
     const s = useWorkspaceStore.getState();
     if (!s.activeFileContent) return;
+    syncLayoutCache(s);
     const activeName = s.activeFile?.name || "";
     const activeIsDiagram = /\.diagram\.ya?ml$/i.test(activeName);
     let next = s.activeFileContent;
