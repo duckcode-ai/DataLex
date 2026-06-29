@@ -49,6 +49,40 @@ function dedupeByName(entities) {
   return [...byName.values()];
 }
 
+/* Collapse a domain's entities into business concepts using the manifest's
+   conformance map. Conformance ties a concept (e.g. Customer) to the physical
+   model(s) that realize it (dim_customer) and its canonical join key — so the
+   conceptual "Customer", the logical "Customer", and the physical "DimCustomer"
+   become one traced row "Customer → dim_customer" instead of three. Entities not
+   covered by a conformance record fall back to their own row (traced if bound). */
+function buildDomainConcepts(domainName, entities, conformance) {
+  const concepts = [];
+  const coveredNames = new Set();
+  const coveredRefs = new Set();
+
+  for (const rec of conformance || []) {
+    if (String(rec?.domain || "") !== String(domainName || "")) continue;
+    const refs = (rec.physical || []).map((p) => p?.binding?.ref).filter(Boolean);
+    coveredNames.add(String(rec.concept || "").toLowerCase());
+    for (const p of rec.physical || []) {
+      if (p?.entity) coveredNames.add(String(p.entity).toLowerCase());
+      if (p?.binding?.ref) coveredRefs.add(p.binding.ref);
+    }
+    concepts.push({ name: rec.concept, refs, canonicalKey: rec.canonical_key || null, conformed: true });
+  }
+
+  const seen = new Set(concepts.map((c) => String(c.name).toLowerCase()));
+  for (const e of dedupeByName(entities) || []) {
+    const lname = String(e?.name || "").toLowerCase();
+    const ref = e?.binding?.ref;
+    if (!lname || seen.has(lname) || coveredNames.has(lname)) continue;
+    if (ref && coveredRefs.has(ref)) continue;
+    seen.add(lname);
+    concepts.push({ name: e.name, refs: ref ? [ref] : [], canonicalKey: null, conformed: false });
+  }
+  return concepts.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 function CoverageBar({ value, total }) {
   const pct = total > 0 ? Math.round((value / total) * 100) : 0;
   return (
@@ -67,12 +101,13 @@ function ConnectDqlBanner() {
   );
 }
 
-/* Per-domain concept trace: concept → dbt model, grouped by whether it reaches dbt. */
-function DomainTrace({ domainName, entities, onGoto }) {
-  const traced = entities.filter((e) => e?.binding?.ref);
-  const untraced = entities.filter((e) => !e?.binding?.ref);
+/* Per-domain concept trace: one row per business concept (conformance-collapsed)
+   → the dbt model(s) that realize it, grouped by whether it reaches dbt. */
+function DomainTrace({ domainName, concepts, onGoto }) {
+  const traced = concepts.filter((c) => (c.refs || []).length > 0);
+  const untraced = concepts.filter((c) => (c.refs || []).length === 0);
 
-  if (entities.length === 0) {
+  if (concepts.length === 0) {
     return (
       <div style={{ border: "1px dashed var(--border-default)", borderRadius: 10, padding: 20, background: "var(--bg-1)", maxWidth: 560 }}>
         <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>No concepts in {domainName} yet</div>
@@ -91,12 +126,21 @@ function DomainTrace({ domainName, entities, onGoto }) {
         <div style={{ fontSize: 12, color: "var(--text-tertiary)", padding: "0 0 4px" }}>No concept reaches a dbt model yet.</div>
       ) : (
         <div style={{ display: "grid", gap: 6 }}>
-          {traced.map((e, i) => (
-            <div key={`${e.name}.${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: "1px solid var(--border-default)", borderRadius: 8, background: "var(--bg-1)" }}>
+          {traced.map((c, i) => (
+            <div key={`${c.name}.${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: "1px solid var(--border-default)", borderRadius: 8, background: "var(--bg-1)" }}>
               <Boxes size={15} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
-              <span style={{ fontSize: 13, fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, flexShrink: 0 }}>{c.name}</span>
               <ArrowRight size={14} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
-              <code style={{ fontSize: 12, padding: "2px 8px", background: "var(--bg-2)", color: SUCCESS, borderRadius: 4, whiteSpace: "nowrap" }}>{e.binding.ref}</code>
+              <span style={{ display: "flex", gap: 4, minWidth: 0, flexWrap: "wrap" }}>
+                {c.refs.map((r) => (
+                  <code key={r} style={{ fontSize: 12, padding: "2px 8px", background: "var(--bg-2)", color: SUCCESS, borderRadius: 4, whiteSpace: "nowrap" }}>{r}</code>
+                ))}
+              </span>
+              {c.canonicalKey?.length > 0 && (
+                <span style={{ fontSize: 11, color: "var(--text-tertiary)", whiteSpace: "nowrap" }} title="Canonical key — the stable key agents join on">
+                  joins on {c.canonicalKey.join(", ")}
+                </span>
+              )}
               <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--text-tertiary)", whiteSpace: "nowrap" }}>DQL &amp; app pending</span>
             </div>
           ))}
@@ -107,10 +151,10 @@ function DomainTrace({ domainName, entities, onGoto }) {
         <>
           <div style={{ fontSize: 12, fontWeight: 600, color: "var(--text-tertiary)", margin: "18px 0 8px" }}>Not yet in dbt · {untraced.length}</div>
           <div style={{ display: "grid", gap: 6 }}>
-            {untraced.map((e, i) => (
-              <div key={`${e.name}.${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: "1px dashed var(--border-default)", borderRadius: 8 }}>
+            {untraced.map((c, i) => (
+              <div key={`${c.name}.${i}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", border: "1px dashed var(--border-default)", borderRadius: 8 }}>
                 <Boxes size={15} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
-                <span style={{ fontSize: 13, minWidth: 0, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>
+                <span style={{ fontSize: 13, minWidth: 0, color: "var(--text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
                 {onGoto && (
                   <button className="panel-btn" style={{ marginLeft: "auto", padding: "3px 8px", fontSize: 11 }} onClick={() => onGoto("diagram")}>
                     <Plus size={11} /> Model in dbt
@@ -146,9 +190,10 @@ export default function LineageView({ projectId, projectPath, domain, embedded =
   const { loading, manifest } = state;
 
   const domains = React.useMemo(() => {
+    const conformance = manifest?.conformance || [];
     return (manifest?.domains || []).map((d) => {
-      const entities = dedupeByName(d.entities || []);
-      return { name: d.name, entities, total: entities.length, inDbt: entities.filter((e) => e?.binding?.ref).length };
+      const concepts = buildDomainConcepts(d.name, d.entities || [], conformance);
+      return { name: d.name, concepts, total: concepts.length, inDbt: concepts.filter((c) => (c.refs || []).length > 0).length };
     });
   }, [manifest]);
 
@@ -162,7 +207,7 @@ export default function LineageView({ projectId, projectPath, domain, embedded =
 
   // Embedded (workspace tab): just the trace for this domain.
   if (embedded) {
-    return <DomainTrace domainName={domain} entities={activeDomain?.entities || []} onGoto={onGoto} />;
+    return <DomainTrace domainName={domain} concepts={activeDomain?.concepts || []} onGoto={onGoto} />;
   }
 
   return (
@@ -232,7 +277,7 @@ export default function LineageView({ projectId, projectPath, domain, embedded =
       {/* Drill-in */}
       {activeDomainName && (
         <>
-          <DomainTrace domainName={activeDomainName} entities={activeDomain?.entities || []} onGoto={onGoto} />
+          <DomainTrace domainName={activeDomainName} concepts={activeDomain?.concepts || []} onGoto={onGoto} />
           <ConnectDqlBanner />
         </>
       )}
