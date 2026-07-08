@@ -319,6 +319,34 @@ class ProjectLoaderTests(unittest.TestCase):
         self.assertEqual(["customer_id"], by_ref["dim_customer"]["canonical_key"])
         self.assertEqual(["order_id"], by_ref["fct_order"]["canonical_key"])
 
+    def test_manifest_glossary_carries_related_fields_abbreviation_owner(self) -> None:
+        # D1 — the glossary term -> physical column links (`related_fields`), plus
+        # abbreviation/owner, must reach the manifest. dql's metadata catalog already
+        # consumes `related_fields` for domain-language grounding; the builder used to
+        # drop it, emitting only term/definition/tags.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(
+                root / "datalex.yaml",
+                "kind: project\nname: t\nversion: '1'\nglossary: glossary/**/*.yaml\n",
+            )
+            _write(
+                root / "glossary" / "gmv.yaml",
+                "kind: term\nname: Gross Merchandise Value\ndomain: commerce\n"
+                "abbreviation: GMV\ndefinition: Total value of products sold before discounts.\n"
+                "owner: finance-data@example.com\n"
+                "related_fields:\n  - SalesOrder.gross_amount\n"
+                "tags: [finance, kpi]\n",
+            )
+            project = load_project(root, strict=False)
+            manifest = build_manifest(project)
+            commerce = next(d for d in manifest["domains"] if d["name"] == "commerce")
+            term = next(t for t in commerce["glossary"] if t["term"] == "Gross Merchandise Value")
+            self.assertEqual(["SalesOrder.gross_amount"], term["related_fields"])
+            self.assertEqual("GMV", term["abbreviation"])
+            self.assertEqual("finance-data@example.com", term["owner"])
+            self.assertEqual(["finance", "kpi"], term["tags"])
+
 
 class DiffTests(unittest.TestCase):
     def test_explicit_rename_is_not_drop_add(self) -> None:
