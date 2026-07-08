@@ -347,6 +347,28 @@ class ProjectLoaderTests(unittest.TestCase):
             self.assertEqual("finance-data@example.com", term["owner"])
             self.assertEqual(["finance", "kpi"], term["tags"])
 
+    def test_manifest_entity_carries_grain_and_keys(self) -> None:
+        # D2 — an entity's declared grain + candidate/business keys must reach the
+        # manifest. dql's grain ledger uses them for GROUP-BY / fan-out safety. The
+        # builder used to drop them (only name/description/tags/fields/binding).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root / "datalex.yaml", "kind: project\nname: t\nversion: '1'\n")
+            _write(
+                root / "models" / "logical" / "customer.yaml",
+                "kind: entity\nlayer: logical\nname: Customer\ndomain: sales\n"
+                "grain: one row per customer\ncandidate_keys: [customer_id]\nbusiness_keys: [email]\n"
+                "columns:\n  - {name: customer_id, type: bigint, primary_key: true}\n"
+                "  - {name: email, type: string(320)}\n",
+            )
+            project = load_project(root, strict=False)
+            manifest = build_manifest(project)
+            sales = next(d for d in manifest["domains"] if d["name"] == "sales")
+            entity = next(e for e in sales["entities"] if e["name"] == "Customer")
+            self.assertEqual("one row per customer", entity["grain"])
+            self.assertEqual(["customer_id"], entity["candidate_keys"])
+            self.assertEqual(["email"], entity["business_keys"])
+
 
 class DiffTests(unittest.TestCase):
     def test_explicit_rename_is_not_drop_add(self) -> None:

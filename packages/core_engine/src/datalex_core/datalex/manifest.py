@@ -233,6 +233,12 @@ def _entity_to_manifest(entity: Dict[str, Any]) -> Dict[str, Any]:
     fields = [_field_to_manifest(c) for c in (entity.get("columns") or entity.get("fields") or [])]
     if fields:
         out["fields"] = fields
+    # Grain + keys (D2): the entity's declared grain and single-/multi-column keys.
+    # dql's grain ledger uses these for GROUP-BY / fan-out safety without needing
+    # dbt tests. Modeling metadata only — no certification coupling.
+    for key in ("grain", "candidate_keys", "business_keys"):
+        if entity.get(key):
+            out[key] = entity[key]
     if entity.get("physical_name"):
         out["binding"] = {"kind": "table", "ref": entity["physical_name"]}
     return out
@@ -247,6 +253,9 @@ def _model_to_manifest_entity(model: Dict[str, Any], entity_name: str) -> Dict[s
     fields = [_field_to_manifest(c) for c in (model.get("columns") or [])]
     if fields:
         out["fields"] = fields
+    for key in ("grain", "candidate_keys", "business_keys"):
+        if model.get(key):
+            out[key] = model[key]
     unique_id = (((model.get("meta") or {}).get("datalex") or {}).get("dbt") or {}).get("unique_id")
     out["binding"] = {"kind": "dbt_model", "ref": unique_id or model.get("name")}
     return out
