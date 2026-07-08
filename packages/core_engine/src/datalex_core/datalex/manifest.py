@@ -75,6 +75,12 @@ def build_manifest(
                 "term": term.get("name") or term.get("term") or "",
                 "definition": term.get("definition") or term.get("description") or "",
                 **({"tags": term.get("tags")} if term.get("tags") else {}),
+                # Business vocabulary -> physical column links, and term metadata.
+                # dql's metadata catalog already consumes `related_fields` (term ->
+                # Entity.field) for grounding; abbreviation/owner enrich the glossary.
+                **({"related_fields": term.get("related_fields")} if term.get("related_fields") else {}),
+                **({"abbreviation": term.get("abbreviation")} if term.get("abbreviation") else {}),
+                **({"owner": term.get("owner")} if term.get("owner") else {}),
             }
         )
 
